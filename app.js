@@ -9,6 +9,10 @@ const MS_DAY = 86400000;
 const MOIS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const JOURS_FR = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const AVATAR_COLORS = ['#1F4D3A','#223A5E','#A9791F','#7A3B2E','#4A5A50','#5B4B8A','#2E6F6E'];
+const GOLD_HEX = '#A9791F';
+const NAVY_HEX = '#223A5E';
+const LINE_HEX = '#DCD6C6';
+const INK_SOFT_HEX = '#5B6B60';
 
 /* ---------------------------------------------------------------
    ÉTAT
@@ -18,18 +22,34 @@ let view = {
   mode: 'year',           // 'year' | 'month'
   dateType: 'pay',        // 'pay' | 'ex'
   showEarnings: true,
+  accountFilter: 'all',   // 'all' | account id
   cursor: new Date()      // date de référence pour la période affichée
 };
 
+function getFilteredHoldings(){
+  if(view.accountFilter === 'all') return state.holdings;
+  return state.holdings.filter(h=>h.account === view.accountFilter);
+}
+function accountName(id){
+  const a = state.accounts.find(a=>a.id===id);
+  return a ? a.name : '—';
+}
+
 function defaultState(){
-  return { holdings: [], settings: { apiKey: '' } };
+  return {
+    holdings: [],
+    settings: { apiKey: '' },
+    accounts: [ { id:'cto', name:'CTO' }, { id:'pea', name:'PEA' } ]
+  };
 }
 function loadState(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return defaultState();
-    const parsed = JSON.parse(raw);
-    return Object.assign(defaultState(), parsed);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const merged = Object.assign(defaultState(), parsed);
+    if(!merged.accounts || !merged.accounts.length) merged.accounts = defaultState().accounts;
+    merged.holdings.forEach(h=>{ if(!h.account) h.account = merged.accounts[0].id; });
+    return merged;
   }catch(e){ return defaultState(); }
 }
 function saveState(){
@@ -162,15 +182,17 @@ function buildEarningsEvents(holding, rangeStart, rangeEnd){
   return events;
 }
 
-/* Construit l'index plat de tous les événements affichables pour une plage donnée */
-function buildEventIndex(rangeStart, rangeEnd){
+/* Construit l'index plat de tous les événements affichables pour une plage donnée.
+   holdingsList est optionnel : par défaut, respecte le filtre de compte actif. */
+function buildEventIndex(rangeStart, rangeEnd, holdingsList){
+  const list = holdingsList || getFilteredHoldings();
   const index = {}; // 'YYYY-MM-DD' -> [event,...]
   function push(dateISO, ev){
     if(!dateISO) return;
     if(!index[dateISO]) index[dateISO] = [];
     index[dateISO].push(ev);
   }
-  state.holdings.forEach(h=>{
+  list.forEach(h=>{
     const divEvents = buildDividendEvents(h, rangeStart, rangeEnd);
     divEvents.forEach(ev=>{
       const dateISO = view.dateType === 'ex' ? (ev.exDate || ev.payDate) : (ev.payDate || ev.exDate);
@@ -324,6 +346,16 @@ function renderToolbar(){
   }
   document.getElementById('dateTypeSelect').value = view.dateType;
   document.getElementById('showEarningsCheckbox').checked = view.showEarnings;
+}
+
+function renderAccountSwitch(){
+  const el = document.getElementById('accountSwitch');
+  if(!el) return;
+  const tabs = [{ id:'all', name:'Tous les comptes' }, ...state.accounts];
+  el.innerHTML = tabs.map(t=>`<button data-acct="${t.id}" class="${view.accountFilter===t.id?'active':''}">${escapeHtml(t.name)}</button>`).join('');
+  el.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click', ()=>{ view.accountFilter = b.dataset.acct; renderAll(); });
+  });
 }
 
 /* ---------------------------------------------------------------
@@ -491,31 +523,46 @@ function closeModal(){
    --------------------------------------------------------------- */
 function renderHoldingsList(){
   const el = document.getElementById('holdingsList');
-  if(!state.holdings.length){
-    el.innerHTML = `<div class="empty-state"><span class="em-icon">🗂️</span>Aucune action pour l'instant.<br>Ajoutez votre première ligne.</div>`;
+  const list = getFilteredHoldings();
+  if(!list.length){
+    el.innerHTML = `<div class="empty-state"><span class="em-icon">🗂️</span>${view.accountFilter==='all' ? "Aucune action pour l'instant.<br>Ajoutez votre première ligne." : "Aucune action dans ce compte."}</div>`;
     return;
   }
-  el.innerHTML = state.holdings.map(h=>`
-    <div class="holding-row" data-id="${h.id}">
-      ${renderAvatar(h.displayTicker || h.ticker, h.logo)}
-      <div class="holding-meta">
-        <div class="tk">${escapeHtml(h.displayTicker || h.ticker)}</div>
-        <div class="nm">${escapeHtml(h.name || 'Sans nom')}</div>
-      </div>
-      <div class="holding-qty">×${h.quantity}</div>
-      <button class="holding-edit" title="Modifier" data-edit="${h.id}">✎</button>
-    </div>
-  `).join('');
+  let html = '';
+  if(view.accountFilter === 'all'){
+    state.accounts.forEach((acc, idx)=>{
+      const items = list.filter(h=>h.account===acc.id);
+      if(!items.length) return;
+      html += `<div class="holdings-group-label"${idx===0?' style="border-top:none;margin-top:0;padding-top:0;"':''}>${escapeHtml(acc.name)}</div>`;
+      html += items.map(holdingRowHtml).join('');
+    });
+  }else{
+    html = list.map(holdingRowHtml).join('');
+  }
+  el.innerHTML = html;
   el.querySelectorAll('[data-edit]').forEach(btn=>{
     btn.addEventListener('click', ()=> openStockModal(btn.dataset.edit));
   });
+}
+
+function holdingRowHtml(h){
+  return `<div class="holding-row" data-id="${h.id}">
+    ${renderAvatar(h.displayTicker || h.ticker, h.logo)}
+    <div class="holding-meta">
+      <div class="tk">${escapeHtml(h.displayTicker || h.ticker)}</div>
+      <div class="nm">${escapeHtml(h.name || 'Sans nom')}</div>
+    </div>
+    <div class="holding-qty">×${h.quantity}</div>
+    <button class="holding-edit" title="Modifier" data-edit="${h.id}">✎</button>
+  </div>`;
 }
 
 function renderSummary(){
   const el = document.getElementById('summaryBox');
   const now = new Date();
   const yearEnd = new Date(now.getFullYear(), 11, 31);
-  const index = buildEventIndex(now, yearEnd);
+  const holdingsList = getFilteredHoldings();
+  const index = buildEventIndex(now, yearEnd, holdingsList);
   const totalsByCurrency = {};
   let countRemaining = 0;
   Object.values(index).forEach(evs=>{
@@ -529,11 +576,434 @@ function renderSummary(){
     `<div class="sum-row"><span class="lbl">Estimé restant ${now.getFullYear()} (${cur})</span><span class="val gold">${fmtAmount2(totalsByCurrency[cur], cur==='—'?'':cur)}</span></div>`
   ).join('') || `<div class="sum-row"><span class="lbl">Estimé restant ${now.getFullYear()}</span><span class="val">—</span></div>`;
 
+  let breakdown = '';
+  if(view.accountFilter === 'all' && state.accounts.length > 1){
+    const perAccount = state.accounts.map(acc=>{
+      const accHoldings = state.holdings.filter(h=>h.account===acc.id);
+      if(!accHoldings.length) return '';
+      const accIndex = buildEventIndex(now, yearEnd, accHoldings);
+      const totals = {};
+      Object.values(accIndex).forEach(evs=> evs.forEach(ev=>{ if(ev.type==='dividend') totals[ev.currency||'—'] = (totals[ev.currency||'—']||0)+(ev.total||0); }));
+      const totalsStr = Object.keys(totals).length ? Object.keys(totals).map(c=>fmtAmount2(totals[c], c==='—'?'':c)).join(' + ') : '—';
+      return `<div class="sum-row"><span class="lbl">${escapeHtml(acc.name)}</span><span class="val">${totalsStr}</span></div>`;
+    }).join('');
+    if(perAccount) breakdown = `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);">${perAccount}</div>`;
+  }
+
   el.innerHTML = `
-    <div class="sum-row"><span class="lbl">Lignes en portefeuille</span><span class="val">${state.holdings.length}</span></div>
+    <div class="sum-row"><span class="lbl">Lignes${view.accountFilter==='all'?' (tous comptes)':''}</span><span class="val">${holdingsList.length}</span></div>
     <div class="sum-row"><span class="lbl">Versements restants (${now.getFullYear()})</span><span class="val">${countRemaining}</span></div>
     ${rows}
+    ${breakdown}
   `;
+}
+
+/* ---------------------------------------------------------------
+   GRAPHIQUES — dividendes par mois & évolution annuelle
+   Rendu en SVG "à la main" (pas de dépendance), dans le même
+   thème graphique que le reste de l'app.
+   --------------------------------------------------------------- */
+function svgBarChart({ labels, values, estimateFlags, color, currency }){
+  const width = 560, height = 200;
+  const padding = { top:14, right:8, bottom:24, left:6 };
+  const w = width - padding.left - padding.right;
+  const h = height - padding.top - padding.bottom;
+  const max = Math.max(1, ...values);
+  const gap = 6;
+  const barW = (w - gap*(values.length-1)) / values.length;
+  const axisY = padding.top + h;
+
+  let bars = '';
+  values.forEach((v, i)=>{
+    const bh = max > 0 ? (v/max) * h : 0;
+    const x = padding.left + i*(barW+gap);
+    const y = axisY - bh;
+    const est = estimateFlags[i];
+    const fillAttr = est ? `url(#hatch-${color.slice(1)})` : color;
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(bh,1).toFixed(1)}" rx="3" fill="${fillAttr}"><title>${escapeHtml(labels[i])} : ${fmtAmount2(v, currency)}${est && v ? ' (estimé)' : ''}</title></rect>`;
+    bars += `<text x="${(x+barW/2).toFixed(1)}" y="${height-7}" font-size="9.5" font-family="'IBM Plex Mono',monospace" text-anchor="middle" style="fill:${INK_SOFT_HEX}">${escapeHtml(labels[i])}</text>`;
+  });
+
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="hatch-${color.slice(1)}" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+        <rect width="6" height="6" style="fill:${color}" opacity="0.25"/>
+        <line x1="0" y1="0" x2="0" y2="6" style="stroke:${color}" stroke-width="2"/>
+      </pattern>
+    </defs>
+    <line x1="${padding.left}" y1="${axisY}" x2="${width-padding.right}" y2="${axisY}" style="stroke:${LINE_HEX}" stroke-width="1"/>
+    ${bars}
+  </svg>`;
+}
+
+function buildMonthlyTotals(year){
+  const rangeStart = new Date(year,0,1), rangeEnd = new Date(year,11,31);
+  const index = buildEventIndex(rangeStart, rangeEnd);
+  const totals = {}, allEstimate = {};
+  Object.keys(index).forEach(dateISO=>{
+    const month = parseISO(dateISO).getMonth();
+    index[dateISO].forEach(ev=>{
+      if(ev.type !== 'dividend') return;
+      const cur = ev.currency || '—';
+      if(!totals[cur]){ totals[cur] = Array(12).fill(0); allEstimate[cur] = Array(12).fill(true); }
+      totals[cur][month] += ev.total || 0;
+      if(!ev.estimate) allEstimate[cur][month] = false;
+    });
+  });
+  return { totals, allEstimate };
+}
+
+function buildYearlyTotals(startYear, endYear){
+  const rangeStart = new Date(startYear,0,1), rangeEnd = new Date(endYear,11,31);
+  const index = buildEventIndex(rangeStart, rangeEnd);
+  const totals = {}, allEstimate = {};
+  Object.keys(index).forEach(dateISO=>{
+    const y = parseISO(dateISO).getFullYear();
+    index[dateISO].forEach(ev=>{
+      if(ev.type !== 'dividend') return;
+      const cur = ev.currency || '—';
+      if(!totals[cur]) totals[cur] = {};
+      if(!allEstimate[cur]) allEstimate[cur] = {};
+      totals[cur][y] = (totals[cur][y]||0) + (ev.total||0);
+      if(allEstimate[cur][y] === undefined) allEstimate[cur][y] = true;
+      if(!ev.estimate) allEstimate[cur][y] = false;
+    });
+  });
+  return { totals, allEstimate };
+}
+
+function renderStats(){
+  const section = document.getElementById('statsSection');
+  const filteredHoldings = getFilteredHoldings();
+  const acctLabel = view.accountFilter === 'all' ? '' : ` — ${accountName(view.accountFilter)}`;
+  if(!filteredHoldings.length){
+    section.innerHTML = `<div class="stats-card"><div class="empty-state">${view.accountFilter==='all' ? "Ajoutez des actions pour voir vos statistiques de revenus apparaître ici." : "Aucune action dans ce compte."}</div></div>`;
+    return;
+  }
+  const year = view.cursor.getFullYear();
+  const { totals: monthTotals, allEstimate: monthEst } = buildMonthlyTotals(year);
+  const monthLabels = MOIS_FR.map(m=>m.slice(0,3));
+  const monthCurrencies = Object.keys(monthTotals);
+
+  let monthHtml;
+  if(!monthCurrencies.length){
+    monthHtml = `<div class="empty-state">Aucun montant connu pour ${year}. Renseignez le montant du dividende sur vos lignes.</div>`;
+  }else{
+    monthHtml = monthCurrencies.map(cur=>`
+      <div class="chart-block">
+        <div class="chart-cur-label">${escapeHtml(cur)}</div>
+        ${svgBarChart({ labels: monthLabels, values: monthTotals[cur], estimateFlags: monthEst[cur], color: GOLD_HEX, currency: cur })}
+      </div>`).join('');
+  }
+
+  const allYears = [];
+  filteredHoldings.forEach(h=>{
+    (h.dividend.history||[]).forEach(e=>{
+      const dd = e.payDate || e.exDate;
+      if(dd) allYears.push(parseISO(dd).getFullYear());
+    });
+  });
+  const minYear = allYears.length ? Math.min(...allYears, year) : year - 2;
+  const startYear = Math.max(minYear, year - 6);
+  const endYear = year + 2;
+  const { totals: yearTotals, allEstimate: yearEst } = buildYearlyTotals(startYear, endYear);
+  const yearCurrencies = Object.keys(yearTotals);
+
+  let yearHtml;
+  if(!yearCurrencies.length){
+    yearHtml = `<div class="empty-state">Pas encore assez de données pour l'évolution annuelle.</div>`;
+  }else{
+    const labels = []; for(let y=startYear;y<=endYear;y++) labels.push(String(y));
+    yearHtml = yearCurrencies.map(cur=>{
+      const values = labels.map(l=> yearTotals[cur][Number(l)] || 0);
+      const ests = labels.map(l=> yearTotals[cur][Number(l)] ? (yearEst[cur][Number(l)] !== false) : false);
+      return `<div class="chart-block">
+        <div class="chart-cur-label">${escapeHtml(cur)}</div>
+        ${svgBarChart({ labels, values, estimateFlags: ests, color: NAVY_HEX, currency: cur })}
+      </div>`;
+    }).join('');
+  }
+
+  section.innerHTML = `
+    <div class="stats-card">
+      <h3>Dividendes par mois — ${year}${acctLabel}</h3>
+      <p class="stats-sub">Selon le filtre actif (${view.dateType==='ex' ? 'ex-dividende' : 'mise en paiement'}). Motif hachuré = mois entièrement estimé.</p>
+      ${monthHtml}
+    </div>
+    <div class="stats-card">
+      <h3>Évolution annuelle${acctLabel}</h3>
+      <p class="stats-sub">${startYear} – ${endYear}, connu + projeté.</p>
+      ${yearHtml}
+    </div>
+  `;
+}
+
+/* ---------------------------------------------------------------
+   IMPORT D'UN RELEVÉ DE COURTIER (CSV / Excel)
+   Fonctionne avec n'importe quel export tabulaire (Degiro ou
+   autre) : l'utilisateur associe lui-même les colonnes Ticker et
+   Quantité, car chaque courtier nomme/ordonne ses colonnes
+   différemment. Les PDF ne sont pas analysés automatiquement —
+   trop peu fiable d'un courtier à l'autre ; Degiro propose un
+   export CSV direct depuis la page "Portefeuille" à privilégier.
+   --------------------------------------------------------------- */
+let importRowsCache = [];
+
+function handleBrokerFile(file){
+  const name = file.name.toLowerCase();
+  if(name.endsWith('.csv')){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      if(typeof Papa === 'undefined'){ toast('Bibliothèque CSV indisponible (hors-ligne ?).'); return; }
+      const parsed = Papa.parse(reader.result, { header:false, skipEmptyLines:true });
+      openImportMappingModal(parsed.data);
+    };
+    reader.readAsText(file, 'UTF-8');
+  }else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      if(typeof XLSX === 'undefined'){ toast('Bibliothèque Excel indisponible (hors-ligne ?).'); return; }
+      const data = new Uint8Array(reader.result);
+      const wb = XLSX.read(data, { type:'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header:1, raw:false, defval:'' });
+      openImportMappingModal(rows);
+    };
+    reader.readAsArrayBuffer(file);
+  }else{
+    toast('Format non pris en charge. Utilisez un fichier .csv ou .xlsx.');
+  }
+}
+
+function parseNumberLoose(raw){
+  if(raw === undefined || raw === null) return NaN;
+  let s = String(raw).trim().replace(/\s/g,'').replace(/[€$£]/g,'');
+  if(!s) return NaN;
+  const hasComma = s.includes(','), hasDot = s.includes('.');
+  if(hasComma && hasDot){
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',', '.');
+    else s = s.replace(/,/g,'');
+  }else if(hasComma){
+    s = s.replace(',', '.');
+  }
+  return parseFloat(s);
+}
+
+function openImportMappingModal(rows){
+  rows = (rows||[]).filter(r=> r && r.some(c=> String(c).trim() !== ''));
+  if(!rows.length){ toast('Fichier vide ou illisible.'); return; }
+  importRowsCache = rows;
+  const headerRow = rows[0] || [];
+  const colCount = Math.max(...rows.map(r=>r.length));
+
+  const guessCol = (keywords)=>{
+    for(let i=0;i<colCount;i++){
+      const h = (headerRow[i]||'').toString().toLowerCase();
+      if(keywords.some(k=>h.includes(k))) return i;
+    }
+    return -1;
+  };
+  const guessTicker = guessCol(['symbole','symbol','ticker','isin','code']);
+  const guessQty = guessCol(['quantité','quantity','nombre','qté','qty','position']);
+  const guessName = guessCol(['produit','nom','name','société','company']);
+
+  const options = (selected)=>{
+    let opts = `<option value="-1">— Ignorer —</option>`;
+    for(let i=0;i<colCount;i++){
+      const label = headerRow[i] ? `${headerRow[i]} (col ${i+1})` : `Colonne ${i+1}`;
+      opts += `<option value="${i}" ${i===selected?'selected':''}>${escapeHtml(label)}</option>`;
+    }
+    return opts;
+  };
+
+  const previewRows = rows.slice(1,6);
+  const previewHtml = `<div class="import-preview-wrap"><table><tbody>
+    ${previewRows.map(r=>`<tr>${r.map(c=>`<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}
+  </tbody></table></div>`;
+
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-overlay" id="impOverlay">
+    <div class="modal" style="max-width:640px;">
+      <button class="modal-close" id="impClose">×</button>
+      <h2>Importer un relevé</h2>
+      <p class="modal-sub">Indiquez quelles colonnes contiennent le ticker et la quantité. La 1ère ligne est considérée comme un en-tête et ignorée à l'import.</p>
+      <div class="field-row">
+        <div class="field"><label>Colonne Ticker / Symbole</label><select id="map-ticker">${options(guessTicker)}</select></div>
+        <div class="field"><label>Colonne Quantité</label><select id="map-qty">${options(guessQty)}</select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Colonne Nom (optionnel)</label><select id="map-name">${options(guessName)}</select></div>
+        <div class="field"><label>Compte de destination</label>
+          <select id="imp-account">
+            ${state.accounts.map(a=>`<option value="${a.id}" ${(view.accountFilter!=='all'?view.accountFilter:state.accounts[0].id)===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="section-title">Aperçu (5 premières lignes)</div>
+      ${previewHtml}
+      <span class="hint">Les lignes déjà présentes dans votre portefeuille (même ticker) sont ignorées automatiquement. Pensez ensuite à lancer "Auto-compléter les lignes".</span>
+      <div class="modal-actions">
+        <span></span>
+        <div class="right">
+          <button class="btn btn-ghost" id="impCancel">Annuler</button>
+          <button class="btn btn-primary" id="impConfirm">Importer</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('impClose').onclick = closeModal;
+  document.getElementById('impCancel').onclick = closeModal;
+  document.getElementById('impOverlay').addEventListener('click', (e)=>{ if(e.target.id==='impOverlay') closeModal(); });
+  document.getElementById('impConfirm').onclick = confirmImportMapping;
+}
+
+function confirmImportMapping(){
+  const rows = importRowsCache;
+  const tCol = Number(document.getElementById('map-ticker').value);
+  const qCol = Number(document.getElementById('map-qty').value);
+  const nCol = Number(document.getElementById('map-name').value);
+  const accountId = document.getElementById('imp-account').value;
+  if(tCol < 0){ toast('Sélectionnez au minimum la colonne Ticker.'); return; }
+
+  const dataRows = rows.slice(1);
+  let added = 0, skipped = 0;
+  dataRows.forEach(r=>{
+    const rawTicker = (r[tCol] || '').toString().trim();
+    if(!rawTicker){ skipped++; return; }
+    const qty = qCol >= 0 ? parseNumberLoose(r[qCol]) : 1;
+    if(!qty || qty <= 0){ skipped++; return; }
+    const already = state.holdings.some(h => (h.displayTicker||h.ticker||'').toUpperCase() === rawTicker.toUpperCase());
+    if(already){ skipped++; return; }
+    state.holdings.push({
+      id: uid(), ticker: rawTicker, displayTicker: rawTicker.toUpperCase(),
+      name: nCol >= 0 ? (r[nCol]||'').toString().trim() : '',
+      exchange: 'Autre', quantity: qty, currency: 'EUR',
+      account: accountId,
+      logo: null, source: 'import',
+      dividend: { lastAmount:null, lastExDate:null, lastPayDate:null, frequency:'quarterly', history: [] },
+      earnings: { lastDate:null, frequency:'quarterly', history: [] }
+    });
+    added++;
+  });
+  saveState();
+  closeModal();
+  toast(`${added} action(s) importée(s)${skipped ? `, ${skipped} ligne(s) ignorée(s)` : ''}.`);
+  renderAll();
+}
+
+/* ---------------------------------------------------------------
+   RÉCUPÉRATION AUTOMATIQUE GROUPÉE
+   Complète toutes les lignes qui n'ont pas encore d'historique de
+   dividendes (typiquement après un import CSV/Excel), une par une
+   avec une petite pause pour respecter le quota de l'API.
+   --------------------------------------------------------------- */
+async function runBulkAutoFetch(){
+  if(!state.settings.apiKey){
+    toast('Ajoutez une clé API dans Paramètres pour la récupération automatique.');
+    openSettingsModal();
+    return;
+  }
+  const targets = state.holdings.filter(h => !(h.dividend.history && h.dividend.history.length));
+  if(!targets.length){ toast('Toutes les lignes ont déjà des données de dividende.'); return; }
+  toast(`Récupération en cours pour ${targets.length} ligne(s)…`);
+
+  let ok = 0, fail = 0; const failedTickers = [];
+  for(const h of targets){
+    try{
+      const data = await fetchAutoData(h.ticker);
+      if(data.name && !h.name) h.name = data.name;
+      if(data.logo) h.logo = data.logo;
+      if(data.currency) h.currency = data.currency;
+      if(data.dividend){
+        h.dividend.history = data.dividend.history;
+        h.dividend.frequency = data.dividend.frequency;
+        const last = data.dividend.history[data.dividend.history.length-1];
+        if(last){ h.dividend.lastAmount = last.amount; h.dividend.lastExDate = last.exDate; h.dividend.lastPayDate = last.payDate; }
+      }
+      if(data.earnings){
+        h.earnings.history = data.earnings.history;
+        h.earnings.frequency = data.earnings.frequency;
+        const last = data.earnings.history[data.earnings.history.length-1];
+        if(last){ h.earnings.lastDate = last.date; }
+      }
+      ok++;
+    }catch(e){
+      fail++;
+      failedTickers.push(h.displayTicker || h.ticker);
+    }
+    saveState();
+    renderHoldingsList();
+    await new Promise(r=>setTimeout(r, 350));
+  }
+  saveState();
+  renderAll();
+  toast(`${ok} ligne(s) mise(s) à jour${fail ? `, ${fail} échec(s) : ${failedTickers.slice(0,5).join(', ')}${failedTickers.length>5?'…':''}` : ''}.`);
+}
+
+/* ---------------------------------------------------------------
+   MODAL — COMPTES / PORTEFEUILLES
+   --------------------------------------------------------------- */
+function openAccountsModal(){
+  const root = document.getElementById('modalRoot');
+  const rowsHtml = state.accounts.map(a=>{
+    const count = state.holdings.filter(h=>h.account===a.id).length;
+    return `<div class="account-row" data-id="${a.id}">
+      <input type="text" value="${escapeHtml(a.name)}" data-rename="${a.id}" />
+      <span class="hint" style="white-space:nowrap;">${count} ligne(s)</span>
+      <button class="holding-edit" data-delete="${a.id}" title="Supprimer" ${state.accounts.length<=1?'disabled':''}>🗑</button>
+    </div>`;
+  }).join('');
+
+  root.innerHTML = `<div class="modal-overlay" id="acctOverlay">
+    <div class="modal" style="max-width:460px;">
+      <button class="modal-close" id="acctClose">×</button>
+      <h2>Comptes / portefeuilles</h2>
+      <p class="modal-sub">Séparez par exemple votre CTO et votre PEA — chaque action est rattachée à un compte, et vous pouvez les consulter séparément ou ensemble via les onglets en haut.</p>
+      <div id="acctRows">${rowsHtml}</div>
+      <div class="account-row" style="margin-top:14px;">
+        <input type="text" id="newAcctName" placeholder="Nom du nouveau compte (ex : PEA)" />
+        <button class="btn btn-primary btn-sm" id="addAcctBtn">Ajouter</button>
+      </div>
+      <div class="modal-actions"><span></span><div class="right"><button class="btn btn-ghost" id="acctDone">Fermer</button></div></div>
+    </div>
+  </div>`;
+
+  document.getElementById('acctClose').onclick = closeModal;
+  document.getElementById('acctDone').onclick = closeModal;
+  document.getElementById('acctOverlay').addEventListener('click', (e)=>{ if(e.target.id==='acctOverlay') closeModal(); });
+
+  root.querySelectorAll('[data-rename]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const acc = state.accounts.find(a=>a.id===inp.dataset.rename);
+      if(acc){ acc.name = inp.value.trim() || acc.name; saveState(); renderAll(); }
+    });
+  });
+  root.querySelectorAll('[data-delete]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(state.accounts.length <= 1){ toast('Il doit rester au moins un compte.'); return; }
+      const id = btn.dataset.delete;
+      const count = state.holdings.filter(h=>h.account===id).length;
+      const fallbackAcc = state.accounts.find(a=>a.id!==id);
+      if(count>0 && !confirm(`${count} ligne(s) seront déplacées vers "${fallbackAcc.name}". Continuer ?`)) return;
+      state.holdings.forEach(h=>{ if(h.account===id) h.account = fallbackAcc.id; });
+      state.accounts = state.accounts.filter(a=>a.id!==id);
+      if(view.accountFilter === id) view.accountFilter = 'all';
+      saveState();
+      toast('Compte supprimé.');
+      openAccountsModal();
+      renderAll();
+    });
+  });
+  document.getElementById('addAcctBtn').onclick = ()=>{
+    const nameInput = document.getElementById('newAcctName');
+    const name = nameInput.value.trim();
+    if(!name){ toast('Donnez un nom au compte.'); return; }
+    state.accounts.push({ id: uid(), name });
+    saveState();
+    toast('Compte ajouté.');
+    openAccountsModal();
+    renderAll();
+  };
 }
 
 /* ---------------------------------------------------------------
@@ -546,6 +1016,7 @@ function openStockModal(existingId){
   modalDraft = existing ? JSON.parse(JSON.stringify(existing)) : {
     id: uid(),
     ticker: '', displayTicker: '', name: '', exchange: 'US', quantity: 1, currency: 'USD',
+    account: (view.accountFilter !== 'all' ? view.accountFilter : state.accounts[0].id),
     logo: null, source: 'manual',
     dividend: { lastAmount:null, lastExDate:null, lastPayDate:null, frequency:'quarterly', history: [] },
     earnings: { lastDate:null, frequency:'quarterly', history: [] }
@@ -594,6 +1065,12 @@ function renderStockModal(){
       <div class="field">
         <label>Nom de la société</label>
         <input type="text" id="f-name" value="${escapeHtml(d.name)}" placeholder="Rempli automatiquement si dispo" />
+      </div>
+      <div class="field">
+        <label>Compte</label>
+        <select id="f-account">
+          ${state.accounts.map(a=>`<option value="${a.id}" ${d.account===a.id?'selected':''}>${escapeHtml(a.name)}</option>`).join('')}
+        </select>
       </div>
 
       <div class="auto-fetch-row">
@@ -715,6 +1192,7 @@ function saveStockModal(){
   d.exchange = document.getElementById('f-exchange').value;
   d.currency = document.getElementById('f-currency').value;
   d.name = document.getElementById('f-name').value.trim();
+  d.account = document.getElementById('f-account').value;
 
   const divAmount = parseFloat(document.getElementById('f-div-amount').value);
   d.dividend.lastAmount = isNaN(divAmount) ? null : divAmount;
@@ -825,14 +1303,17 @@ function importData(file){
    --------------------------------------------------------------- */
 function renderAll(){
   renderToolbar();
+  renderAccountSwitch();
   renderTickerTape();
   renderCalendar();
   renderHoldingsList();
   renderSummary();
+  renderStats();
 }
 
 function initEvents(){
   document.getElementById('addStockBtn').onclick = ()=> openStockModal(null);
+  document.getElementById('accountsBtn').onclick = openAccountsModal;
   document.getElementById('settingsBtn').onclick = openSettingsModal;
 
   document.querySelectorAll('#viewSwitch button').forEach(b=>{
@@ -857,6 +1338,13 @@ function initEvents(){
     if(e.target.files[0]) importData(e.target.files[0]);
     e.target.value = '';
   };
+
+  document.getElementById('brokerImportBtn').onclick = ()=> document.getElementById('brokerImportFile').click();
+  document.getElementById('brokerImportFile').onchange = (e)=>{
+    if(e.target.files[0]) handleBrokerFile(e.target.files[0]);
+    e.target.value = '';
+  };
+  document.getElementById('bulkFetchBtn').onclick = runBulkAutoFetch;
 
   document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
 }
