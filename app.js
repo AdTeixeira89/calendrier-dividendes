@@ -755,7 +755,9 @@ function handleBrokerFile(file){
     const reader = new FileReader();
     reader.onload = ()=>{
       if(typeof Papa === 'undefined'){ toast('Bibliothèque CSV indisponible (hors-ligne ?).'); return; }
-      const parsed = Papa.parse(reader.result, { header:false, skipEmptyLines:true });
+      let text = reader.result;
+      if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // retire le BOM UTF-8 (courant sur les exports bancaires)
+      const parsed = Papa.parse(text, { header:false, skipEmptyLines:true });
       openImportMappingModal(parsed.data);
     };
     reader.readAsText(file, 'UTF-8');
@@ -789,11 +791,35 @@ function parseNumberLoose(raw){
   return parseFloat(s);
 }
 
+const TICKER_KEYWORDS = ['symbole','symbol','ticker','isin','code'];
+const QTY_KEYWORDS = ['quantité','quantity','nombre','qté','qty','position','en portefeuille'];
+const NAME_KEYWORDS = ['produit','nom','name','société','company','libellé'];
+
+/* Beaucoup d'exports bancaires ont 1 ou 2 lignes de titre/résumé avant la vraie
+   ligne d'en-têtes de colonnes. On cherche automatiquement, dans les 10
+   premières lignes, celle qui ressemble le plus à un en-tête (contient à la
+   fois un mot-clé "ticker" et un mot-clé "quantité"). */
+function guessHeaderRowIndex(rows){
+  const maxCheck = Math.min(10, rows.length);
+  for(let i=0;i<maxCheck;i++){
+    const cells = (rows[i]||[]).map(c=>String(c).toLowerCase());
+    const hasTicker = cells.some(c=>TICKER_KEYWORDS.some(k=>c.includes(k)));
+    const hasQty = cells.some(c=>QTY_KEYWORDS.some(k=>c.includes(k)));
+    if(hasTicker && hasQty) return i;
+  }
+  return 0;
+}
+
 function openImportMappingModal(rows){
   rows = (rows||[]).filter(r=> r && r.some(c=> String(c).trim() !== ''));
   if(!rows.length){ toast('Fichier vide ou illisible.'); return; }
   importRowsCache = rows;
-  const headerRow = rows[0] || [];
+  renderImportModal(guessHeaderRowIndex(rows));
+}
+
+function renderImportModal(headerRowIdx){
+  const rows = importRowsCache;
+  const headerRow = rows[headerRowIdx] || [];
   const colCount = Math.max(...rows.map(r=>r.length));
 
   const guessCol = (keywords)=>{
@@ -803,9 +829,9 @@ function openImportMappingModal(rows){
     }
     return -1;
   };
-  const guessTicker = guessCol(['symbole','symbol','ticker','isin','code']);
-  const guessQty = guessCol(['quantité','quantity','nombre','qté','qty','position']);
-  const guessName = guessCol(['produit','nom','name','société','company']);
+  const guessTicker = guessCol(TICKER_KEYWORDS);
+  const guessQty = guessCol(QTY_KEYWORDS);
+  const guessName = guessCol(NAME_KEYWORDS);
 
   const options = (selected)=>{
     let opts = `<option value="-1">— Ignorer —</option>`;
@@ -816,17 +842,27 @@ function openImportMappingModal(rows){
     return opts;
   };
 
-  const previewRows = rows.slice(1,6);
+  const headerRowOptions = Array.from({length: Math.min(10, rows.length)}, (_,i)=>i)
+    .map(i=>`<option value="${i}" ${i===headerRowIdx?'selected':''}>Ligne ${i+1}${rows[i] ? ' — ' + rows[i].slice(0,3).map(c=>String(c)).join(' / ') : ''}</option>`)
+    .join('');
+
+  const previewRows = rows.slice(0, 9);
   const previewHtml = `<div class="import-preview-wrap"><table><tbody>
-    ${previewRows.map(r=>`<tr>${r.map(c=>`<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}
+    ${previewRows.map((r,i)=>`<tr style="${i===headerRowIdx?'background:var(--forest-tint);font-weight:600;':''}"><td class="mono" style="color:var(--ink-soft);">${i+1}</td>${r.map(c=>`<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}
   </tbody></table></div>`;
 
   const root = document.getElementById('modalRoot');
   root.innerHTML = `<div class="modal-overlay" id="impOverlay">
-    <div class="modal" style="max-width:640px;">
+    <div class="modal" style="max-width:680px;">
       <button class="modal-close" id="impClose">×</button>
       <h2>Importer un relevé</h2>
-      <p class="modal-sub">Indiquez quelles colonnes contiennent le ticker et la quantité. La 1ère ligne est considérée comme un en-tête et ignorée à l'import.</p>
+      <p class="modal-sub">Si l'import ne détecte rien, la cause la plus fréquente est une ligne d'en-tête mal identifiée (beaucoup d'exports ont 1-2 lignes de résumé avant le vrai tableau) — corrigez-la ci-dessous, la ligne surlignée en vert dans l'aperçu est celle actuellement utilisée comme en-tête.</p>
+
+      <div class="field">
+        <label>Ligne contenant les en-têtes de colonnes</label>
+        <select id="map-headerrow">${headerRowOptions}</select>
+      </div>
+
       <div class="field-row">
         <div class="field"><label>Colonne Ticker / Symbole</label><select id="map-ticker">${options(guessTicker)}</select></div>
         <div class="field"><label>Colonne Quantité</label><select id="map-qty">${options(guessQty)}</select></div>
@@ -839,7 +875,7 @@ function openImportMappingModal(rows){
           </select>
         </div>
       </div>
-      <div class="section-title">Aperçu (5 premières lignes)</div>
+      <div class="section-title">Aperçu (les 9 premières lignes du fichier, numérotées)</div>
       ${previewHtml}
       <span class="hint">Les lignes déjà présentes dans votre portefeuille (même ticker) sont ignorées automatiquement. Pensez ensuite à lancer "Auto-compléter les lignes".</span>
       <div class="modal-actions">
@@ -855,25 +891,27 @@ function openImportMappingModal(rows){
   document.getElementById('impCancel').onclick = closeModal;
   document.getElementById('impOverlay').addEventListener('click', (e)=>{ if(e.target.id==='impOverlay') closeModal(); });
   document.getElementById('impConfirm').onclick = confirmImportMapping;
+  document.getElementById('map-headerrow').onchange = (e)=> renderImportModal(Number(e.target.value));
 }
 
 function confirmImportMapping(){
   const rows = importRowsCache;
+  const headerRowIdx = Number(document.getElementById('map-headerrow').value);
   const tCol = Number(document.getElementById('map-ticker').value);
   const qCol = Number(document.getElementById('map-qty').value);
   const nCol = Number(document.getElementById('map-name').value);
   const accountId = document.getElementById('imp-account').value;
   if(tCol < 0){ toast('Sélectionnez au minimum la colonne Ticker.'); return; }
 
-  const dataRows = rows.slice(1);
-  let added = 0, skipped = 0;
+  const dataRows = rows.slice(headerRowIdx + 1);
+  let added = 0, skippedEmptyTicker = 0, skippedBadQty = 0, skippedDupe = 0;
   dataRows.forEach(r=>{
     const rawTicker = (r[tCol] || '').toString().trim();
-    if(!rawTicker){ skipped++; return; }
+    if(!rawTicker){ skippedEmptyTicker++; return; }
     const qty = qCol >= 0 ? parseNumberLoose(r[qCol]) : 1;
-    if(!qty || qty <= 0){ skipped++; return; }
+    if(!qty || qty <= 0 || isNaN(qty)){ skippedBadQty++; return; }
     const already = state.holdings.some(h => (h.displayTicker||h.ticker||'').toUpperCase() === rawTicker.toUpperCase());
-    if(already){ skipped++; return; }
+    if(already){ skippedDupe++; return; }
     state.holdings.push({
       id: uid(), ticker: rawTicker, displayTicker: rawTicker.toUpperCase(),
       name: nCol >= 0 ? (r[nCol]||'').toString().trim() : '',
@@ -887,7 +925,17 @@ function confirmImportMapping(){
   });
   saveState();
   closeModal();
-  toast(`${added} action(s) importée(s)${skipped ? `, ${skipped} ligne(s) ignorée(s)` : ''}.`);
+
+  const totalSkipped = skippedEmptyTicker + skippedBadQty + skippedDupe;
+  if(added === 0 && totalSkipped > 0){
+    const reasons = [];
+    if(skippedEmptyTicker) reasons.push(`${skippedEmptyTicker} sans ticker (colonne Ticker probablement mal choisie)`);
+    if(skippedBadQty) reasons.push(`${skippedBadQty} quantité invalide (colonne Quantité probablement mal choisie, ou nombres dans un format inattendu)`);
+    if(skippedDupe) reasons.push(`${skippedDupe} déjà présent(s) dans le portefeuille`);
+    toast(`0 action importée. ${reasons.join(' · ')}.`);
+  }else{
+    toast(`${added} action(s) importée(s)${totalSkipped ? `, ${totalSkipped} ligne(s) ignorée(s)` : ''}.`);
+  }
   renderAll();
 }
 
