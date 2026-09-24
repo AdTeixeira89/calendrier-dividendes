@@ -1,0 +1,291 @@
+rules_version = '2';
+
+// =============================================================================
+// Règles de sécurité Firestore — Finances du foyer
+//
+// Principe : tout est refusé par défaut. Un utilisateur authentifié ne peut
+// lire / écrire que :
+//   - son propre profil  (users/{uid})
+//   - les foyers dont il est membre (households/{hid}.memberIds)
+//   - une invitation dont il connaît le code (lecture unitaire, jamais de liste)
+// Les rôles sont stockés dans households/{hid}.roles :
+//   owner  : fondateur, gère les membres
+//   member : lecture + écriture des données financières
+//   viewer : lecture seule (réservé : enfant, conseiller…)
+// =============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- helpers
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function householdPath(hid) {
+      return /databases/$(database)/documents/households/$(hid);
+    }
+
+    function memberPath(hid, memberId) {
+      return /databases/$(database)/documents/households/$(hid)/members/$(memberId);
+    }
+
+    function invitePath(code) {
+      return /databases/$(database)/documents/invites/$(code);
+    }
+
+    function isMember(hid) {
+      return signedIn() && uid() in get(householdPath(hid)).data.memberIds;
+    }
+
+    function canWrite(hid) {
+      return isMember(hid) && get(householdPath(hid)).data.roles[uid()] in ['owner', 'member'];
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function isText(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+
+    function isCurrency(value) {
+      return value is string && value.matches('^[A-Z]{3}$');
+    }
+
+    // Invitation valide AVANT l'écriture et consommée par l'utilisateur courant
+    // dans le même batch (get = état avant, getAfter = état après).
+    function consumesInvite(code, hid) {
+      let before = get(invitePath(code)).data;
+      let after = getAfter(invitePath(code)).data;
+      return before.householdId == hid
+        && before.usedBy == null
+        && before.expiresAt > request.time
+        && after.usedBy == uid();
+    }
+
+    // Collections de données financières rattachées à un foyer.
+    function isFinancialCollection(name) {
+      return name in [
+        'incomes', 'expenses', 'categories', 'budgets', 'debts', 'savingsGoals',
+        'goals', 'assets', 'subscriptions', 'documents', 'receipts', 'alerts',
+        'reports', 'settings'
+      ];
+    }
+
+    function hasValidFinancialFields(data) {
+      return (!('amountCents' in data) || data.amountCents is int)
+        && (!('scope' in data) || data.scope in ['personal', 'shared'])
+        && (!('memberId' in data) || data.memberId == null || data.memberId in get(householdPath(data.householdId)).data.memberIds);
+    }
+
+    // ------------------------------------------------------------------ users
+    match /users/{userId} {
+      function validProfile() {
+        return incoming().keys().hasOnly(['displayName', 'email', 'activeHouseholdId', 'createdAt', 'updatedAt'])
+          && isText(incoming().displayName, 80)
+          && incoming().updatedAt == request.time;
+      }
+
+      // On ne peut pointer que vers un foyer dont on est membre (après l'écriture).
+      function validActiveHousehold() {
+        return !('activeHouseholdId' in incoming())
+          || incoming().activeHouseholdId == null
+          || uid() in getAfter(householdPath(incoming().activeHouseholdId)).data.memberIds;
+      }
+
+      allow read: if signedIn() && uid() == userId;
+      allow create: if signedIn() && uid() == userId
+        && validProfile()
+        && incoming().createdAt == request.time
+        && validActiveHousehold();
+      allow update: if signedIn() && uid() == userId
+        && validProfile()
+        && !changedKeys().hasAny(['createdAt'])
+        && (!changedKeys().hasAny(['activeHouseholdId']) || validActiveHousehold());
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------- invites
+    // Code aléatoire à usage unique, valable 7 jours maximum.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && code.size() >= 10
+        && incoming().keys().hasOnly(['householdId', 'householdName', 'createdBy', 'createdAt', 'expiresAt', 'usedBy', 'usedAt'])
+        && canWrite(incoming().householdId)
+        && incoming().createdBy == uid()
+        && incoming().createdAt == request.time
+        && incoming().expiresAt is timestamp
+        && incoming().expiresAt > request.time
+        && incoming().expiresAt <= request.time + duration.value(7, 'd')
+        && incoming().usedBy == null
+        && incoming().usedAt == null;
+
+      // Consommation par la personne qui rejoint le foyer (dans le batch d'adhésion).
+      allow update: if signedIn()
+        && resource.data.usedBy == null
+        && resource.data.expiresAt > request.time
+        && changedKeys().hasOnly(['usedBy', 'usedAt'])
+        && incoming().usedBy == uid()
+        && incoming().usedAt == request.time
+        && existsAfter(memberPath(resource.data.householdId, uid()));
+
+      allow delete: if signedIn() && canWrite(resource.data.householdId);
+    }
+
+    // ------------------------------------------------------------- households
+    match /households/{hid} {
+      function validHouseholdShape() {
+        return incoming().keys().hasOnly(['name', 'currency', 'ownerId', 'memberIds', 'roles', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
+          && isText(incoming().name, 80)
+          && isCurrency(incoming().currency)
+          && incoming().memberIds is list
+          && incoming().roles is map
+          && incoming().updatedBy == uid()
+          && incoming().updatedAt == request.time;
+      }
+
+      allow read: if signedIn() && uid() in resource.data.memberIds;
+
+      allow create: if signedIn()
+        && validHouseholdShape()
+        && incoming().ownerId == uid()
+        && incoming().createdBy == uid()
+        && incoming().createdAt == request.time
+        && incoming().memberIds == [uid()]
+        && incoming().roles.keys() == [uid()]
+        && incoming().roles[uid()] == 'owner';
+
+      allow update: if signedIn() && validHouseholdShape() && !changedKeys().hasAny(['ownerId', 'createdAt', 'createdBy']) && (
+        // 1. Un membre modifie les paramètres généraux du foyer.
+        (
+          canWrite(hid)
+          && changedKeys().hasOnly(['name', 'currency', 'updatedAt', 'updatedBy'])
+        )
+        // 2. Le propriétaire gère les membres et leurs rôles.
+        || (
+          resource.data.ownerId == uid()
+          && changedKeys().hasOnly(['name', 'currency', 'memberIds', 'roles', 'updatedAt', 'updatedBy'])
+          && uid() in incoming().memberIds
+          && incoming().roles[uid()] == 'owner'
+          && incoming().roles.keys().toSet() == incoming().memberIds.toSet()
+          && incoming().roles.values().toSet().hasOnly(['owner', 'member', 'viewer'])
+        )
+        // 3. Un nouvel utilisateur rejoint le foyer avec une invitation valide.
+        || (
+          !(uid() in resource.data.memberIds)
+          && changedKeys().hasOnly(['memberIds', 'roles', 'updatedAt', 'updatedBy'])
+          && incoming().memberIds == resource.data.memberIds.concat([uid()])
+          && incoming().roles.diff(resource.data.roles).affectedKeys() == [uid()].toSet()
+          && incoming().roles[uid()] == 'member'
+          && consumesInvite(getAfter(memberPath(hid, uid())).data.inviteCode, hid)
+        )
+        // 4. Un membre (non propriétaire) quitte le foyer.
+        || (
+          uid() in resource.data.memberIds
+          && resource.data.ownerId != uid()
+          && changedKeys().hasOnly(['memberIds', 'roles', 'updatedAt', 'updatedBy'])
+          && incoming().memberIds == resource.data.memberIds.removeAll([uid()])
+          && incoming().roles.diff(resource.data.roles).affectedKeys() == [uid()].toSet()
+          && !(uid() in incoming().roles)
+        )
+      );
+
+      // La suppression d'un foyer (et de ses sous-collections) passera par une
+      // Cloud Function dédiée : jamais directement depuis le client.
+      allow delete: if false;
+
+      // ------------------------------------------------------------ members
+      match /members/{memberId} {
+        function validMemberShape() {
+          return incoming().keys().hasOnly(['uid', 'displayName', 'email', 'role', 'joinedAt', 'inviteCode'])
+            && incoming().uid == memberId
+            && isText(incoming().displayName, 80);
+        }
+
+        allow read: if isMember(hid);
+
+        allow create: if signedIn()
+          && memberId == uid()
+          && validMemberShape()
+          && incoming().joinedAt == request.time
+          && (
+            // Fondateur : le foyer est créé dans le même batch.
+            (
+              incoming().role == 'owner'
+              && !exists(householdPath(hid))
+              && getAfter(householdPath(hid)).data.ownerId == uid()
+            )
+            // Invité : invitation valide consommée dans le même batch.
+            || (
+              incoming().role == 'member'
+              && isText(incoming().inviteCode, 64)
+              && uid() in getAfter(householdPath(hid)).data.memberIds
+              && consumesInvite(incoming().inviteCode, hid)
+            )
+          );
+
+        // Chacun peut mettre à jour son nom affiché.
+        allow update: if signedIn()
+          && memberId == uid()
+          && validMemberShape()
+          && changedKeys().hasOnly(['displayName']);
+
+        // Le propriétaire retire un membre, ou un membre quitte le foyer.
+        allow delete: if signedIn() && (
+          (get(householdPath(hid)).data.ownerId == uid() && memberId != uid())
+          || (memberId == uid() && get(householdPath(hid)).data.ownerId != uid())
+        );
+      }
+
+      // ----------------------------------------------------------- auditLog
+      // Journal des modifications : ajout uniquement, jamais modifié ni supprimé.
+      match /auditLog/{entryId} {
+        allow read: if isMember(hid);
+        allow create: if canWrite(hid)
+          && incoming().keys().hasOnly(['householdId', 'entityType', 'entityId', 'action', 'before', 'after', 'changedFields', 'by', 'at'])
+          && incoming().householdId == hid
+          && incoming().by == uid()
+          && incoming().at == request.time
+          && incoming().action in ['create', 'update', 'delete']
+          && isText(incoming().entityType, 40)
+          && isText(incoming().entityId, 128);
+        allow update, delete: if false;
+      }
+
+      // ------------------------------------------------- données financières
+      match /{collection}/{docId} {
+        allow read: if isFinancialCollection(collection) && isMember(hid);
+
+        allow create: if isFinancialCollection(collection)
+          && canWrite(hid)
+          && incoming().householdId == hid
+          && incoming().createdBy == uid()
+          && incoming().updatedBy == uid()
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidFinancialFields(incoming());
+
+        allow update: if isFinancialCollection(collection)
+          && canWrite(hid)
+          && !changedKeys().hasAny(['householdId', 'createdBy', 'createdAt'])
+          && incoming().updatedBy == uid()
+          && incoming().updatedAt == request.time
+          && hasValidFinancialFields(incoming());
+
+        allow delete: if isFinancialCollection(collection) && canWrite(hid);
+      }
+    }
+  }
+}

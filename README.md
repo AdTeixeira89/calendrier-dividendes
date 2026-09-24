@@ -1,5 +1,7 @@
 # Calendrier Dividendes
 
+> Ce dépôt contient aussi **Foyer**, une application de gestion financière familiale (React + Firebase), dans le dossier [`finances/`](finances/README.md).
+
 Application web (100% statique, sans serveur) pour suivre les dates de versement de dividendes et les dates de résultats trimestriels/semestriels/annuels de votre portefeuille d'actions, sous forme de calendrier annuel ou mensuel.
 
 ## Fonctionnalités

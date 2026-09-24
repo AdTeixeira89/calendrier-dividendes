@@ -1,0 +1,42 @@
+import type { ReactNode } from 'react'
+import { TrendingDown, TrendingUp } from 'lucide-react'
+import type { Cents } from '@/types'
+import { formatCents, formatPercent } from '@/utils/money'
+import { toneColor, type Tone } from './tone'
+import styles from './StatCard.module.css'
+
+interface StatCardProps {
+  label: string
+  /** Montant en centimes ; null = pas encore de données. */
+  amount: Cents | null
+  tone?: Tone
+  icon?: ReactNode
+  /** Variation en % par rapport à la période précédente. */
+  change?: number | null
+  /** Une hausse est-elle une bonne nouvelle ? (vrai pour revenus/épargne, faux pour dépenses). */
+  higherIsBetter?: boolean
+  footnote?: ReactNode
+}
+
+export function StatCard({ label, amount, tone = 'accent', icon, change, higherIsBetter = true, footnote }: StatCardProps) {
+  const hasChange = change !== undefined && change !== null && Number.isFinite(change)
+  const positive = hasChange && (change > 0) === higherIsBetter
+  return (
+    <article className={styles.card} style={{ ['--tone' as string]: toneColor(tone) }}>
+      <div className={styles.head}>
+        {icon && <span className={styles.icon}>{icon}</span>}
+        <span className={styles.label}>{label}</span>
+      </div>
+      <p className={`${styles.amount} num`}>{amount === null ? '—' : formatCents(amount, 'EUR', { compact: true })}</p>
+      {hasChange ? (
+        <p className={[styles.change, positive ? styles.good : styles.bad].join(' ')}>
+          {change >= 0 ? <TrendingUp size={14} aria-hidden /> : <TrendingDown size={14} aria-hidden />}
+          <span className="num">{formatPercent(change, { signed: true })}</span>
+          <span className={styles.vs}>vs mois dernier</span>
+        </p>
+      ) : (
+        footnote && <p className={styles.footnote}>{footnote}</p>
+      )}
+    </article>
+  )
+}

@@ -1,0 +1,22 @@
+.shell {
+  display: flex;
+  min-height: 100dvh;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.content {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-4) calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-8));
+}
+
+@media (min-width: 1024px) {
+  .content {
+    padding: var(--space-8) var(--space-8) var(--space-10);
+  }
+}

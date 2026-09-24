@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// =============================================================================
+// Règles Firebase Storage — tickets et documents du foyer
+// Chemin : households/{householdId}/{receipts|documents}/{fichier}
+// L'appartenance au foyer est vérifiée dans Firestore (households/{hid}.memberIds).
+// =============================================================================
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function household(hid) {
+      return firestore.get(/databases/(default)/documents/households/$(hid)).data;
+    }
+
+    function isMember(hid) {
+      return request.auth != null && request.auth.uid in household(hid).memberIds;
+    }
+
+    function canWrite(hid) {
+      return isMember(hid) && household(hid).roles[request.auth.uid] in ['owner', 'member'];
+    }
+
+    function isAllowedFile() {
+      return request.resource.size < 15 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType == 'application/pdf');
+    }
+
+    match /households/{hid}/{folder}/{fileName} {
+      allow read: if folder in ['receipts', 'documents'] && isMember(hid);
+      allow create: if folder in ['receipts', 'documents'] && canWrite(hid) && isAllowedFile();
+      allow update: if false;
+      allow delete: if folder in ['receipts', 'documents'] && canWrite(hid);
+    }
+
+    // Tout le reste est interdit.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,32 @@
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.padded {
+  padding: var(--space-5);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

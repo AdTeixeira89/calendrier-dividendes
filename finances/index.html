@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Foyer — Finances familiales</title>
+    <meta name="description" content="Votre directeur financier personnel : revenus, dépenses, épargne, dettes et patrimoine du foyer." />
+    <meta name="theme-color" content="#070a12" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Foyer" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <script>
+      // Applique le thème avant le premier rendu (évite un flash de couleur).
+      try {
+        var t = localStorage.getItem('foyer.theme')
+        if (t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches))
+          document.documentElement.dataset.theme = 'light'
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: calc(var(--space-3) + var(--safe-top)) var(--space-4) var(--space-3);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.household {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+
+.avatar:hover {
+  text-decoration: none;
+}
+
+.menuBadge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  padding: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+@media (min-width: 1024px) {
+  .bar {
+    display: none;
+  }
+}

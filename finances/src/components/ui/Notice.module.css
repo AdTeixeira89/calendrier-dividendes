@@ -1,0 +1,15 @@
+.notice {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
+  background: color-mix(in srgb, var(--tone) 10%, transparent);
+  font-size: var(--text-sm);
+}
+
+.icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--tone);
+}

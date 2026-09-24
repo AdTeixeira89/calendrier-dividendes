@@ -1,0 +1,64 @@
+.choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.choice:hover {
+  border-color: var(--accent);
+}
+
+.choice:active {
+  transform: scale(0.98);
+}
+
+.choice strong {
+  display: block;
+}
+
+.choiceIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.choiceText {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.householdName {
+  margin: var(--space-1) 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.email {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

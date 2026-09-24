@@ -1,0 +1,15 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.logo img {
+  border-radius: 9px;
+}
+
+.word {
+  font-size: var(--text-lg);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}

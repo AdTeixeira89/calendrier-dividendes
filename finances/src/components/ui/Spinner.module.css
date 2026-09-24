@@ -1,0 +1,21 @@
+.spinner {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--track);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+}
+
+.fullPage {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  color: var(--accent);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
