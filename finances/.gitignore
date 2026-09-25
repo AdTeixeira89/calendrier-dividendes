@@ -5,6 +5,7 @@ dev-dist
 .env.local
 .env.*.local
 .firebaserc
+.firebase
 *.log
 firebase-debug.*
 firestore-debug.log
