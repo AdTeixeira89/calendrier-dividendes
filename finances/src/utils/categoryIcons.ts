@@ -1,0 +1,65 @@
+import {
+  Baby,
+  Banknote,
+  Briefcase,
+  Car,
+  Coins,
+  CreditCard,
+  Dumbbell,
+  Gift,
+  GraduationCap,
+  Heart,
+  Home,
+  Landmark,
+  MoreHorizontal,
+  PawPrint,
+  PiggyBank,
+  Plane,
+  Receipt,
+  ShoppingBag,
+  ShoppingCart,
+  Shirt,
+  Smartphone,
+  Ticket,
+  Utensils,
+  Wifi,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
+
+/** Icônes proposées pour les catégories, indexées par leur nom stocké en base. */
+export const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  home: Home,
+  zap: Zap,
+  wifi: Wifi,
+  'shopping-cart': ShoppingCart,
+  car: Car,
+  baby: Baby,
+  landmark: Landmark,
+  ticket: Ticket,
+  'piggy-bank': PiggyBank,
+  'more-horizontal': MoreHorizontal,
+  utensils: Utensils,
+  smartphone: Smartphone,
+  heart: Heart,
+  plane: Plane,
+  gift: Gift,
+  wrench: Wrench,
+  'graduation-cap': GraduationCap,
+  shirt: Shirt,
+  dumbbell: Dumbbell,
+  briefcase: Briefcase,
+  'credit-card': CreditCard,
+  banknote: Banknote,
+  coins: Coins,
+  receipt: Receipt,
+  'shopping-bag': ShoppingBag,
+  'paw-print': PawPrint,
+}
+
+export const CATEGORY_ICON_NAMES = Object.keys(CATEGORY_ICONS)
+
+export function categoryIcon(name: string): LucideIcon {
+  return CATEGORY_ICONS[name] ?? MoreHorizontal
+}

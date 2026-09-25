@@ -1,0 +1,16 @@
+.icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--radius-sm);
+}
+
+.sm {
+  width: 26px;
+  height: 26px;
+}
+
+.md {
+  width: 36px;
+  height: 36px;
+}

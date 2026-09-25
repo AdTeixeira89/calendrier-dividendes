@@ -7,8 +7,10 @@ import styles from './StatCard.module.css'
 
 interface StatCardProps {
   label: string
-  /** Montant en centimes ; null = pas encore de données. */
+  /** Montant en centimes ; null = pas encore de données (ignoré si `displayValue` est fourni). */
   amount: Cents | null
+  /** Remplace l'affichage du montant par un texte déjà formaté (ex. un pourcentage). */
+  displayValue?: string
   tone?: Tone
   icon?: ReactNode
   /** Variation en % par rapport à la période précédente. */
@@ -18,16 +20,17 @@ interface StatCardProps {
   footnote?: ReactNode
 }
 
-export function StatCard({ label, amount, tone = 'accent', icon, change, higherIsBetter = true, footnote }: StatCardProps) {
+export function StatCard({ label, amount, displayValue, tone = 'accent', icon, change, higherIsBetter = true, footnote }: StatCardProps) {
   const hasChange = change !== undefined && change !== null && Number.isFinite(change)
   const positive = hasChange && (change > 0) === higherIsBetter
+  const value = displayValue ?? (amount === null ? '—' : formatCents(amount, 'EUR', { compact: true }))
   return (
     <article className={styles.card} style={{ ['--tone' as string]: toneColor(tone) }}>
       <div className={styles.head}>
         {icon && <span className={styles.icon}>{icon}</span>}
         <span className={styles.label}>{label}</span>
       </div>
-      <p className={`${styles.amount} num`}>{amount === null ? '—' : formatCents(amount, 'EUR', { compact: true })}</p>
+      <p className={`${styles.amount} num`}>{value}</p>
       {hasChange ? (
         <p className={[styles.change, positive ? styles.good : styles.bad].join(' ')}>
           {change >= 0 ? <TrendingUp size={14} aria-hidden /> : <TrendingDown size={14} aria-hidden />}

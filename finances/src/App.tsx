@@ -6,9 +6,13 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
+import { AnalysePage } from '@/pages/AnalysePage'
+import { CategoriesPage } from '@/pages/CategoriesPage'
 import { ComingSoonPage } from '@/pages/ComingSoonPage'
+import { ExpensesPage } from '@/pages/ExpensesPage'
 import { HomePage } from '@/pages/HomePage'
 import { HouseholdPage } from '@/pages/HouseholdPage'
+import { IncomesPage } from '@/pages/IncomesPage'
 import { MorePage } from '@/pages/MorePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { HouseholdSetupPage } from '@/pages/onboarding/HouseholdSetupPage'
@@ -35,11 +39,12 @@ export default function App() {
                 <Route element={<RequireHousehold />}>
                   <Route element={<AppShell />}>
                     <Route index element={<HomePage />} />
-                    <Route path="depenses" element={<ComingSoonPage module="depenses" />} />
-                    <Route path="revenus" element={<ComingSoonPage module="revenus" />} />
+                    <Route path="depenses" element={<ExpensesPage />} />
+                    <Route path="revenus" element={<IncomesPage />} />
+                    <Route path="categories" element={<CategoriesPage />} />
                     <Route path="epargne" element={<ComingSoonPage module="epargne" />} />
                     <Route path="dette" element={<ComingSoonPage module="dette" />} />
-                    <Route path="analyse" element={<ComingSoonPage module="analyse" />} />
+                    <Route path="analyse" element={<AnalysePage />} />
                     <Route path="patrimoine" element={<ComingSoonPage module="patrimoine" />} />
                     <Route path="objectifs" element={<ComingSoonPage module="objectifs" />} />
                     <Route path="abonnements" element={<ComingSoonPage module="abonnements" />} />

@@ -1,0 +1,26 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--text-muted);
+}
+
+.select {
+  height: 50px;
+  padding: 0 var(--space-4);
+  background: var(--surface-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  color: var(--text);
+}
+
+.select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}

@@ -19,6 +19,7 @@ import { db } from '@/firebase/client'
 import { householdCol, householdDoc, householdItemDoc, householdsCol, inviteDoc, userDoc } from '@/firebase/paths'
 import type { Household, HouseholdInvite, HouseholdMember } from '@/types'
 import { generateInviteCode } from '@/utils/inviteCode'
+import { seedDefaultCategories } from './categoryService'
 
 const INVITE_VALIDITY_DAYS = 7
 
@@ -49,6 +50,9 @@ export async function createHousehold(user: User, name: string): Promise<string>
     joinedAt: serverTimestamp(),
   })
   await batch.commit()
+  // Séparé du batch précédent : les règles de sécurité des catégories exigent
+  // que le foyer existe déjà (elles ne voient pas les autres écritures du même batch).
+  seedDefaultCategories(ref.id, user)
   await activateHousehold(user.uid, ref.id)
   return ref.id
 }
