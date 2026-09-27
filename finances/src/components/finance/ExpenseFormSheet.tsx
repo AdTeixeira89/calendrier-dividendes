@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Receipt, Trash2 } from 'lucide-react'
 import { Button, ConfirmButton, Notice, Select, Sheet, TextArea, TextField } from '@/components/ui'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
@@ -11,6 +11,14 @@ import { toUserMessage } from '@/utils/firebaseErrors'
 import { CategoryPicker } from './CategoryPicker'
 import { AmountField } from './AmountField'
 
+/** Pré-remplissage initial (ex. issu du scanner de tickets), ignoré si `expense` est fourni. */
+export interface ExpenseFormInitial {
+  amountCents?: Cents
+  date?: string
+  merchant?: string
+  receiptPath?: string
+}
+
 interface ExpenseFormSheetProps {
   open: boolean
   onClose: () => void
@@ -18,18 +26,19 @@ interface ExpenseFormSheetProps {
   /** Dépense à modifier ; absent = création. */
   expense?: Expense
   defaultDate: string
+  initial?: ExpenseFormInitial
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ['card', 'transfer', 'cash', 'check', 'direct_debit', 'other']
 const KINDS: ExpenseKind[] = ['one_off', 'recurring', 'exceptional']
 
-export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDate }: ExpenseFormSheetProps) {
+export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDate, initial }: ExpenseFormSheetProps) {
   const user = useCurrentUser()
   const { household, members } = useHousehold()
-  const [amountCents, setAmountCents] = useState<Cents | null>(expense?.amountCents ?? null)
-  const [date, setDate] = useState(expense ? fromTimestamp(expense.date) : defaultDate)
+  const [amountCents, setAmountCents] = useState<Cents | null>(expense?.amountCents ?? initial?.amountCents ?? null)
+  const [date, setDate] = useState(expense ? fromTimestamp(expense.date) : (initial?.date ?? defaultDate))
   const [categoryId, setCategoryId] = useState(expense?.categoryId ?? '')
-  const [merchant, setMerchant] = useState(expense?.merchant ?? '')
+  const [merchant, setMerchant] = useState(expense?.merchant ?? initial?.merchant ?? '')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(expense?.paymentMethod ?? 'card')
   const [memberId, setMemberId] = useState(expense?.memberId ?? user.uid)
   const [scope, setScope] = useState<Scope>(expense?.scope ?? 'shared')
@@ -37,6 +46,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
   const [note, setNote] = useState(expense?.note ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const receiptPath = expense?.receiptPath ?? initial?.receiptPath ?? null
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
@@ -53,6 +63,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
       scope,
       kind,
       note: note.trim() || null,
+      receiptPath,
     }
     try {
       if (expense) await updateExpense(household.id, expense.id, data, user)
@@ -85,6 +96,13 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
           <AmountField value={amountCents} onChange={setAmountCents} autoFocus={!expense} />
           <TextField label="Date" type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
+        {receiptPath && (
+          <Notice tone="info">
+            <span className="row" style={{ gap: 6 }}>
+              <Receipt size={16} aria-hidden /> Ticket scanné joint à cette dépense.
+            </span>
+          </Notice>
+        )}
         <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
         <TextField label="Commerçant (facultatif)" maxLength={120} value={merchant} onChange={(e) => setMerchant(e.target.value)} />
         <div className="row" style={{ alignItems: 'flex-start' }}>

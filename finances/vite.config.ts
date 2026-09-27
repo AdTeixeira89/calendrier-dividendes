@@ -51,12 +51,27 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-        // Seules les polices latines sont mises en cache hors-ligne.
-        globIgnores: ['**/inter-{cyrillic,cyrillic-ext,greek,greek-ext,vietnamese}-*.woff2'],
+        // Seules les polices latines sont mises en cache hors-ligne. Les
+        // fichiers du moteur OCR (~8 Mo) ne sont volontairement pas
+        // pré-mis en cache à l'installation : ils ne sont téléchargés
+        // qu'au premier scan de ticket (voir runtimeCaching ci-dessous).
+        globIgnores: ['**/inter-{cyrillic,cyrillic-ext,greek,greek-ext,vietnamese}-*.woff2', 'worker.min.js', 'tesseract-core/**', 'tesseract-lang/**'],
         navigateFallback: 'index.html',
         // Les données Firestore ont leur propre cache hors-ligne (IndexedDB) :
         // le service worker ne met en cache que la coquille de l'application.
         navigateFallbackDenylist: [/^\/__/],
+        runtimeCaching: [
+          {
+            // Fichiers immuables (nommés par version) : une fois téléchargés,
+            // jamais re-demandés au réseau.
+            urlPattern: /\/(worker\.min\.js|tesseract-core\/.*|tesseract-lang\/.*)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ocr-engine',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            },
+          },
+        ],
       },
     }),
   ],

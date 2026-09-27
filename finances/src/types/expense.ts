@@ -16,6 +16,8 @@ export interface Expense extends BaseEntity {
   scope: Scope
   kind: ExpenseKind
   note: string | null
+  /** Chemin Storage du ticket/justificatif scanné, ou null si saisie manuelle. */
+  receiptPath: string | null
 }
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

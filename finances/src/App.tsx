@@ -11,6 +11,7 @@ import { AnalysePage } from '@/pages/AnalysePage'
 import { CategoriesPage } from '@/pages/CategoriesPage'
 import { ComingSoonPage } from '@/pages/ComingSoonPage'
 import { DettePage } from '@/pages/DettePage'
+import { DocumentsPage } from '@/pages/DocumentsPage'
 import { EpargnePage } from '@/pages/EpargnePage'
 import { ExpensesPage } from '@/pages/ExpensesPage'
 import { HomePage } from '@/pages/HomePage'
@@ -51,7 +52,7 @@ export default function App() {
                     <Route path="patrimoine" element={<ComingSoonPage module="patrimoine" />} />
                     <Route path="objectifs" element={<ComingSoonPage module="objectifs" />} />
                     <Route path="abonnements" element={<AbonnementsPage />} />
-                    <Route path="documents" element={<ComingSoonPage module="documents" />} />
+                    <Route path="documents" element={<DocumentsPage />} />
                     <Route path="ia" element={<ComingSoonPage module="ia" />} />
                     <Route path="foyer" element={<HouseholdPage />} />
                     <Route path="parametres" element={<SettingsPage />} />

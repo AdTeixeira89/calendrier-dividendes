@@ -7,7 +7,7 @@ import type { Income } from '@/types/income'
 function expense(amountCents: number, categoryId: string, kind: Expense['kind'] = 'one_off'): Expense {
   return {
     id: 'e', householdId: 'h', amountCents, date: Timestamp.now(), categoryId, merchant: null,
-    paymentMethod: 'card', memberId: null, scope: 'shared', kind, note: null,
+    paymentMethod: 'card', memberId: null, scope: 'shared', kind, receiptPath: null, note: null,
     createdBy: 'u', createdAt: Timestamp.now(), updatedBy: 'u', updatedAt: Timestamp.now(),
   }
 }
