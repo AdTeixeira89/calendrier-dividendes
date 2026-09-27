@@ -84,7 +84,7 @@ export class ClaudeProvider implements AIProvider {
   async complete(question: string, facts: HouseholdFacts): Promise<StructuredAnswer> {
     const contextText = facts.items.map((f) => `- [${f.key}] ${f.label} : ${f.value}`).join('\n')
     const message = await this.client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-5',
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [
