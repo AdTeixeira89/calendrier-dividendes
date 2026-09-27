@@ -107,7 +107,14 @@ export function DebtFormSheet({ open, onClose, debt }: DebtFormSheetProps) {
         </div>
         <TextField label="Date de début" type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         <div className="row" style={{ alignItems: 'flex-start' }}>
-          <TextField label="Mensualité (hors assurance)" inputMode="decimal" required value={monthlyPayment} onChange={(e) => setMonthlyPayment(e.target.value)} trailing={<span className="subtle">€</span>} />
+          <TextField
+            label="Mensualité (hors assurance)"
+            inputMode="decimal"
+            value={monthlyPayment}
+            onChange={(e) => setMonthlyPayment(e.target.value)}
+            trailing={<span className="subtle">€</span>}
+            hint="Laissez vide si inconnue pour l'instant"
+          />
           <TextField label="Assurance / mois" inputMode="decimal" value={insurance} onChange={(e) => setInsurance(e.target.value)} trailing={<span className="subtle">€</span>} />
         </div>
         <TextField label="Frais éventuels (facultatif)" inputMode="decimal" value={fees} onChange={(e) => setFees(e.target.value)} trailing={<span className="subtle">€</span>} />
