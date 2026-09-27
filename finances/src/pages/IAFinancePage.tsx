@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Send } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { ExportCard } from '@/components/finance/ExportCard'
 import { StructuredAnswerView } from '@/components/finance/StructuredAnswerView'
 import { Button, Card, Notice, TextArea } from '@/components/ui'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -36,19 +37,29 @@ export function IAFinancePage() {
 
   return (
     <div className="stack animate-in">
-      <PageHeader title="IA Finance" subtitle="Posez vos questions : chaque chiffre vient de vos données, jamais inventé." />
+      <PageHeader title="IA Finance" subtitle="Exportez vos données pour les analyser avec l'IA de votre choix, gratuitement." />
 
-      <Card title="Bilan du mois">
+      <ExportCard />
+
+      <Card title="Bilan du mois" subtitle={formatMonthKey(month)}>
         {report === undefined ? null : report === null ? (
-          <p className="muted">Le bilan de {formatMonthKey(month)} sera généré le mois prochain (le 1er de chaque mois).</p>
-        ) : report.bilan ? (
-          <StructuredAnswerView answer={report.bilan} />
+          <p className="muted">Le bilan sera généré le 1er du mois prochain.</p>
         ) : (
-          <Notice tone="info">{report.aiError ?? "Bilan chiffré disponible, synthèse IA indisponible."}</Notice>
+          <div className="stack">
+            <ul className="stack" style={{ gap: 4 }}>
+              {report.facts.map((f) => (
+                <li key={f.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span>{f.label}</span>
+                  <strong className="num">{f.value}</strong>
+                </li>
+              ))}
+            </ul>
+            {report.bilan && <StructuredAnswerView answer={report.bilan} />}
+          </div>
         )}
       </Card>
 
-      <Card title="Poser une question">
+      <Card title="Poser une question à l'IA" subtitle="Nécessite une clé API IA payante, non configurée pour l'instant.">
         <form className="stack" onSubmit={onSubmit}>
           <TextArea
             label="Votre question"
