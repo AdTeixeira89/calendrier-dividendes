@@ -25,10 +25,17 @@ export const SYNC_ERROR_EVENT = 'app:sync-error'
  * Un refus serveur est signalé à l'interface via un événement global.
  */
 function commitInBackground(batch: WriteBatch): void {
-  batch.commit().catch((error: unknown) => {
-    console.error(error)
-    window.dispatchEvent(new CustomEvent(SYNC_ERROR_EVENT, { detail: error }))
-  })
+  batch.commit().catch(reportSyncError)
+}
+
+/**
+ * Signale une erreur de lecture ou d'écriture Firestore à l'interface (bandeau
+ * global) : un `onSnapshot` en échec (ex. index manquant, droits refusés) ne
+ * doit jamais se traduire par une liste vide affichée en silence.
+ */
+export function reportSyncError(error: unknown): void {
+  console.error(error)
+  window.dispatchEvent(new CustomEvent(SYNC_ERROR_EVENT, { detail: error }))
 }
 
 function auditEntry(

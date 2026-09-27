@@ -1,4 +1,5 @@
 import { watchCategories } from '@/services/categoryService'
+import { reportSyncError } from '@/services/repository'
 import type { Category, CategoryWithChildren } from '@/types'
 import { useKeyedSnapshot } from './useKeyedSnapshot'
 
@@ -7,7 +8,10 @@ export function useCategories(householdId: string, kind?: Category['kind']): Cat
     watchCategories(
       householdId,
       (all) => onChange(kind ? all.filter((c) => c.kind === kind) : all),
-      () => onChange([]),
+      (error) => {
+        reportSyncError(error)
+        onChange([])
+      },
     ),
   )
 }

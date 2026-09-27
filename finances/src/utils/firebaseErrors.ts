@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   'auth/network-request-failed': 'Connexion impossible. Vérifiez votre réseau.',
   'permission-denied': "Action non autorisée. Le code d'invitation est peut-être expiré ou déjà utilisé.",
   unavailable: 'Service momentanément indisponible. Réessayez.',
+  'failed-precondition': "Configuration de la base de données incomplète (index manquant). Signalez ce message.",
 }
 
 /** Message d'erreur lisible en français à partir d'une erreur Firebase. */
