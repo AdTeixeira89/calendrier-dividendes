@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { Button, Notice, Select, Sheet, TextArea, TextField } from '@/components/ui'
+import { Button, ConfirmButton, Notice, Select, Sheet, TextArea, TextField } from '@/components/ui'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -62,7 +62,7 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
   }
 
   async function onDelete() {
-    if (!income || !confirm('Supprimer ce revenu ?')) return
+    if (!income) return
     setLoading(true)
     try {
       await deleteIncome(household.id, income.id, user)
@@ -105,9 +105,7 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
           {income ? 'Enregistrer' : 'Ajouter le revenu'}
         </Button>
         {income && (
-          <Button type="button" variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDelete()}>
-            Supprimer
-          </Button>
+          <ConfirmButton label="Supprimer" icon={<Trash2 size={18} />} question="Supprimer ce revenu ?" onConfirm={() => void onDelete()} disabled={loading} />
         )}
       </form>
     </Sheet>

@@ -4,11 +4,13 @@ import { MonthNav } from '@/components/finance/MonthNav'
 import { TrendChart } from '@/components/finance/TrendChart'
 import { Card, StatCard } from '@/components/ui'
 import { useCategories } from '@/hooks/useCategories'
+import { useDebts } from '@/hooks/useDebts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { useTrend } from '@/hooks/useTrend'
+import { aggregateDebts } from '@/utils/debt'
 import { formatPercent, percentChange } from '@/utils/money'
 import { previousMonthKey } from '@/utils/month'
 import { summarizeMonth } from '@/utils/monthlyStats'
@@ -22,9 +24,13 @@ export function AnalysePage() {
   const prevExpenses = useMonthlyExpenses(household.id, previousMonthKey(month))
   const prevIncomes = useMonthlyIncomes(household.id, previousMonthKey(month))
   const trend = useTrend(household.id, month, 6)
+  const debts = useDebts(household.id)
 
   const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
   const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
+  const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
+  const livingAllowanceCents = summary ? summary.livingAllowanceCents - debtMonthlyCents : null
+  const prevLivingAllowanceCents = prevSummary ? prevSummary.livingAllowanceCents - debtMonthlyCents : null
 
   return (
     <div className="stack animate-in">
@@ -41,9 +47,10 @@ export function AnalysePage() {
         />
         <StatCard
           label="Reste à vivre"
-          amount={summary?.livingAllowanceCents ?? null}
+          amount={livingAllowanceCents}
           tone="accent"
-          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
+          change={livingAllowanceCents !== null && prevLivingAllowanceCents !== null ? percentChange(livingAllowanceCents, prevLivingAllowanceCents) : null}
+          footnote="Après charges fixes et mensualités de prêts"
         />
       </section>
 

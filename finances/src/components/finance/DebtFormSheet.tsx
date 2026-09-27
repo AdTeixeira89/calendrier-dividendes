@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { Button, Notice, Select, Sheet, TextField } from '@/components/ui'
+import { Button, ConfirmButton, Notice, Select, Sheet, TextField } from '@/components/ui'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { createDebt, deleteDebt, updateDebt } from '@/services/debtService'
@@ -70,7 +70,7 @@ export function DebtFormSheet({ open, onClose, debt }: DebtFormSheetProps) {
   }
 
   async function onDelete() {
-    if (!debt || !confirm(`Supprimer « ${debt.name} » ?`)) return
+    if (!debt) return
     setLoading(true)
     try {
       await deleteDebt(household.id, debt.id, user)
@@ -122,9 +122,7 @@ export function DebtFormSheet({ open, onClose, debt }: DebtFormSheetProps) {
           {debt ? 'Enregistrer' : 'Ajouter le prêt'}
         </Button>
         {debt && (
-          <Button type="button" variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDelete()}>
-            Supprimer
-          </Button>
+          <ConfirmButton label="Supprimer" icon={<Trash2 size={18} />} question={`Supprimer « ${debt.name} » ?`} onConfirm={() => void onDelete()} disabled={loading} />
         )}
       </form>
     </Sheet>

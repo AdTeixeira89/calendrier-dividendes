@@ -1,6 +1,6 @@
 import { createElement, useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { Button, Notice, Sheet, TextField } from '@/components/ui'
+import { Button, ConfirmButton, Notice, Sheet, TextField } from '@/components/ui'
 import { toneSolid, type Tone } from '@/components/ui/tone'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -59,7 +59,7 @@ export function SavingsGoalFormSheet({ open, onClose, goal }: SavingsGoalFormShe
   }
 
   async function onDelete() {
-    if (!goal || !confirm(`Supprimer l'objectif « ${goal.name} » ?`)) return
+    if (!goal) return
     setLoading(true)
     try {
       await deleteSavingsGoal(household.id, goal.id, user)
@@ -146,9 +146,7 @@ export function SavingsGoalFormSheet({ open, onClose, goal }: SavingsGoalFormShe
           {goal ? 'Enregistrer' : "Créer l'objectif"}
         </Button>
         {goal && (
-          <Button type="button" variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDelete()}>
-            Supprimer
-          </Button>
+          <ConfirmButton label="Supprimer" icon={<Trash2 size={18} />} question={`Supprimer l'objectif « ${goal.name} » ?`} onConfirm={() => void onDelete()} disabled={loading} />
         )}
       </form>
     </Sheet>

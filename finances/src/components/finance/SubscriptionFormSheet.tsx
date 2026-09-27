@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { Button, Notice, Select, Sheet, TextField } from '@/components/ui'
+import { Button, ConfirmButton, Notice, Select, Sheet, TextField } from '@/components/ui'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -44,7 +44,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
   }
 
   async function onDelete() {
-    if (!subscription || !confirm(`Supprimer « ${subscription.name} » ?`)) return
+    if (!subscription) return
     setLoading(true)
     try {
       await deleteSubscription(household.id, subscription.id, user)
@@ -74,9 +74,13 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
           {subscription ? 'Enregistrer' : "Ajouter l'abonnement"}
         </Button>
         {subscription && (
-          <Button type="button" variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDelete()}>
-            Supprimer
-          </Button>
+          <ConfirmButton
+            label="Supprimer"
+            icon={<Trash2 size={18} />}
+            question={`Supprimer « ${subscription.name} » ?`}
+            onConfirm={() => void onDelete()}
+            disabled={loading}
+          />
         )}
       </form>
     </Sheet>

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Trash2 } from 'lucide-react'
-import { Button, Notice, Select, Sheet, TextField } from '@/components/ui'
+import { Button, ConfirmButton, Notice, Select, Sheet, TextField } from '@/components/ui'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { createCategory, deleteCategory, updateCategory } from '@/services/categoryService'
@@ -48,7 +48,7 @@ export function CategoryFormSheet({ open, onClose, roots, category, defaultParen
   }
 
   async function onDelete() {
-    if (!category || !confirm(`Supprimer « ${category.name} » ? Les dépenses déjà enregistrées la garderont en référence, mais elle disparaîtra des listes.`)) return
+    if (!category) return
     setLoading(true)
     try {
       await deleteCategory(household.id, category.id, user)
@@ -134,9 +134,13 @@ export function CategoryFormSheet({ open, onClose, roots, category, defaultParen
           {category ? 'Enregistrer' : 'Créer la catégorie'}
         </Button>
         {category && (
-          <Button type="button" variant="danger" icon={<Trash2 size={18} />} onClick={() => void onDelete()}>
-            Supprimer
-          </Button>
+          <ConfirmButton
+            label="Supprimer"
+            icon={<Trash2 size={18} />}
+            question={`Supprimer « ${category.name} » ? Les dépenses déjà enregistrées la garderont en référence, mais elle disparaîtra des listes.`}
+            onConfirm={() => void onDelete()}
+            disabled={loading}
+          />
         )}
       </form>
     </Sheet>

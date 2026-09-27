@@ -3,9 +3,11 @@ import { ArrowDownRight, ArrowUpRight, CheckCircle2, Circle, PiggyBank, Wallet }
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
+import { useDebts } from '@/hooks/useDebts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
+import { aggregateDebts } from '@/utils/debt'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
 import { percentChange } from '@/utils/money'
@@ -22,10 +24,17 @@ export function HomePage() {
   const incomes = useMonthlyIncomes(household.id, month)
   const prevExpenses = useMonthlyExpenses(household.id, prevMonth)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
+  const debts = useDebts(household.id)
 
   const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
   const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
   const hasData = Boolean(expenses?.length || incomes?.length)
+
+  // Les mensualités de prêts (capital + assurance) ne sont pas des « dépenses »
+  // enregistrées comme telles, mais réduisent bien ce qui reste réellement disponible.
+  const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
+  const livingAllowanceCents = summary ? summary.livingAllowanceCents - debtMonthlyCents : null
+  const prevLivingAllowanceCents = prevSummary ? prevSummary.livingAllowanceCents - debtMonthlyCents : null
 
   const steps = [
     { done: true, label: 'Créer votre foyer', to: '/foyer' },
@@ -68,11 +77,11 @@ export function HomePage() {
         />
         <StatCard
           label="Reste à vivre"
-          amount={summary?.livingAllowanceCents ?? null}
+          amount={livingAllowanceCents}
           tone="accent"
           icon={<Wallet size={16} />}
-          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
-          footnote="Après charges fixes"
+          change={livingAllowanceCents !== null && prevLivingAllowanceCents !== null ? percentChange(livingAllowanceCents, prevLivingAllowanceCents) : null}
+          footnote="Après charges fixes et mensualités de prêts"
         />
       </section>
 
