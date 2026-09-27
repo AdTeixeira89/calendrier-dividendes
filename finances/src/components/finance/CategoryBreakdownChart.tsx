@@ -29,23 +29,41 @@ function renderAmountLabel({ x = 0, y = 0, width = 0, height = 0, value = 0 }: A
   )
 }
 
-export function CategoryBreakdownChart({ expenses, categories }: { expenses: Expense[]; categories: Category[] }) {
-  const totals = totalsByCategory(expenses)
-  if (totals.length === 0) {
+interface Slice {
+  name: string
+  color: Tone
+  amountCents: number
+}
+
+export function CategoryBreakdownChart({
+  expenses,
+  categories,
+  debtMonthlyCents = 0,
+}: {
+  expenses: Expense[]
+  categories: Category[]
+  /** Mensualités de prêts du mois : affichées comme un poste « Crédits » à part entière. */
+  debtMonthlyCents?: number
+}) {
+  const byId = new Map(categories.map((c) => [c.id, c]))
+  const slices: Slice[] = totalsByCategory(expenses).map((t) => ({
+    name: byId.get(t.categoryId)?.name ?? 'Sans catégorie',
+    color: (byId.get(t.categoryId)?.color as Tone) ?? 'accent',
+    amountCents: t.amountCents,
+  }))
+  if (debtMonthlyCents > 0) slices.push({ name: 'Crédits', color: 'debt', amountCents: debtMonthlyCents })
+  slices.sort((a, b) => b.amountCents - a.amountCents)
+
+  if (slices.length === 0) {
     return <EmptyState icon={<PieIcon size={28} />} title="Rien à afficher" description="Ajoutez des dépenses pour voir leur répartition." />
   }
 
-  const byId = new Map(categories.map((c) => [c.id, c]))
-  const top = totals.slice(0, MAX_BARS)
-  const rest = totals.slice(MAX_BARS)
-  const restTotal = rest.reduce((sum, t) => sum + t.amountCents, 0)
+  const top = slices.slice(0, MAX_BARS)
+  const rest = slices.slice(MAX_BARS)
+  const restTotal = rest.reduce((sum, s) => sum + s.amountCents, 0)
 
   const data = [
-    ...top.map((t) => ({
-      name: byId.get(t.categoryId)?.name ?? 'Sans catégorie',
-      color: (byId.get(t.categoryId)?.color as Tone) ?? 'accent',
-      amount: t.amountCents / 100,
-    })),
+    ...top.map((s) => ({ name: s.name, color: s.color, amount: s.amountCents / 100 })),
     ...(restTotal > 0 ? [{ name: 'Autres', color: 'warning' as Tone, amount: restTotal / 100 }] : []),
   ]
   const height = data.length * 44 + 24

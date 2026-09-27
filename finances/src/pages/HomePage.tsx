@@ -11,7 +11,7 @@ import { aggregateDebts } from '@/utils/debt'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
 import { percentChange } from '@/utils/money'
-import { summarizeMonth } from '@/utils/monthlyStats'
+import { summarizeMonth, withDebtCharges } from '@/utils/monthlyStats'
 import styles from './HomePage.module.css'
 
 export function HomePage() {
@@ -26,15 +26,14 @@ export function HomePage() {
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
 
-  const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
-  const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
   const hasData = Boolean(expenses?.length || incomes?.length)
 
-  // Les mensualités de prêts (capital + assurance) ne sont pas des « dépenses »
-  // enregistrées comme telles, mais réduisent bien ce qui reste réellement disponible.
+  // Les mensualités de prêts (capital + assurance) sont une charge fixe à part
+  // entière : elles s'ajoutent aux dépenses enregistrées, même si elles ne
+  // sont pas saisies comme des dépenses individuelles.
   const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
-  const livingAllowanceCents = summary ? summary.livingAllowanceCents - debtMonthlyCents : null
-  const prevLivingAllowanceCents = prevSummary ? prevSummary.livingAllowanceCents - debtMonthlyCents : null
+  const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
+  const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
 
   const steps = [
     { done: true, label: 'Créer votre foyer', to: '/foyer' },
@@ -65,7 +64,7 @@ export function HomePage() {
           icon={<ArrowDownRight size={16} />}
           higherIsBetter={false}
           change={summary && prevSummary ? percentChange(summary.expenseCents, prevSummary.expenseCents) : null}
-          footnote="Aucune dépense saisie"
+          footnote={debtMonthlyCents > 0 ? 'Dont mensualités de prêts' : 'Aucune dépense saisie'}
         />
         <StatCard
           label="Épargne"
@@ -73,14 +72,14 @@ export function HomePage() {
           tone="saving"
           icon={<PiggyBank size={16} />}
           change={summary && prevSummary ? percentChange(summary.savingsCents, prevSummary.savingsCents) : null}
-          footnote="Revenus − dépenses"
+          footnote="Revenus − dépenses (dont crédits)"
         />
         <StatCard
           label="Reste à vivre"
-          amount={livingAllowanceCents}
+          amount={summary?.livingAllowanceCents ?? null}
           tone="accent"
           icon={<Wallet size={16} />}
-          change={livingAllowanceCents !== null && prevLivingAllowanceCents !== null ? percentChange(livingAllowanceCents, prevLivingAllowanceCents) : null}
+          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
           footnote="Après charges fixes et mensualités de prêts"
         />
       </section>

@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase/firestore'
 import { describe, expect, it } from 'vitest'
-import { buildBudgetLines, sumCents, summarizeMonth, totalsByCategory } from './monthlyStats'
+import { buildBudgetLines, sumCents, summarizeMonth, totalsByCategory, withDebtCharges } from './monthlyStats'
 import type { Expense } from '@/types/expense'
 import type { Income } from '@/types/income'
 
@@ -40,6 +40,24 @@ describe('summarizeMonth', () => {
   })
   it('taux d’épargne null sans revenu', () => {
     expect(summarizeMonth([], []).savingsRate).toBeNull()
+  })
+})
+
+describe('withDebtCharges', () => {
+  it('ajoute les mensualités aux dépenses et recalcule épargne, taux et reste à vivre', () => {
+    const expenses = [expense(200_000, 'logement', 'recurring'), expense(50_000, 'loisirs', 'one_off')]
+    const incomes = [income(500_000)]
+    const summary = summarizeMonth(expenses, incomes)
+    const withDebt = withDebtCharges(summary, 90_000)
+    expect(withDebt.expenseCents).toBe(340_000)
+    expect(withDebt.savingsCents).toBe(160_000)
+    expect(withDebt.savingsRate).toBeCloseTo(32)
+    expect(withDebt.livingAllowanceCents).toBe(210_000)
+    expect(withDebt.incomeCents).toBe(500_000)
+  })
+  it('ne modifie rien sans mensualité', () => {
+    const summary = summarizeMonth([], [income(100_000)])
+    expect(withDebtCharges(summary, 0)).toBe(summary)
   })
 })
 

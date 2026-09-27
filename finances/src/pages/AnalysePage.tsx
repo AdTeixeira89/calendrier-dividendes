@@ -13,7 +13,7 @@ import { useTrend } from '@/hooks/useTrend'
 import { aggregateDebts } from '@/utils/debt'
 import { formatPercent, percentChange } from '@/utils/money'
 import { previousMonthKey } from '@/utils/month'
-import { summarizeMonth } from '@/utils/monthlyStats'
+import { summarizeMonth, withDebtCharges } from '@/utils/monthlyStats'
 
 export function AnalysePage() {
   const { household } = useHousehold()
@@ -26,11 +26,9 @@ export function AnalysePage() {
   const trend = useTrend(household.id, month, 6)
   const debts = useDebts(household.id)
 
-  const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
-  const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
   const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
-  const livingAllowanceCents = summary ? summary.livingAllowanceCents - debtMonthlyCents : null
-  const prevLivingAllowanceCents = prevSummary ? prevSummary.livingAllowanceCents - debtMonthlyCents : null
+  const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
+  const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
 
   return (
     <div className="stack animate-in">
@@ -47,15 +45,15 @@ export function AnalysePage() {
         />
         <StatCard
           label="Reste à vivre"
-          amount={livingAllowanceCents}
+          amount={summary?.livingAllowanceCents ?? null}
           tone="accent"
-          change={livingAllowanceCents !== null && prevLivingAllowanceCents !== null ? percentChange(livingAllowanceCents, prevLivingAllowanceCents) : null}
+          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
           footnote="Après charges fixes et mensualités de prêts"
         />
       </section>
 
       <Card title="Dépenses par catégorie">
-        {categories && expenses ? <CategoryBreakdownChart expenses={expenses} categories={categories} /> : null}
+        {categories && expenses ? <CategoryBreakdownChart expenses={expenses} categories={categories} debtMonthlyCents={debtMonthlyCents} /> : null}
       </Card>
 
       <Card title="Revenus vs dépenses" subtitle="6 derniers mois">

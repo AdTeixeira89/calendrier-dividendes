@@ -31,6 +31,24 @@ export function summarizeMonth(expenses: Expense[], incomes: Income[]): MonthlyS
   }
 }
 
+/**
+ * Intègre les mensualités de prêts (capital + assurance) au résumé du mois :
+ * ce sont des charges fixes à part entière, même si elles ne sont pas
+ * enregistrées comme des dépenses individuelles (cahier des charges §13).
+ */
+export function withDebtCharges(summary: MonthlySummary, debtMonthlyCents: Cents): MonthlySummary {
+  if (debtMonthlyCents <= 0) return summary
+  const expenseCents = summary.expenseCents + debtMonthlyCents
+  const savingsCents = summary.incomeCents - expenseCents
+  return {
+    incomeCents: summary.incomeCents,
+    expenseCents,
+    savingsCents,
+    savingsRate: summary.incomeCents > 0 ? (savingsCents / summary.incomeCents) * 100 : null,
+    livingAllowanceCents: summary.livingAllowanceCents - debtMonthlyCents,
+  }
+}
+
 export interface CategoryTotal {
   categoryId: string
   amountCents: Cents
