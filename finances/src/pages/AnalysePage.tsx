@@ -57,7 +57,8 @@ export function AnalysePage() {
       </Card>
 
       <Card title="Revenus vs dépenses" subtitle="6 derniers mois">
-        {trend ? <TrendChart points={trend} /> : null}
+        {/* Mensualités de prêts ajoutées à chaque mois (montant actuel des prêts en cours, faute d'historique). */}
+        {trend ? <TrendChart points={trend.map((p) => ({ ...p, expenseCents: p.expenseCents + debtMonthlyCents }))} /> : null}
       </Card>
     </div>
   )
