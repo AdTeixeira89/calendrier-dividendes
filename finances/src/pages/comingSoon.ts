@@ -1,4 +1,4 @@
-import { Banknote, BarChart3, Bot, CreditCard, FileText, Landmark, PiggyBank, Receipt, Repeat, type LucideIcon } from 'lucide-react'
+import { Banknote, BarChart3, CreditCard, FileText, Landmark, PiggyBank, Receipt, Repeat, type LucideIcon } from 'lucide-react'
 
 export interface ComingSoonContent {
   title: string
@@ -58,13 +58,6 @@ export const COMING_SOON: Record<string, ComingSoonContent> = {
     phase: 4,
     description: 'Scanner un ticket, importer une facture PDF : extraction OCR, puis validation par vous avant tout enregistrement.',
     features: ['Photo ou PDF', 'Extraction automatique', 'Validation humaine obligatoire'],
-  },
-  ia: {
-    title: 'IA Finance',
-    icon: Bot,
-    phase: 5,
-    description: 'Posez vos questions, recevez un bilan mensuel. Chaque chiffre est calculé à partir de vos données, jamais inventé.',
-    features: ['Bilan automatique', 'Mode conseiller', 'Données / calculs / estimations séparés'],
   },
   patrimoine: {
     title: 'Patrimoine',

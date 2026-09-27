@@ -3,8 +3,9 @@
 PWA de gestion financière pour le foyer : revenus, dépenses, épargne, dettes, patrimoine, partagés entre
 les membres du foyer. React + TypeScript + Firebase. Architecture détaillée : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-> État : **phase 1 (socle)** — comptes, foyers, invitation du conjoint, navigation, design system,
-> PWA, règles de sécurité. Les modules financiers arrivent à partir de la phase 2.
+> État : **phases 1 à 5 livrées** — comptes/foyers, dépenses/revenus/budget, épargne/dettes/abonnements,
+> scanner de tickets (OCR) et import de documents, IA Finance (Q&A + bilan mensuel, clé API à configurer).
+> Reste : patrimoine (phase 6) et finitions (phase 7).
 
 ## Démarrer en local (sans projet Firebase)
 
@@ -13,7 +14,8 @@ Prérequis : Node 20+ et Java 11+ (pour les émulateurs Firebase).
 ```bash
 cd finances
 npm install
-npm run dev:emulators                    # terminal 1 : Auth, Firestore, Storage + UI sur :4000
+cd functions && npm install && npm run build && cd ..
+npm run dev:emulators                    # terminal 1 : Auth, Firestore, Storage, Functions + UI sur :4000
 VITE_USE_EMULATORS=true npm run dev      # terminal 2 : http://localhost:5173
 ```
 
@@ -31,6 +33,24 @@ VITE_USE_EMULATORS=true npm run dev      # terminal 2 : http://localhost:5173
    npx firebase login
    npx firebase deploy --only firestore:rules,firestore:indexes,storage
    npm run build && npx firebase deploy --only hosting
+   ```
+
+## Activer l'IA Finance (phase 5)
+
+L'architecture (Cloud Function `askFinance`, bilan mensuel planifié) est en place, mais aucune clé IA
+n'est configurée : tant qu'elle ne l'est pas, la page **IA Finance** affiche clairement « IA
+indisponible » (jamais de crash, jamais de chiffre inventé). Pour l'activer :
+
+1. Créez une clé sur <https://console.anthropic.com>.
+2. Nécessite le plan Firebase **Blaze** (facturation à l'usage, requis pour les Cloud Functions).
+3. Enregistrez la clé dans Secret Manager :
+   ```bash
+   npx firebase functions:secrets:set ANTHROPIC_API_KEY --project <votre-projet>
+   ```
+4. Déployez les fonctions :
+   ```bash
+   cd functions && npm run build && cd ..
+   npx firebase deploy --only functions --project <votre-projet>
    ```
 
 ## Scripts

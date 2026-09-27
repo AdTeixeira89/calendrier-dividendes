@@ -16,6 +16,7 @@ import { EpargnePage } from '@/pages/EpargnePage'
 import { ExpensesPage } from '@/pages/ExpensesPage'
 import { HomePage } from '@/pages/HomePage'
 import { HouseholdPage } from '@/pages/HouseholdPage'
+import { IAFinancePage } from '@/pages/IAFinancePage'
 import { IncomesPage } from '@/pages/IncomesPage'
 import { MorePage } from '@/pages/MorePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -53,7 +54,7 @@ export default function App() {
                     <Route path="objectifs" element={<Navigate to="/epargne" replace />} />
                     <Route path="abonnements" element={<AbonnementsPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
-                    <Route path="ia" element={<ComingSoonPage module="ia" />} />
+                    <Route path="ia" element={<IAFinancePage />} />
                     <Route path="foyer" element={<HouseholdPage />} />
                     <Route path="parametres" element={<SettingsPage />} />
                     <Route path="plus" element={<MorePage />} />

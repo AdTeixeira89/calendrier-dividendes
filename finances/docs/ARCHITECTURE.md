@@ -219,10 +219,10 @@ finances/
 | Phase | Contenu | État |
 | --- | --- | --- |
 | **1 — Socle** | Projet, React/TS strict, PWA, Firebase (Auth, Firestore, Storage), Security Rules testées, utilisateurs, foyers, invitations, navigation, design system, journal d'audit (architecture) | ✅ |
-| 2 — Finances de base | Catégories (par défaut + personnalisables), dépenses, revenus, budget prévu/réel/écart, dashboard réel, vue mensuelle, graphiques, recherche | |
-| 3 — Épargne & dettes | Objectifs d'épargne, prêts (amortissement, % remboursé, date de fin), page « Ma dette », charges fixes, abonnements, échéances | |
-| 4 — Documents | Scanner de tickets, OCR, import PDF, stockage, écran de validation | |
-| 5 — IA | Bilan mensuel, questions/réponses, mode conseiller, projections 3/6/12 mois | |
+| 2 — Finances de base | Catégories (par défaut + personnalisables), dépenses, revenus, budget prévu/réel/écart, dashboard réel, vue mensuelle, graphiques, recherche | ✅ |
+| 3 — Épargne & dettes | Objectifs d'épargne, prêts (amortissement, % remboursé, date de fin), page « Ma dette », charges fixes, abonnements, échéances | ✅ |
+| 4 — Documents | Scanner de tickets, OCR, import PDF, stockage, écran de validation | ✅ |
+| 5 — IA | Bilan mensuel, questions/réponses, mode conseiller, projections 3/6/12 mois | ✅ (clé IA à configurer) |
 | 6 — Patrimoine | Actifs, passifs, patrimoine net et évolution | |
 | 7 — Finitions | Alertes/notifications, exports CSV/PDF, offline étendu, accessibilité, tests E2E | |
 

@@ -21,6 +21,8 @@ const MESSAGES: Record<string, string> = {
 /** Message d'erreur lisible en français à partir d'une erreur Firebase. */
 export function toUserMessage(error: unknown): string {
   if (error instanceof FirebaseError) {
+    // Erreurs des Cloud Functions (askFinance…) : message déjà rédigé en français côté serveur.
+    if (error.code.startsWith('functions/')) return error.message
     return MESSAGES[error.code] ?? `Une erreur est survenue (${error.code}).`
   }
   if (error instanceof Error && error.message) return error.message
