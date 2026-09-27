@@ -78,7 +78,7 @@ export function ExpensesPage() {
       {!loading && categories.length > 0 && <BudgetSection month={month} categories={categories} expenses={expenses} budget={budget} />}
 
       {categories !== undefined && (
-        <ExpenseFormSheet open={sheetOpen} onClose={closeSheet} categories={categories} expense={editing} defaultDate={monthDefaultDate(month)} />
+        <ExpenseFormSheet key={editing?.id ?? 'new'} open={sheetOpen} onClose={closeSheet} categories={categories} expense={editing} defaultDate={monthDefaultDate(month)} />
       )}
     </div>
   )

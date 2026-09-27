@@ -56,6 +56,7 @@ export function CategoriesPage() {
       )}
 
       <CategoryFormSheet
+        key={editing?.id ?? creatingUnder ?? 'new'}
         open={sheetOpen}
         onClose={() => {
           setEditing(undefined)

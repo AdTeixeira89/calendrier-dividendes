@@ -6,9 +6,12 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
+import { AbonnementsPage } from '@/pages/AbonnementsPage'
 import { AnalysePage } from '@/pages/AnalysePage'
 import { CategoriesPage } from '@/pages/CategoriesPage'
 import { ComingSoonPage } from '@/pages/ComingSoonPage'
+import { DettePage } from '@/pages/DettePage'
+import { EpargnePage } from '@/pages/EpargnePage'
 import { ExpensesPage } from '@/pages/ExpensesPage'
 import { HomePage } from '@/pages/HomePage'
 import { HouseholdPage } from '@/pages/HouseholdPage'
@@ -42,12 +45,12 @@ export default function App() {
                     <Route path="depenses" element={<ExpensesPage />} />
                     <Route path="revenus" element={<IncomesPage />} />
                     <Route path="categories" element={<CategoriesPage />} />
-                    <Route path="epargne" element={<ComingSoonPage module="epargne" />} />
-                    <Route path="dette" element={<ComingSoonPage module="dette" />} />
+                    <Route path="epargne" element={<EpargnePage />} />
+                    <Route path="dette" element={<DettePage />} />
                     <Route path="analyse" element={<AnalysePage />} />
                     <Route path="patrimoine" element={<ComingSoonPage module="patrimoine" />} />
                     <Route path="objectifs" element={<ComingSoonPage module="objectifs" />} />
-                    <Route path="abonnements" element={<ComingSoonPage module="abonnements" />} />
+                    <Route path="abonnements" element={<AbonnementsPage />} />
                     <Route path="documents" element={<ComingSoonPage module="documents" />} />
                     <Route path="ia" element={<ComingSoonPage module="ia" />} />
                     <Route path="foyer" element={<HouseholdPage />} />

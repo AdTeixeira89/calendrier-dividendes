@@ -58,7 +58,7 @@ export function IncomesPage() {
         )}
       </Card>
 
-      <IncomeFormSheet open={sheetOpen} onClose={closeSheet} income={editing} defaultDate={monthDefaultDate(month)} />
+      <IncomeFormSheet key={editing?.id ?? 'new'} open={sheetOpen} onClose={closeSheet} income={editing} defaultDate={monthDefaultDate(month)} />
     </div>
   )
 }
