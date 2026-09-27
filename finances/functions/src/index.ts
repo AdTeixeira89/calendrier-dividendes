@@ -13,6 +13,15 @@ setGlobalOptions({ region: 'europe-west1' })
 
 const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY')
 
+// Secret Manager exige une valeur au premier déploiement : ce sentinel tient la
+// place tant que la vraie clé (console.anthropic.com) n'a pas été configurée
+// via `firebase functions:secrets:set ANTHROPIC_API_KEY`.
+const NOT_CONFIGURED = '__not_configured__'
+
+function isConfigured(apiKey: string): boolean {
+  return apiKey.length > 0 && apiKey !== NOT_CONFIGURED
+}
+
 function currentMonthKey(date = new Date()): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 }
@@ -49,7 +58,7 @@ export const askFinance = onCall({ secrets: [ANTHROPIC_API_KEY] }, async (reques
   await assertMember(householdId, uid)
 
   const apiKey = ANTHROPIC_API_KEY.value()
-  if (!apiKey) {
+  if (!isConfigured(apiKey)) {
     throw new HttpsError('failed-precondition', "IA indisponible : la clé n'est pas encore configurée pour ce foyer.")
   }
 
@@ -106,7 +115,8 @@ export const monthlyReport = onSchedule({ schedule: '0 6 1 * *', timeZone: 'Euro
   const db = getFirestore()
   const monthKey = previousMonthKey()
   const households = await db.collection('households').get()
-  const apiKey = ANTHROPIC_API_KEY.value() || undefined
+  const rawKey = ANTHROPIC_API_KEY.value()
+  const apiKey = isConfigured(rawKey) ? rawKey : undefined
 
   for (const household of households.docs) {
     try {
