@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { HouseholdProvider } from '@/contexts/HouseholdContext'
@@ -50,7 +50,7 @@ export default function App() {
                     <Route path="dette" element={<DettePage />} />
                     <Route path="analyse" element={<AnalysePage />} />
                     <Route path="patrimoine" element={<ComingSoonPage module="patrimoine" />} />
-                    <Route path="objectifs" element={<ComingSoonPage module="objectifs" />} />
+                    <Route path="objectifs" element={<Navigate to="/epargne" replace />} />
                     <Route path="abonnements" element={<AbonnementsPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
                     <Route path="ia" element={<ComingSoonPage module="ia" />} />

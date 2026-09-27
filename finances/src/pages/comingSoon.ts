@@ -1,4 +1,4 @@
-import { Banknote, BarChart3, Bot, CreditCard, FileText, Landmark, PiggyBank, Receipt, Repeat, Target, type LucideIcon } from 'lucide-react'
+import { Banknote, BarChart3, Bot, CreditCard, FileText, Landmark, PiggyBank, Receipt, Repeat, type LucideIcon } from 'lucide-react'
 
 export interface ComingSoonContent {
   title: string
@@ -44,13 +44,6 @@ export const COMING_SOON: Record<string, ComingSoonContent> = {
     phase: 3,
     description: 'Prêts immobiliers, travaux, consommation : capital restant, mensualités et date de désendettement.',
     features: ['Tableau d\'amortissement', '% remboursé', 'Courbe de diminution de la dette'],
-  },
-  objectifs: {
-    title: 'Objectifs',
-    icon: Target,
-    phase: 3,
-    description: 'Vos objectifs financiers et leur progression.',
-    features: ['Montant restant', 'Versement prévu', 'Date estimée'],
   },
   abonnements: {
     title: 'Abonnements',
