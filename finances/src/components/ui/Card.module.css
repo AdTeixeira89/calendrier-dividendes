@@ -20,6 +20,11 @@
   margin-bottom: var(--space-4);
 }
 
+.card:not(.padded) > .header {
+  padding: var(--space-5) var(--space-5) 0;
+  margin-bottom: var(--space-2);
+}
+
 .title {
   font-size: var(--text-md);
   font-weight: 650;

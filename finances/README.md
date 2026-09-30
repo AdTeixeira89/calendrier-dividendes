@@ -3,9 +3,9 @@
 PWA de gestion financière pour le foyer : revenus, dépenses, épargne, dettes, patrimoine, partagés entre
 les membres du foyer. React + TypeScript + Firebase. Architecture détaillée : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-> État : **phases 1 à 5 livrées** — comptes/foyers, dépenses/revenus/budget, épargne/dettes/abonnements,
-> scanner de tickets (OCR) et import de documents, IA Finance (Q&A + bilan mensuel, clé API à configurer).
-> Reste : patrimoine (phase 6) et finitions (phase 7).
+> État : **phases 1 à 6 livrées** — comptes/foyers, dépenses/revenus/budget, épargne/dettes/abonnements,
+> scanner de tickets (OCR) et import de documents, IA Finance (export CSV/texte + Q&A, clé API à configurer),
+> patrimoine (actifs, patrimoine net, évolution). Reste : finitions (phase 7).
 
 ## Démarrer en local (sans projet Firebase)
 

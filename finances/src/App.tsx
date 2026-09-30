@@ -9,7 +9,6 @@ import { RegisterPage } from '@/pages/auth/RegisterPage'
 import { AbonnementsPage } from '@/pages/AbonnementsPage'
 import { AnalysePage } from '@/pages/AnalysePage'
 import { CategoriesPage } from '@/pages/CategoriesPage'
-import { ComingSoonPage } from '@/pages/ComingSoonPage'
 import { DettePage } from '@/pages/DettePage'
 import { DocumentsPage } from '@/pages/DocumentsPage'
 import { EpargnePage } from '@/pages/EpargnePage'
@@ -21,6 +20,7 @@ import { IncomesPage } from '@/pages/IncomesPage'
 import { MorePage } from '@/pages/MorePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { HouseholdSetupPage } from '@/pages/onboarding/HouseholdSetupPage'
+import { PatrimoinePage } from '@/pages/PatrimoinePage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { PublicOnly, RequireAuth, RequireHousehold } from '@/routes/guards'
 
@@ -50,7 +50,7 @@ export default function App() {
                     <Route path="epargne" element={<EpargnePage />} />
                     <Route path="dette" element={<DettePage />} />
                     <Route path="analyse" element={<AnalysePage />} />
-                    <Route path="patrimoine" element={<ComingSoonPage module="patrimoine" />} />
+                    <Route path="patrimoine" element={<PatrimoinePage />} />
                     <Route path="objectifs" element={<Navigate to="/epargne" replace />} />
                     <Route path="abonnements" element={<AbonnementsPage />} />
                     <Route path="documents" element={<DocumentsPage />} />
