@@ -8,7 +8,11 @@ export default defineConfig({
   // Chemin de base configurable (ex. "/calendrier-dividendes/finances/" pour GitHub Pages).
   base: process.env.VITE_BASE_PATH ?? '/',
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Règles d'alerte et config push partagées avec les Cloud Functions.
+      '@shared': fileURLToPath(new URL('./functions/src/shared', import.meta.url)),
+    },
   },
   build: {
     // Le SDK Firestore (avec cache hors-ligne) pèse ~190 ko gzip à lui seul.
@@ -56,6 +60,8 @@ export default defineConfig({
         // pré-mis en cache à l'installation : ils ne sont téléchargés
         // qu'au premier scan de ticket (voir runtimeCaching ci-dessous).
         globIgnores: ['**/inter-{cyrillic,cyrillic-ext,greek,greek-ext,vietnamese}-*.woff2', 'worker.min.js', 'tesseract-core/**', 'tesseract-lang/**'],
+        // Réception des notifications push (voir public/push-sw.js).
+        importScripts: ['push-sw.js'],
         navigateFallback: 'index.html',
         // Les données Firestore ont leur propre cache hors-ligne (IndexedDB) :
         // le service worker ne met en cache que la coquille de l'application.

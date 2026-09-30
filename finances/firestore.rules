@@ -112,6 +112,21 @@ service cloud.firestore {
         && !changedKeys().hasAny(['createdAt'])
         && (!changedKeys().hasAny(['activeHouseholdId']) || validActiveHousehold());
       allow delete: if false;
+
+      // Appareils abonnés aux notifications push : visibles et modifiables
+      // par leur propriétaire seulement (la Cloud Function les lit en admin).
+      match /pushSubscriptions/{subscriptionId} {
+        allow read, delete: if signedIn() && uid() == userId;
+        allow create, update: if signedIn() && uid() == userId
+          && incoming().keys().hasOnly(['endpoint', 'p256dh', 'auth', 'userAgent', 'createdAt'])
+          && incoming().endpoint is string
+          && incoming().endpoint.matches('https://.+')
+          && incoming().endpoint.size() <= 1000
+          && isText(incoming().p256dh, 200)
+          && isText(incoming().auth, 100)
+          && (!('userAgent' in incoming()) || isText(incoming().userAgent, 300))
+          && incoming().createdAt == request.time;
+      }
     }
 
     // ---------------------------------------------------------------- invites

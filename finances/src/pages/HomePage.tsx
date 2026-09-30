@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, Circle, PiggyBank, Wallet } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { AlertsCard } from '@/components/finance/AlertsCard'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useDebts } from '@/hooks/useDebts'
+import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
@@ -25,6 +27,7 @@ export function HomePage() {
   const prevExpenses = useMonthlyExpenses(household.id, prevMonth)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
+  const alerts = useFinancialAlerts(household.id)
 
   const hasData = Boolean(expenses?.length || incomes?.length)
 
@@ -83,6 +86,8 @@ export function HomePage() {
           footnote="Après charges fixes et mensualités de prêts"
         />
       </section>
+
+      {alerts && alerts.length > 0 && <AlertsCard alerts={alerts} />}
 
       {!hasData && (
         <Card title="Premiers pas" subtitle={`${doneCount} / ${steps.length} étapes`}>

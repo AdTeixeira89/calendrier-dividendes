@@ -5,7 +5,8 @@ les membres du foyer. React + TypeScript + Firebase. Architecture détaillée : 
 
 > État : **phases 1 à 6 livrées** — comptes/foyers, dépenses/revenus/budget, épargne/dettes/abonnements,
 > scanner de tickets (OCR) et import de documents, IA Finance (export CSV/texte + Q&A, clé API à configurer),
-> patrimoine (actifs, patrimoine net, évolution). Reste : finitions (phase 7).
+> patrimoine (actifs, patrimoine net, évolution), alertes (accueil + notifications push) et rythme des dépenses.
+> Reste en phase 7 : export PDF, accessibilité, tests E2E intégrés.
 
 ## Démarrer en local (sans projet Firebase)
 

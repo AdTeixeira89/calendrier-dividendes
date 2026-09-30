@@ -159,6 +159,20 @@ Question ──▶ ai/context.ts ──▶ faits calculés (fonctions pures, sou
 - La clé API reste dans la Cloud Function (Secret Manager) ; le client n'envoie que les agrégats nécessaires.
 - Bilan mensuel : Function planifiée le 1er du mois → `reports/{YYYY-MM}`.
 
+## 6 bis. Alertes et notifications push (phase 7)
+
+```
+functions/src/shared/alerts.ts   règles pures (budget, dépenses > revenus, prélèvement, taux d'épargne)
+        │                         partagées par les deux côtés (alias @shared côté app)
+        ├─▶ app : carte « Alertes » de l'accueil, recalculée en direct
+        └─▶ Cloud Function dailyAlerts (9 h, Europe/Paris) ─▶ Web Push (VAPID) ─▶ public/push-sw.js
+```
+
+- Réglages communs au foyer : `settings/alerts` ; alertes déjà notifiées : `alerts/notified` (une alerte n'est envoyée qu'une fois).
+- Appareils abonnés : `users/{uid}/pushSubscriptions/{empreinte}` (lecture/écriture par leur seul propriétaire).
+- Web Push standard, sans Firebase Messaging : clé publique VAPID dans `shared/push.ts`, clé privée dans Secret Manager (`VAPID_PRIVATE_KEY`).
+- Sur iPhone, les notifications exigent l'app installée sur l'écran d'accueil (iOS 16.4+).
+
 ## 7. Architecture OCR (phase 4)
 
 ```
@@ -224,7 +238,7 @@ finances/
 | 4 — Documents | Scanner de tickets, OCR, import PDF, stockage, écran de validation | ✅ |
 | 5 — IA | Bilan mensuel, questions/réponses, mode conseiller, projections 3/6/12 mois | ✅ (clé IA à configurer) |
 | 6 — Patrimoine | Actifs, passifs, patrimoine net et évolution | ✅ |
-| 7 — Finitions | Alertes/notifications, exports CSV/PDF, offline étendu, accessibilité, tests E2E | |
+| 7 — Finitions | Alertes/notifications, exports CSV/PDF, offline étendu, accessibilité, tests E2E | 🟡 alertes + push, rythme des dépenses, export CSV/texte |
 
 ## Risques techniques identifiés
 

@@ -4,6 +4,7 @@ import { Button, ConfirmButton, Notice, Select, Sheet, TextField } from '@/compo
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
+import { fromTimestamp, toTimestamp } from '@/services/expenseService'
 import { createSubscription, deleteSubscription, updateSubscription } from '@/services/subscriptionService'
 import type { Subscription } from '@/types'
 import type { SubscriptionPeriod } from '@/types/subscription'
@@ -21,6 +22,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
   const [name, setName] = useState(subscription?.name ?? '')
   const [amount, setAmount] = useState(subscription ? String(subscription.amountCents / 100) : '')
   const [period, setPeriod] = useState<SubscriptionPeriod>(subscription?.period ?? 'monthly')
+  const [nextDate, setNextDate] = useState(subscription?.nextDate ? fromTimestamp(subscription.nextDate) : '')
   const [usage, setUsage] = useState<'frequent' | 'occasional' | 'rare' | ''>(subscription?.usage ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -31,7 +33,15 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
     if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0) return setError('Donnez un nom et un montant valide.')
     setError(null)
     setLoading(true)
-    const data = { name: name.trim(), amountCents, period, categoryId: null, nextDate: null, usage: usage || null, archived: false }
+    const data = {
+      name: name.trim(),
+      amountCents,
+      period,
+      categoryId: subscription?.categoryId ?? null,
+      nextDate: nextDate ? toTimestamp(nextDate) : null,
+      usage: usage || null,
+      archived: subscription?.archived ?? false,
+    }
     try {
       if (subscription) await updateSubscription(household.id, subscription.id, data, user)
       else await createSubscription(household.id, data, user)
@@ -64,6 +74,13 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
           <TextField label="Montant" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} trailing={<span className="subtle">€</span>} />
           <SegmentedControl label="Période" value={period} onChange={setPeriod} options={[{ value: 'monthly', label: 'Mensuel' }, { value: 'yearly', label: 'Annuel' }]} />
         </div>
+        <TextField
+          label="Prochain prélèvement (facultatif)"
+          type="date"
+          value={nextDate}
+          onChange={(e) => setNextDate(e.target.value)}
+          hint="Sert au rappel avant prélèvement ; la date avance ensuite toute seule chaque mois ou chaque année."
+        />
         <Select label="Usage (facultatif)" value={usage} onChange={(e) => setUsage(e.target.value as typeof usage)}>
           <option value="">Non renseigné</option>
           <option value="frequent">Fréquent</option>

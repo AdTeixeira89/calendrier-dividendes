@@ -1,0 +1,129 @@
+import { FieldValue, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
+import { evaluateAlerts, withDefaultSettings, type AlertInput, type AlertSettings, type FinancialAlert } from './shared/alerts.js'
+import type { PushPayload } from './shared/push.js'
+
+export interface StoredPushSubscription {
+  endpoint: string
+  p256dh: string
+  auth: string
+}
+
+/** Envoie une notification ; rejette avec `statusCode` 404/410 si l'abonnement n'existe plus. */
+export type PushSender = (subscription: StoredPushSubscription, payload: PushPayload) => Promise<void>
+
+/** Date calendaire à Paris, quel que soit le fuseau du serveur (UTC sur Cloud Functions). */
+export function parisCalendar(now: Date): { today: Date; month: string; previousMonth: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((p) => [p.type, p.value]),
+  )
+  const year = Number(parts.year)
+  const month = Number(parts.month)
+  const today = new Date(year, month - 1, Number(parts.day))
+  const prev = new Date(year, month - 2, 1)
+  const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  return { today, month: key(today), previousMonth: key(prev) }
+}
+
+function monthBounds(month: string): { start: Date; end: Date } {
+  const [year, m] = month.split('-').map(Number)
+  return { start: new Date(Date.UTC(year!, m! - 1, 1)), end: new Date(Date.UTC(year!, m!, 1)) }
+}
+
+const cents = (docs: QueryDocumentSnapshot[]) => docs.reduce((sum, d) => sum + (d.data().amountCents as number), 0)
+
+/** Rassemble, pour un foyer, exactement les données que la carte « Alertes » de l'app utilise. */
+export async function loadAlertInput(db: Firestore, householdId: string, now: Date): Promise<AlertInput> {
+  const { today, month, previousMonth } = parisCalendar(now)
+  const ref = db.collection('households').doc(householdId)
+  const cur = monthBounds(month)
+  const prev = monthBounds(previousMonth)
+
+  const [expenses, incomes, prevExpenses, prevIncomes, debts, budget, categories, subscriptions, settings] = await Promise.all([
+    ref.collection('expenses').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
+    ref.collection('incomes').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
+    ref.collection('expenses').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
+    ref.collection('incomes').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
+    ref.collection('debts').get(),
+    ref.collection('budgets').doc(month).get(),
+    ref.collection('categories').get(),
+    ref.collection('subscriptions').get(),
+    ref.collection('settings').doc('alerts').get(),
+  ])
+
+  return {
+    today,
+    month,
+    expenses: expenses.docs.map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
+    incomeCents: cents(incomes.docs),
+    debtMonthlyCents: debts.docs.reduce((sum, d) => sum + ((d.data().monthlyPaymentCents as number) ?? 0) + ((d.data().insuranceCents as number) ?? 0), 0),
+    budgetLines: (budget.data()?.lines as Record<string, number> | undefined) ?? {},
+    categoryNames: Object.fromEntries(categories.docs.map((d) => [d.id, d.data().name as string])),
+    subscriptions: subscriptions.docs.map((d) => {
+      const data = d.data()
+      return { id: d.id, name: data.name as string, amountCents: data.amountCents as number, period: data.period === 'yearly' ? ('yearly' as const) : ('monthly' as const), nextDate: data.nextDate?.toDate() ?? null, archived: Boolean(data.archived) }
+    }),
+    previousMonth: { month: previousMonth, incomeCents: cents(prevIncomes.docs), expenseCents: cents(prevExpenses.docs) },
+    settings: withDefaultSettings(settings.data() as Partial<AlertSettings> | undefined),
+  }
+}
+
+/** Regroupe les nouvelles alertes en une seule notification (une par alerte serait envahissant). */
+export function buildPayload(alerts: FinancialAlert[]): PushPayload {
+  if (alerts.length === 1) {
+    const [a] = alerts
+    return { title: a!.title, body: a!.message, url: a!.link, tag: a!.key }
+  }
+  return {
+    title: `${alerts.length} nouvelles alertes`,
+    body: alerts.map((a) => `• ${a.title}`).join('\n'),
+    url: '/',
+    tag: 'alerts-summary',
+  }
+}
+
+/** Abonnements push de tous les membres du foyer. */
+async function householdSubscriptions(db: Firestore, householdId: string) {
+  const household = await db.collection('households').doc(householdId).get()
+  const memberIds = (household.data()?.memberIds as string[] | undefined) ?? []
+  const snaps = await Promise.all(memberIds.map((uid) => db.collection('users').doc(uid).collection('pushSubscriptions').get()))
+  return snaps.flatMap((s) => s.docs)
+}
+
+/** Envoie à chaque appareil ; supprime les abonnements expirés (appareil réinitialisé, notifications retirées…). */
+export async function sendToSubscriptions(docs: QueryDocumentSnapshot[], payload: PushPayload, send: PushSender): Promise<number> {
+  let delivered = 0
+  await Promise.all(
+    docs.map(async (doc) => {
+      try {
+        await send(doc.data() as StoredPushSubscription, payload)
+        delivered++
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode
+        if (status === 404 || status === 410) await doc.ref.delete()
+        else throw err
+      }
+    }),
+  )
+  return delivered
+}
+
+/**
+ * Évalue les alertes d'un foyer et notifie uniquement celles qui ne l'ont pas
+ * encore été (mémorisées dans `alerts/notified`). Retourne les alertes envoyées.
+ */
+export async function notifyNewAlerts(db: Firestore, householdId: string, now: Date, send: PushSender): Promise<FinancialAlert[]> {
+  const subscriptions = await householdSubscriptions(db, householdId)
+  if (subscriptions.length === 0) return []
+
+  const alerts = evaluateAlerts(await loadAlertInput(db, householdId, now))
+  const stateRef = db.collection('households').doc(householdId).collection('alerts').doc('notified')
+  const alreadySent = new Set(((await stateRef.get()).data()?.keys as string[] | undefined) ?? [])
+  const fresh = alerts.filter((a) => !alreadySent.has(a.key))
+  if (fresh.length === 0) return []
+
+  await sendToSubscriptions(subscriptions, buildPayload(fresh), send)
+  // On ne garde que les 200 dernières clés : les anciennes portent sur des mois révolus.
+  const keys = [...alreadySent, ...fresh.map((a) => a.key)].slice(-200)
+  await stateRef.set({ householdId, keys, updatedAt: FieldValue.serverTimestamp() })
+  return fresh
+}

@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { AlertSettingsCard } from '@/components/settings/AlertSettingsCard'
+import { PushNotificationsCard } from '@/components/settings/PushNotificationsCard'
 import { Button, Card, Notice, TextField } from '@/components/ui'
+import { useAlertSettings } from '@/hooks/useAlertSettings'
 import { useAuth, useCurrentUser } from '@/hooks/useAuth'
+import { useHousehold } from '@/hooks/useHousehold'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemePreference } from '@/contexts/ThemeContext'
 import { logout } from '@/services/authService'
@@ -20,6 +24,8 @@ export function SettingsPage() {
   const user = useCurrentUser()
   const { profile } = useAuth()
   const { preference, setPreference } = useTheme()
+  const { household } = useHousehold()
+  const alertSettings = useAlertSettings(household.id)
   const [displayName, setDisplayName] = useState(profile?.displayName ?? '')
   const [status, setStatus] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
 
@@ -53,6 +59,10 @@ export function SettingsPage() {
           ))}
         </div>
       </Card>
+
+      {alertSettings && <AlertSettingsCard key={household.id} initial={alertSettings} />}
+
+      <PushNotificationsCard />
 
       <Card title="Profil" subtitle={user.email ?? undefined}>
         <form

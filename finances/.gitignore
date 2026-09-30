@@ -12,3 +12,4 @@ firebase-debug.*
 firestore-debug.log
 ui-debug.log
 coverage
+functions/.secret.local

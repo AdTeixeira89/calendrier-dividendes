@@ -323,3 +323,35 @@ describe('invitations', () => {
     await assertFails(updateDoc(doc(db('bob'), `households/${HID}`), { ownerId: 'bob', updatedAt: serverTimestamp(), updatedBy: 'bob' }))
   })
 })
+
+describe('appareils abonnés aux notifications push', () => {
+  const sub = () => ({
+    endpoint: 'https://web.push.apple.com/abc123',
+    p256dh: 'BKey',
+    auth: 'AuthSecret',
+    userAgent: 'iPhone',
+    createdAt: serverTimestamp(),
+  })
+
+  it("chacun enregistre, lit et supprime ses propres appareils", async () => {
+    const ref = doc(db('alice'), 'users/alice/pushSubscriptions/device1')
+    await assertSucceeds(setDoc(ref, sub()))
+    await assertSucceeds(getDoc(ref))
+    await assertSucceeds(deleteDoc(ref))
+  })
+
+  it("personne ne lit ni n'ajoute d'appareil chez quelqu'un d'autre", async () => {
+    await assertSucceeds(setDoc(doc(db('alice'), 'users/alice/pushSubscriptions/device1'), sub()))
+    await assertFails(getDoc(doc(db('victor'), 'users/alice/pushSubscriptions/device1')))
+    await assertFails(getDocs(collection(db('victor'), 'users/alice/pushSubscriptions')))
+    await assertFails(setDoc(doc(db('victor'), 'users/alice/pushSubscriptions/device2'), sub()))
+    await assertFails(setDoc(doc(db(null), 'users/alice/pushSubscriptions/device3'), sub()))
+  })
+
+  it('refuse un abonnement mal formé', async () => {
+    const ref = doc(db('alice'), 'users/alice/pushSubscriptions/bad')
+    await assertFails(setDoc(ref, { ...sub(), endpoint: 'http://non-securise.example' }))
+    await assertFails(setDoc(ref, { ...sub(), extra: 'champ inconnu' }))
+    await assertFails(setDoc(ref, { ...sub(), auth: '' }))
+  })
+})

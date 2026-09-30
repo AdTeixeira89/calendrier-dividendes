@@ -1,0 +1,65 @@
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.ruleHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.ruleText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+
+.switch {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  accent-color: var(--income);
+  cursor: pointer;
+}
+
+.number {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.numberInput {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.numberInput input {
+  width: 72px;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text);
+  /* 16 px minimum : pas de zoom automatique sur iPhone. */
+  font-size: 16px;
+  text-align: right;
+}
+
+.deviceStatus {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}

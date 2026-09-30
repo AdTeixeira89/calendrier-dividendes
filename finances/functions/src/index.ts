@@ -5,8 +5,11 @@ import { defineSecret } from 'firebase-functions/params'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { setGlobalOptions } from 'firebase-functions/v2'
 import { logger } from 'firebase-functions'
+import webpush from 'web-push'
 import { ClaudeProvider, InvalidAIResponseError, type StructuredAnswer } from './aiProvider.js'
+import { notifyNewAlerts, sendToSubscriptions, type PushSender } from './alertsJob.js'
 import { computeHouseholdFacts, type HouseholdFacts } from './context.js'
+import { VAPID_PUBLIC_KEY } from './shared/push.js'
 
 initializeApp()
 setGlobalOptions({ region: 'europe-west1' })
@@ -125,4 +128,49 @@ export const monthlyReport = onSchedule({ schedule: '0 6 1 * *', timeZone: 'Euro
       logger.error(`Échec du bilan mensuel pour le foyer ${household.id}`, err)
     }
   }
+})
+
+const VAPID_PRIVATE_KEY = defineSecret('VAPID_PRIVATE_KEY')
+
+/** Expéditeur Web Push signé avec les clés VAPID du projet. */
+function webPushSender(): PushSender {
+  const subject = `https://${process.env.GCLOUD_PROJECT}.web.app`
+  return async (subscription, payload) => {
+    await webpush.sendNotification(
+      { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+      JSON.stringify(payload),
+      { vapidDetails: { subject, publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY.value() }, TTL: 60 * 60 * 24 },
+    )
+  }
+}
+
+/** Alertes du jour : chaque matin, notifie les membres des nouvelles alertes de leur foyer. */
+export const dailyAlerts = onSchedule({ schedule: '0 9 * * *', timeZone: 'Europe/Paris', secrets: [VAPID_PRIVATE_KEY] }, async () => {
+  const db = getFirestore()
+  const send = webPushSender()
+  const now = new Date()
+  const households = await db.collection('households').get()
+  for (const household of households.docs) {
+    try {
+      const sent = await notifyNewAlerts(db, household.id, now, send)
+      if (sent.length > 0) logger.info(`Alertes envoyées pour ${household.id}`, { keys: sent.map((a) => a.key) })
+    } catch (err) {
+      logger.error(`Échec des alertes pour le foyer ${household.id}`, err)
+    }
+  }
+})
+
+/** Notification de test sur les appareils de l'utilisateur, pour vérifier l'installation. */
+export const sendTestPush = onCall({ secrets: [VAPID_PRIVATE_KEY] }, async (request) => {
+  const uid = request.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Connexion requise.')
+  const subscriptions = await getFirestore().collection('users').doc(uid).collection('pushSubscriptions').get()
+  if (subscriptions.empty) throw new HttpsError('failed-precondition', "Aucun appareil n'est abonné aux notifications.")
+  const delivered = await sendToSubscriptions(
+    subscriptions.docs,
+    { title: 'Foyer', body: 'Les notifications fonctionnent sur cet appareil.', url: '/parametres', tag: 'test' },
+    webPushSender(),
+  )
+  if (delivered === 0) throw new HttpsError('failed-precondition', "L'abonnement de cet appareil a expiré : réactivez les notifications.")
+  return { delivered }
 })
