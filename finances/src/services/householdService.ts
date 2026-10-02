@@ -6,12 +6,15 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocsFromServer,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore'
 import type { User } from 'firebase/auth'
@@ -120,6 +123,21 @@ export async function joinHousehold(user: User, invite: HouseholdInvite): Promis
  */
 function activateHousehold(uid: string, householdId: string): Promise<void> {
   return updateDoc(userDoc(uid), { activeHouseholdId: householdId, updatedAt: serverTimestamp() })
+}
+
+/**
+ * Profil sans foyer actif alors que l'utilisateur est membre d'un foyer :
+ * on le réactive plutôt que de lui proposer d'en créer ou d'en rejoindre un.
+ * Lecture serveur uniquement : un cache local vide ne prouve rien.
+ * Retourne l'identifiant du foyer réactivé, ou null s'il n'en a vraiment aucun.
+ */
+export async function recoverActiveHousehold(uid: string): Promise<string | null> {
+  const snap = await getDocsFromServer(query(householdsCol(), where('memberIds', 'array-contains', uid), limit(10)))
+  if (snap.empty) return null
+  const owned = snap.docs.find((d) => d.data().ownerId === uid)
+  const householdId = (owned ?? snap.docs[0]!).id
+  await activateHousehold(uid, householdId)
+  return householdId
 }
 
 /** Quitte un foyer (impossible pour le propriétaire). */

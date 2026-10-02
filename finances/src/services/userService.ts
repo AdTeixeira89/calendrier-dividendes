@@ -19,12 +19,12 @@ export function updateUserProfile(uid: string, data: Partial<Pick<UserProfile, '
 /** Écoute temps réel du profil ; `null` si le document n'existe pas (encore). */
 export function watchUserProfile(
   uid: string,
-  onChange: (profile: UserProfile | null) => void,
+  onChange: (profile: UserProfile | null, fromServer: boolean) => void,
   onError: (error: Error) => void,
 ): () => void {
   return onSnapshot(
     userDoc(uid),
-    (snap) => onChange(snap.exists() ? ({ uid: snap.id, ...snap.data() } as UserProfile) : null),
+    (snap) => onChange(snap.exists() ? ({ uid: snap.id, ...snap.data() } as UserProfile) : null, !snap.metadata.fromCache),
     onError,
   )
 }

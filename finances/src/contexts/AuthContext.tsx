@@ -32,9 +32,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return
     return watchUserProfile(
       user.uid,
-      (next) => {
+      (next, fromServer) => {
         // Filet de sécurité : profil absent (ex. inscription interrompue) → on le recrée.
+        // Seulement si le serveur le confirme : sur un appareil neuf ou un réseau
+        // lent, le cache local est vide sans que le profil soit absent, et le
+        // recréer effacerait le foyer actif.
         if (next === null) {
+          if (!fromServer) return
           const displayName = user.displayName?.trim() || user.email?.split('@')[0] || 'Moi'
           createUserProfile(user.uid, { displayName, email: user.email ?? '' }).catch(setError)
           return

@@ -15,9 +15,11 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
@@ -353,5 +355,16 @@ describe('appareils abonnés aux notifications push', () => {
     await assertFails(setDoc(ref, { ...sub(), endpoint: 'http://non-securise.example' }))
     await assertFails(setDoc(ref, { ...sub(), extra: 'champ inconnu' }))
     await assertFails(setDoc(ref, { ...sub(), auth: '' }))
+  })
+})
+
+describe('retrouver son foyer (profil sans foyer actif)', () => {
+  it('un membre peut lister les foyers dont il fait partie', async () => {
+    await assertSucceeds(getDocs(query(collection(db('alice'), 'households'), where('memberIds', 'array-contains', 'alice'))))
+  })
+
+  it("personne ne peut lister les foyers des autres", async () => {
+    await assertFails(getDocs(query(collection(db('bob'), 'households'), where('memberIds', 'array-contains', 'alice'))))
+    await assertFails(getDocs(collection(db('bob'), 'households')))
   })
 })
