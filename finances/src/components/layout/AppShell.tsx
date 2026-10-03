@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
+import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
 import { BottomNav } from './BottomNav'
 import { QuickAddSheet } from './QuickAddSheet'
 import { SideNav } from './SideNav'
@@ -9,6 +10,7 @@ import styles from './AppShell.module.css'
 
 export function AppShell() {
   const [quickAddOpen, setQuickAddOpen] = useState(false)
+  useRecurringExpenses()
   const openQuickAdd = () => setQuickAddOpen(true)
   return (
     <div className={styles.shell}>

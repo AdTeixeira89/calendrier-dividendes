@@ -13,6 +13,7 @@ export function ExpenseRow({ expense, category, onClick }: { expense: Expense; c
         <span className="subtle">
           {day} · {category?.name ?? 'Sans catégorie'}
           {expense.scope === 'personal' && ' · Personnelle'}
+          {expense.recurrenceId && ' · Automatique'}
         </span>
       </span>
       <span className={`${styles.amount} num`}>−{formatCents(expense.amountCents)}</span>

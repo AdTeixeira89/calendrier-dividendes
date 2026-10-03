@@ -30,7 +30,7 @@ export function AbonnementsPage() {
 
   return (
     <div className="stack animate-in">
-      <PageHeader title="Abonnements" subtitle="Tous vos abonnements, leur coût mensuel et annuel." />
+      <PageHeader title="Abonnements et charges fixes" subtitle="Ajoutés automatiquement à vos dépenses, chaque mois." />
 
       <section className="grid-cards" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
         <StatCard label="Coût mensuel" amount={subscriptions ? totalMonthlyCost(subscriptions) : null} tone="expense" icon={<Repeat size={16} />} higherIsBetter={false} footnote={subscriptions ? `${subscriptions.length} abonnement${subscriptions.length > 1 ? 's' : ''}` : undefined} />
@@ -45,13 +45,13 @@ export function AbonnementsPage() {
 
       {canWrite && (
         <Button icon={<Plus size={18} />} onClick={() => setParams((p) => new URLSearchParams({ ...Object.fromEntries(p), ajouter: '1' }))}>
-          Ajouter un abonnement
+          Ajouter un abonnement ou une charge
         </Button>
       )}
 
-      <Card title="Vos abonnements" padded={subscriptions !== undefined && subscriptions.length === 0}>
+      <Card title="Vos abonnements et charges" padded={subscriptions !== undefined && subscriptions.length === 0}>
         {subscriptions === undefined ? null : subscriptions.length === 0 ? (
-          <EmptyState icon={<Repeat size={28} />} title="Aucun abonnement" description="Netflix, Spotify, téléphone, internet, assurances…" />
+          <EmptyState icon={<Repeat size={28} />} title="Aucun abonnement" description="Netflix, Spotify, internet, eau, assurances… chacun est ajouté tout seul aux dépenses de chaque mois." />
         ) : (
           <ul className="stack" style={{ gap: 2 }}>
             {subscriptions.map((subscription) => (

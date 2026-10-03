@@ -1,3 +1,4 @@
+import { FirebaseError } from 'firebase/app'
 import { doc, getDoc, serverTimestamp, writeBatch, type DocumentData, type WriteBatch } from 'firebase/firestore'
 import { db } from '@/firebase/client'
 import { householdCol, householdItemDoc, type HouseholdCollection } from '@/firebase/paths'
@@ -80,6 +81,40 @@ export async function createItem(
   batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, ref.id, 'create', null, data, actor))
   commitInBackground(batch)
   return ref.id
+}
+
+/**
+ * Crée un document à identifiant imposé, une seule fois : ne fait rien (et
+ * retourne false) s'il existe déjà. Sert aux dépenses automatiques, que
+ * plusieurs appareils peuvent tenter de créer en même temps.
+ */
+export async function createItemOnce(
+  householdId: string,
+  collectionName: FinancialCollection,
+  id: string,
+  data: DocumentData,
+  actor: Actor,
+): Promise<boolean> {
+  const ref = householdItemDoc(householdId, collectionName, id)
+  if ((await getDoc(ref)).exists()) return false
+  const batch = writeBatch(db)
+  batch.set(ref, {
+    ...data,
+    householdId,
+    createdBy: actor.uid,
+    createdAt: serverTimestamp(),
+    updatedBy: actor.uid,
+    updatedAt: serverTimestamp(),
+  })
+  batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'create', null, data, actor))
+  try {
+    await batch.commit()
+    return true
+  } catch (error) {
+    // Refus des règles = le document vient d'être créé par un autre appareil.
+    if (error instanceof FirebaseError && error.code === 'permission-denied') return false
+    throw error
+  }
 }
 
 export async function updateItem(

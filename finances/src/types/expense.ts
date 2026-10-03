@@ -18,6 +18,8 @@ export interface Expense extends BaseEntity {
   note: string | null
   /** Chemin Storage du ticket/justificatif scanné, ou null si saisie manuelle. */
   receiptPath: string | null
+  /** Abonnement / charge fixe qui a généré cette dépense automatiquement. */
+  recurrenceId?: string | null
 }
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

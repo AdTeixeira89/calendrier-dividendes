@@ -5,11 +5,15 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { createExpense, deleteExpense, fromTimestamp, toTimestamp, updateExpense } from '@/services/expenseService'
+import { skipOccurrence } from '@/services/recurringExpenseService'
+import { createSubscription } from '@/services/subscriptionService'
 import type { Cents, Category, Expense, PaymentMethod, Scope } from '@/types'
 import { EXPENSE_KIND_LABELS, PAYMENT_METHOD_LABELS, type ExpenseKind } from '@/types/expense'
 import { toUserMessage } from '@/utils/firebaseErrors'
+import { monthKey, shiftMonth } from '@/utils/month'
 import { CategoryPicker } from './CategoryPicker'
 import { AmountField } from './AmountField'
+import { ToggleRow } from './ToggleRow'
 
 /** Pré-remplissage initial (ex. issu du scanner de tickets), ignoré si `expense` est fourni. */
 export interface ExpenseFormInitial {
@@ -44,6 +48,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
   const [scope, setScope] = useState<Scope>(expense?.scope ?? 'shared')
   const [kind, setKind] = useState<ExpenseKind>(expense?.kind ?? 'one_off')
   const [note, setNote] = useState(expense?.note ?? '')
+  const [fixedMonthly, setFixedMonthly] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const receiptPath = expense?.receiptPath ?? initial?.receiptPath ?? null
@@ -51,6 +56,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     if (amountCents === null || amountCents <= 0 || !categoryId) return setError('Renseignez un montant et une catégorie.')
+    if (fixedMonthly && !merchant.trim()) return setError('Donnez un nom à cette charge fixe, par exemple « Eau ».')
     setError(null)
     setLoading(true)
     const data = {
@@ -61,13 +67,31 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
       paymentMethod,
       memberId: memberId || null,
       scope,
-      kind,
+      kind: fixedMonthly ? ('recurring' as ExpenseKind) : kind,
       note: note.trim() || null,
       receiptPath,
     }
     try {
       if (expense) await updateExpense(household.id, expense.id, data, user)
-      else await createExpense(household.id, data, user)
+      else if (fixedMonthly) {
+        // La dépense saisie couvre son propre mois ; la charge fixe prend le relais dès le mois suivant.
+        const subscriptionId = await createSubscription(
+          household.id,
+          {
+            name: merchant.trim(),
+            amountCents,
+            period: 'monthly',
+            categoryId,
+            nextDate: data.date,
+            usage: null,
+            archived: false,
+            autoExpense: true,
+            startMonth: shiftMonth(monthKey(data.date.toDate()), 1),
+          },
+          user,
+        )
+        await createExpense(household.id, { ...data, recurrenceId: subscriptionId }, user)
+      } else await createExpense(household.id, data, user)
       onClose()
     } catch (err) {
       setError(toUserMessage(err))
@@ -80,6 +104,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
     if (!expense) return
     setLoading(true)
     try {
+      if (expense.recurrenceId) await skipOccurrence(household.id, expense.id, expense.recurrenceId, user)
       await deleteExpense(household.id, expense.id, user)
       onClose()
     } catch (err) {
@@ -103,8 +128,28 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
             </span>
           </Notice>
         )}
+        {expense?.recurrenceId && (
+          <Notice tone="info">
+            Dépense ajoutée automatiquement chaque mois. Cette modification ne change que ce mois-ci ; pour les mois suivants, modifiez la charge dans
+            Abonnements et charges fixes.
+          </Notice>
+        )}
         <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
-        <TextField label="Commerçant (facultatif)" maxLength={120} value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+        <TextField
+          label={fixedMonthly ? 'Nom de la charge fixe' : 'Commerçant (facultatif)'}
+          placeholder={fixedMonthly ? 'Ex. Eau, assurance habitation…' : undefined}
+          maxLength={120}
+          value={merchant}
+          onChange={(e) => setMerchant(e.target.value)}
+        />
+        {!expense && (
+          <ToggleRow
+            label="Même montant chaque mois"
+            description="Eau, assurance, loyer… ajoutée automatiquement aux dépenses de chaque mois, même si la consommation varie."
+            checked={fixedMonthly}
+            onChange={setFixedMonthly}
+          />
+        )}
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <Select label="Moyen de paiement" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
             {PAYMENT_METHODS.map((m) => (
@@ -122,7 +167,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
           </Select>
         </div>
         <SegmentedControl label="Portée" value={scope} onChange={setScope} options={[{ value: 'shared', label: 'Commune' }, { value: 'personal', label: 'Personnelle' }]} />
-        <SegmentedControl label="Type" value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: EXPENSE_KIND_LABELS[k] }))} />
+        {!fixedMonthly && <SegmentedControl label="Type" value={kind} onChange={setKind} options={KINDS.map((k) => ({ value: k, label: EXPENSE_KIND_LABELS[k] }))} />}
         <TextArea label="Commentaire (facultatif)" maxLength={280} value={note} onChange={(e) => setNote(e.target.value)} />
         <div className="row">
           <Button type="submit" size="lg" block loading={loading}>

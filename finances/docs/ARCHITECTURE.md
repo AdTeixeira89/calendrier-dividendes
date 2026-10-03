@@ -173,6 +173,20 @@ functions/src/shared/alerts.ts   règles pures (budget, dépenses > revenus, pr�
 - Web Push standard, sans Firebase Messaging : clé publique VAPID dans `shared/push.ts`, clé privée dans Secret Manager (`VAPID_PRIVATE_KEY`).
 - Sur iPhone, les notifications exigent l'app installée sur l'écran d'accueil (iOS 16.4+).
 
+## 6 ter. Dépenses automatiques (abonnements et charges fixes)
+
+Un abonnement ou une charge fixe (`subscriptions`) crée **une vraie dépense par mois** (`expenses`), à l'ouverture
+de l'app (`useRecurringExpenses`, monté dans la coque). Liste, budgets, graphiques, alertes et exports fonctionnent
+donc sans cas particulier.
+
+- Identifiant fixe `{abonnement}_{AAAA-MM}` : une occurrence n'existe qu'une fois, même si deux appareils s'ouvrent ensemble.
+- `startMonth` : premier mois généré ; les mois manqués (app non ouverte) sont rattrapés jusqu'au mois en cours.
+- Mensuel : chaque mois. Annuel : mois anniversaire seulement, montant entier. Jour = jour du prélèvement, borné à la fin du mois.
+- Supprimer une dépense automatique mémorise le mois (`skippedMonths`) : elle ne revient pas.
+- Modifier l'abonnement met à jour le mois en cours ; les mois passés restent tels quels.
+- Formulaire de dépense : « Même montant chaque mois » crée la charge fixe, qui prend le relais dès le mois suivant.
+- Les mensualités de prêts restent, elles, un total calculé (non matérialisé en dépenses).
+
 ## 7. Architecture OCR (phase 4)
 
 ```
