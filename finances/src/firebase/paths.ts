@@ -6,6 +6,7 @@ export type HouseholdCollection =
   | 'members'
   | 'auditLog'
   | 'incomes'
+  | 'recurringIncomes'
   | 'expenses'
   | 'categories'
   | 'budgets'

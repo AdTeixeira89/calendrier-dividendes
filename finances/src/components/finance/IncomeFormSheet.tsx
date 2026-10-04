@@ -6,10 +6,13 @@ import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { fromTimestamp, toTimestamp } from '@/services/expenseService'
 import { createIncome, deleteIncome, updateIncome } from '@/services/incomeService'
+import { createRecurringIncome, skipIncomeOccurrence } from '@/services/recurringIncomeService'
 import type { Cents, Income, Scope } from '@/types'
 import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS, type IncomeFrequency, type IncomeType } from '@/types/income'
 import { toUserMessage } from '@/utils/firebaseErrors'
+import { monthKey, shiftMonth } from '@/utils/month'
 import { AmountField } from './AmountField'
+import { ToggleRow } from './ToggleRow'
 
 interface IncomeFormSheetProps {
   open: boolean
@@ -32,6 +35,7 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
   const [scope, setScope] = useState<Scope>(income?.scope ?? 'personal')
   const [frequency, setFrequency] = useState<IncomeFrequency>(income?.frequency ?? 'monthly')
   const [note, setNote] = useState(income?.note ?? '')
+  const [fixedMonthly, setFixedMonthly] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -47,12 +51,29 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
       label: label.trim() || null,
       memberId: memberId || null,
       scope,
-      frequency,
+      frequency: fixedMonthly ? ('monthly' as IncomeFrequency) : frequency,
       note: note.trim() || null,
     }
     try {
       if (income) await updateIncome(household.id, income.id, data, user)
-      else await createIncome(household.id, data, user)
+      else if (fixedMonthly) {
+        // Le revenu saisi couvre son propre mois ; le revenu fixe prend le relais dès le mois suivant.
+        const recurringId = await createRecurringIncome(
+          household.id,
+          {
+            label: data.label ?? INCOME_TYPE_LABELS[type],
+            amountCents,
+            type,
+            memberId: data.memberId,
+            scope,
+            dayOfMonth: data.date.toDate().getDate(),
+            startMonth: shiftMonth(monthKey(data.date.toDate()), 1),
+            archived: false,
+          },
+          user,
+        )
+        await createIncome(household.id, { ...data, recurrenceId: recurringId }, user)
+      } else await createIncome(household.id, data, user)
       onClose()
     } catch (err) {
       setError(toUserMessage(err))
@@ -65,6 +86,7 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
     if (!income) return
     setLoading(true)
     try {
+      if (income.recurrenceId) await skipIncomeOccurrence(household.id, income.id, income.recurrenceId, user)
       await deleteIncome(household.id, income.id, user)
       onClose()
     } catch (err) {
@@ -77,6 +99,12 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
     <Sheet open={open} onClose={onClose} title={income ? 'Modifier le revenu' : 'Nouveau revenu'}>
       <form className="stack" onSubmit={onSubmit} noValidate>
         {error && <Notice tone="danger">{error}</Notice>}
+        {income?.recurrenceId && (
+          <Notice tone="info">
+            Revenu ajouté automatiquement chaque mois. Cette modification ne change que ce mois-ci ; pour les mois suivants (augmentation, fin de contrat),
+            modifiez le revenu fixe dans la carte « Revenus fixes ».
+          </Notice>
+        )}
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <AmountField value={amountCents} onChange={setAmountCents} autoFocus={!income} />
           <TextField label="Date" type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
@@ -98,7 +126,15 @@ export function IncomeFormSheet({ open, onClose, income, defaultDate }: IncomeFo
           </Select>
         </div>
         <TextField label="Libellé (facultatif)" placeholder="Ex. Employeur, locataire…" maxLength={120} value={label} onChange={(e) => setLabel(e.target.value)} />
-        <SegmentedControl label="Fréquence" value={frequency} onChange={setFrequency} options={FREQUENCIES.map((f) => ({ value: f, label: INCOME_FREQUENCY_LABELS[f] }))} />
+        {!income && (
+          <ToggleRow
+            label="Même montant chaque mois"
+            description="Salaire, pension, allocation… ajouté automatiquement aux revenus de chaque mois."
+            checked={fixedMonthly}
+            onChange={setFixedMonthly}
+          />
+        )}
+        {!fixedMonthly && <SegmentedControl label="Fréquence" value={frequency} onChange={setFrequency} options={FREQUENCIES.map((f) => ({ value: f, label: INCOME_FREQUENCY_LABELS[f] }))} />}
         <SegmentedControl label="Portée" value={scope} onChange={setScope} options={[{ value: 'personal', label: 'Personnel' }, { value: 'shared', label: 'Foyer' }]} />
         <TextArea label="Commentaire (facultatif)" maxLength={280} value={note} onChange={(e) => setNote(e.target.value)} />
         <Button type="submit" size="lg" block loading={loading}>

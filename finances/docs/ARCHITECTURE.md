@@ -186,6 +186,9 @@ donc sans cas particulier.
 - Modifier l'abonnement met à jour le mois en cours ; les mois passés restent tels quels.
 - Formulaire de dépense : « Même montant chaque mois » crée la charge fixe, qui prend le relais dès le mois suivant.
 - Les mensualités de prêts restent, elles, un total calculé (non matérialisé en dépenses).
+- **Revenus fixes** (salaire, pension…) : même mécanique avec la collection `recurringIncomes` (libellé, montant, type, personne, portée, jour du
+  versement, `startMonth`, `skippedMonths`) ; une ligne `incomes` par mois, identifiant `{revenu fixe}_{AAAA-MM}`. Une personne qui quitte le foyer
+  fait passer son revenu fixe au foyer. Carte « Revenus fixes » sur la page Revenus : modifier (augmentation dès le mois en cours) ou arrêter.
 
 ## 6 quater. Import de relevé bancaire (CSV)
 

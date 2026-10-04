@@ -14,6 +14,8 @@ export interface Income extends BaseEntity {
   scope: Scope
   frequency: IncomeFrequency
   note: string | null
+  /** Revenu fixe qui a généré cette ligne automatiquement. */
+  recurrenceId?: string | null
 }
 
 export const INCOME_TYPE_LABELS: Record<IncomeType, string> = {

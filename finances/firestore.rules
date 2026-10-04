@@ -75,7 +75,7 @@ service cloud.firestore {
     // Collections de données financières rattachées à un foyer.
     function isFinancialCollection(name) {
       return name in [
-        'incomes', 'expenses', 'categories', 'budgets', 'debts', 'savingsGoals',
+        'incomes', 'recurringIncomes', 'expenses', 'categories', 'budgets', 'debts', 'savingsGoals',
         'goals', 'assets', 'subscriptions', 'documents', 'receipts', 'alerts',
         'reports', 'settings'
       ];

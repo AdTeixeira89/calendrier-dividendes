@@ -13,6 +13,7 @@ export function IncomeRow({ income, onClick }: { income: Income; onClick: () => 
         <strong>{income.label || INCOME_TYPE_LABELS[income.type]}</strong>
         <span className="subtle">
           {day} · {INCOME_TYPE_LABELS[income.type]}
+          {income.recurrenceId && ' · Automatique'}
         </span>
       </span>
       <span className={`${styles.amount} num`} style={{ color: 'var(--income)' }}>

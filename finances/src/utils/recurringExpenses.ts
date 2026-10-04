@@ -31,10 +31,17 @@ export function resolveCategoryId(categoryId: string | null, categories: Categor
   return (usable.find((c) => c.name === 'Autres') ?? usable.find((c) => !c.parentId))?.id ?? null
 }
 
-function monthsBetween(from: MonthKey, to: MonthKey): MonthKey[] {
+export function monthsBetween(from: MonthKey, to: MonthKey): MonthKey[] {
   const months: MonthKey[] = []
   for (let m = from; m <= to; m = shiftMonth(m, 1)) months.push(m)
   return months
+}
+
+/** Date de l'occurrence d'un mois : jour demandé borné à la fin du mois (un 31 devient un 30), à midi comme les saisies manuelles. */
+export function occurrenceDate(month: MonthKey, day: number): Date {
+  const { start } = monthRange(month)
+  const lastDay = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
+  return new Date(start.getFullYear(), start.getMonth(), Math.min(day, lastDay), 12)
 }
 
 /**
@@ -58,15 +65,12 @@ export function dueOccurrences(subscription: Subscription, categories: Category[
   const occurrences: DueOccurrence[] = []
   for (const month of monthsBetween(start, current)) {
     if (subscription.skippedMonths?.includes(month)) continue
-    const { start: first } = monthRange(month)
-    if (subscription.period === 'yearly' && first.getMonth() !== anniversaryMonthIndex) continue
-    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+    if (subscription.period === 'yearly' && monthRange(month).start.getMonth() !== anniversaryMonthIndex) continue
     occurrences.push({
       id: occurrenceId(subscription.id, month),
       subscriptionId: subscription.id,
       month,
-      // Midi, comme les dates saisies à la main : aucun décalage de jour selon le fuseau.
-      date: new Date(first.getFullYear(), first.getMonth(), Math.min(day, lastDay), 12),
+      date: occurrenceDate(month, day),
       amountCents: subscription.amountCents,
       categoryId,
       merchant: subscription.name,

@@ -239,6 +239,20 @@ describe('données financières', () => {
     await assertFails(deleteDoc(doc(db('victor'), `households/${HID}/expenses/e1`)))
   })
 
+  it('les revenus fixes suivent les mêmes règles (lecture membre, écriture réservée, métadonnées vérifiées)', async () => {
+    const fixed = (by: string, extra: Record<string, unknown> = {}) => ({
+      householdId: HID, label: 'Salaire', amountCents: 215000, type: 'salary', memberId: by, scope: 'personal', dayOfMonth: 1, startMonth: '2026-10', archived: false,
+      createdBy: by, createdAt: serverTimestamp(), updatedBy: by, updatedAt: serverTimestamp(), ...extra,
+    })
+    const ref = doc(db('alice'), `households/${HID}/recurringIncomes/r1`)
+    await assertSucceeds(setDoc(ref, fixed('alice')))
+    await assertSucceeds(getDoc(doc(db('victor'), `households/${HID}/recurringIncomes/r1`)))
+    await assertFails(setDoc(doc(db('victor'), `households/${HID}/recurringIncomes/r2`), fixed('victor')))
+    await assertFails(setDoc(doc(db('alice'), `households/${HID}/recurringIncomes/r3`), fixed('alice', { amountCents: 21.5 })))
+    await assertFails(setDoc(doc(db('alice'), `households/${HID}/recurringIncomes/r4`), fixed('alice', { memberId: 'mallory' })))
+    await assertFails(getDoc(doc(db('bob'), `households/${HID}/recurringIncomes/r1`)))
+  })
+
   it('le journal des modifications est en ajout seul', async () => {
     const f = db('alice')
     const entry = {
