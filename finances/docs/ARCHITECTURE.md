@@ -187,6 +187,20 @@ donc sans cas particulier.
 - Formulaire de dépense : « Même montant chaque mois » crée la charge fixe, qui prend le relais dès le mois suivant.
 - Les mensualités de prêts restent, elles, un total calculé (non matérialisé en dépenses).
 
+## 6 quater. Import de relevé bancaire (CSV)
+
+Page `/importer-releve`. Tout se passe dans le navigateur : le fichier n'est jamais envoyé, seules les opérations validées sont écrites.
+
+```
+fichier ─▶ decodeStatement (UTF-8, sinon Windows-1252) ─▶ parseBankCsv (séparateur, en-tête, colonnes détectés)
+        ─▶ buildImportPreview ─▶ écran de relecture (cases, catégories) ─▶ importStatement ─▶ expenses / incomes
+```
+
+- Catégorie suggérée : d'abord l'historique du foyer (commerçant → catégorie la plus fréquente sur 12 mois), puis des règles de commerçants courants ; sinon « À vérifier » (jamais inventée, « Autres » par défaut).
+- Décochés d'office : virements entre ses comptes, opérations déjà importées, doublons probables d'une saisie manuelle (même montant, ±1 jour).
+- Idempotent : l'identifiant d'une opération (`imp_` + empreinte de date, montant, libellé, rang) est déduit de son contenu ; réimporter un relevé, ou un relevé qui en chevauche un autre, ne crée rien en double.
+- Écriture par lots de 100 (`createItemsOnce`), avec journal d'audit comme toute écriture financière.
+
 ## 7. Architecture OCR (phase 4)
 
 ```

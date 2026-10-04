@@ -16,6 +16,7 @@ import { ExpensesPage } from '@/pages/ExpensesPage'
 import { HomePage } from '@/pages/HomePage'
 import { HouseholdPage } from '@/pages/HouseholdPage'
 import { IAFinancePage } from '@/pages/IAFinancePage'
+import { ImportStatementPage } from '@/pages/ImportStatementPage'
 import { IncomesPage } from '@/pages/IncomesPage'
 import { MorePage } from '@/pages/MorePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -46,6 +47,7 @@ export default function App() {
                     <Route index element={<HomePage />} />
                     <Route path="depenses" element={<ExpensesPage />} />
                     <Route path="revenus" element={<IncomesPage />} />
+                    <Route path="importer-releve" element={<ImportStatementPage />} />
                     <Route path="categories" element={<CategoriesPage />} />
                     <Route path="epargne" element={<EpargnePage />} />
                     <Route path="dette" element={<DettePage />} />

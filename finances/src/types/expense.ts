@@ -20,6 +20,8 @@ export interface Expense extends BaseEntity {
   receiptPath: string | null
   /** Abonnement / charge fixe qui a généré cette dépense automatiquement. */
   recurrenceId?: string | null
+  /** Origine de la saisie quand elle n'est pas manuelle (relevé bancaire importé). */
+  source?: 'import'
 }
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

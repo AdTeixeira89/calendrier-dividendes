@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Plus, Receipt, Settings2 } from 'lucide-react'
+import { FileUp, Plus, Receipt, Settings2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BudgetSection } from '@/components/finance/BudgetSection'
 import { ExpenseFormSheet } from '@/components/finance/ExpenseFormSheet'
@@ -72,6 +72,13 @@ export function ExpensesPage() {
         <Button icon={<Plus size={18} />} onClick={() => setParams((p) => new URLSearchParams({ ...Object.fromEntries(p), ajouter: '1' }))}>
           Ajouter une dépense
         </Button>
+      )}
+      {canWrite && (
+        <Link to="/importer-releve">
+          <Button variant="secondary" block icon={<FileUp size={18} />}>
+            Importer un relevé bancaire
+          </Button>
+        </Link>
       )}
 
       <Card title="Transactions" padded={expenses !== undefined && expenses.length === 0}>

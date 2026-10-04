@@ -117,6 +117,50 @@ export async function createItemOnce(
   }
 }
 
+const CHUNK = 100
+
+/**
+ * Crée plusieurs documents à identifiant imposé, ignorant ceux qui existent
+ * déjà (réimport d'un même relevé). Par lots de 100 : 2 écritures chacun
+ * (document + journal), sous la limite de 500 d'un batch Firestore.
+ * Retourne le nombre de documents réellement créés.
+ */
+export async function createItemsOnce(
+  householdId: string,
+  collectionName: FinancialCollection,
+  items: { id: string; data: DocumentData }[],
+  actor: Actor,
+): Promise<number> {
+  let created = 0
+  for (let start = 0; start < items.length; start += CHUNK) {
+    const chunk = items.slice(start, start + CHUNK)
+    const existing = await Promise.all(chunk.map((item) => getDoc(householdItemDoc(householdId, collectionName, item.id))))
+    const fresh = chunk.filter((_, i) => !existing[i]!.exists())
+    if (fresh.length === 0) continue
+    const batch = writeBatch(db)
+    for (const item of fresh) {
+      batch.set(householdItemDoc(householdId, collectionName, item.id), {
+        ...item.data,
+        householdId,
+        createdBy: actor.uid,
+        createdAt: serverTimestamp(),
+        updatedBy: actor.uid,
+        updatedAt: serverTimestamp(),
+      })
+      batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, item.id, 'create', null, item.data, actor))
+    }
+    try {
+      await batch.commit()
+      created += fresh.length
+    } catch (error) {
+      if (!(error instanceof FirebaseError && error.code === 'permission-denied')) throw error
+      // Un autre appareil a créé l'un d'eux entre-temps : on reprend un par un.
+      for (const item of fresh) if (await createItemOnce(householdId, collectionName, item.id, item.data, actor)) created++
+    }
+  }
+  return created
+}
+
 export async function updateItem(
   householdId: string,
   collectionName: FinancialCollection,
