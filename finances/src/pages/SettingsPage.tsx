@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { DeleteAccountCard } from '@/components/settings/DeleteAccountCard'
 import { AlertSettingsCard } from '@/components/settings/AlertSettingsCard'
 import { PushNotificationsCard } from '@/components/settings/PushNotificationsCard'
 import { Button, Card, Notice, TextField } from '@/components/ui'
@@ -87,9 +88,11 @@ export function SettingsPage() {
         </p>
       </Card>
 
-      <Button variant="danger" icon={<LogOut size={18} />} onClick={() => void logout()}>
+      <Button variant="secondary" icon={<LogOut size={18} />} onClick={() => void logout()}>
         Se déconnecter
       </Button>
+
+      <DeleteAccountCard />
     </div>
   )
 }

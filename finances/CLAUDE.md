@@ -24,12 +24,18 @@ Si la réponse est non à la 1 ou à la 2, on ne la fait pas. Le dire à l'utili
 - Une fonctionnalité qui vit côté web ne doit pas dépendre d'API réservées au navigateur sans solution native équivalente.
 - Mises à jour : privilégier ce qui se déploie sans repasser par les stores (web, règles, Cloud Functions).
 
+## Décisions prises (04/10/2026)
+
+- Voie technique : **Capacitor** (l'app web actuelle enveloppée en natif Android + iOS). Réécriture native à n'envisager que si des limites réelles apparaissent.
+- Éditeur des stores : **l'utilisateur en nom propre** (compte individuel). Ses nom et e-mail de contact figureront dans la politique de confidentialité.
+- Modèle : **gratuite + abonnement premium**. Tout paiement devra passer par les achats intégrés Apple / Google (15 à 30 % de commission) : ne rien construire qui contourne cela, et garder les fonctions premium isolables.
+
 ## Exigences des stores (état au 04/10/2026) — à traiter avant toute soumission
 
 | Exigence | État |
 | --- | --- |
 | Coque native Android + iOS (Capacitor) | À faire |
-| Suppression de compte depuis l'app, avec effacement des données (Apple 5.1.1(v), Google) | À faire |
+| Suppression de compte depuis l'app, avec effacement des données (Apple 5.1.1(v), Google) | Fait (Paramètres → Supprimer mon compte ; fonction `deleteAccount`) |
 | Politique de confidentialité + conditions d'utilisation (pages publiques, liens dans l'app et les fiches) | À faire (informations de l'éditeur requises) |
 | Déclarations Google « Sécurité des données » / Apple « Confidentialité » | À faire |
 | App Check (Play Integrity / App Attest) | À faire |

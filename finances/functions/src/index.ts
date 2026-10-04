@@ -1,4 +1,6 @@
 import { initializeApp } from 'firebase-admin/app'
+import { getAuth } from 'firebase-admin/auth'
+import { getStorage } from 'firebase-admin/storage'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
@@ -7,6 +9,7 @@ import { setGlobalOptions } from 'firebase-functions/v2'
 import { logger } from 'firebase-functions'
 import webpush from 'web-push'
 import { ClaudeProvider, InvalidAIResponseError, type StructuredAnswer } from './aiProvider.js'
+import { deleteAccountData } from './accountDeletion.js'
 import { notifyNewAlerts, sendToSubscriptions, type PushSender } from './alertsJob.js'
 import { computeHouseholdFacts, type HouseholdFacts } from './context.js'
 import { VAPID_PUBLIC_KEY } from './shared/push.js'
@@ -173,4 +176,22 @@ export const sendTestPush = onCall({ secrets: [VAPID_PRIVATE_KEY] }, async (requ
   )
   if (delivered === 0) throw new HttpsError('failed-precondition', "L'abonnement de cet appareil a expiré : réactivez les notifications.")
   return { delivered }
+})
+
+/** Suppression définitive du compte de l'appelant, après une reconnexion récente (mot de passe confirmé). */
+export const deleteAccount = onCall(async (request) => {
+  const uid = request.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Connexion requise.')
+  const authTime = request.auth?.token.auth_time
+  if (typeof authTime !== 'number' || Date.now() / 1000 - authTime > 5 * 60) {
+    throw new HttpsError('failed-precondition', 'Par sécurité, confirmez votre mot de passe puis réessayez.')
+  }
+  try {
+    const report = await deleteAccountData(getFirestore(), getAuth(), getStorage().bucket(), uid)
+    logger.info('Compte supprimé', report)
+    return report
+  } catch (err) {
+    logger.error('Échec de la suppression du compte', err)
+    throw new HttpsError('internal', 'La suppression a échoué. Vos données sont intactes ou partiellement effacées : réessayez.')
+  }
 })

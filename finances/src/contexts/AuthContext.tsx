@@ -1,6 +1,7 @@
 import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { onAuthStateChanged, type User } from 'firebase/auth'
 import { auth } from '@/firebase/client'
+import { accountDeletion } from '@/services/accountService'
 import { createUserProfile, watchUserProfile } from '@/services/userService'
 import type { UserProfile } from '@/types'
 
@@ -38,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // lent, le cache local est vide sans que le profil soit absent, et le
         // recréer effacerait le foyer actif.
         if (next === null) {
-          if (!fromServer) return
+          if (!fromServer || accountDeletion.inProgress) return
           const displayName = user.displayName?.trim() || user.email?.split('@')[0] || 'Moi'
           createUserProfile(user.uid, { displayName, email: user.email ?? '' }).catch(setError)
           return
