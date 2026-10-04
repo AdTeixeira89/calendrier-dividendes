@@ -46,6 +46,6 @@ export const QUICK_ACTIONS: NavItem[] = [
   { to: '/revenus?ajouter=1', label: 'Revenu', icon: Banknote },
   { to: '/epargne?ajouter=1', label: 'Épargne', icon: Wallet },
   { to: '/dette?ajouter=1', label: 'Dette', icon: CreditCard },
-  { to: '/documents?scanner=1', label: 'Ticket', icon: Camera },
+  { to: '/depenses?scanner=1', label: 'Ticket', icon: Camera },
   { to: '/documents?importer=1', label: 'Document', icon: FileText },
 ]

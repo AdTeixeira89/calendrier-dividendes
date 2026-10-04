@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { FileUp, Plus, Receipt, Settings2 } from 'lucide-react'
+import { Camera, FileUp, Plus, Receipt, Settings2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BudgetSection } from '@/components/finance/BudgetSection'
-import { ExpenseFormSheet } from '@/components/finance/ExpenseFormSheet'
+import { ExpenseFormSheet, type ExpenseFormInitial } from '@/components/finance/ExpenseFormSheet'
 import { MonthNav } from '@/components/finance/MonthNav'
 import { ExpenseRow } from '@/components/finance/ExpenseRow'
+import { ScanReceiptSheet } from '@/components/finance/ScanReceiptSheet'
 import { SpendingPaceChart } from '@/components/finance/SpendingPaceChart'
 import { Button, Card, EmptyState, StatCard } from '@/components/ui'
 import { useCategories } from '@/hooks/useCategories'
@@ -28,15 +29,21 @@ export function ExpensesPage() {
   const prevExpenses = useMonthlyExpenses(household.id, prevMonth)
   const [params, setParams] = useSearchParams()
   const [editing, setEditing] = useState<Expense | undefined>(undefined)
-  const sheetOpen = params.has('ajouter') || Boolean(editing)
+  // Résultat du scan d'un ticket : ouvre le formulaire de dépense pré-rempli, à valider par l'utilisateur.
+  const [scanned, setScanned] = useState<ExpenseFormInitial | undefined>(undefined)
+  const sheetOpen = params.has('ajouter') || Boolean(editing) || Boolean(scanned)
+
+  function closeParam(name: string) {
+    if (!params.has(name)) return
+    const next = new URLSearchParams(params)
+    next.delete(name)
+    setParams(next, { replace: true })
+  }
 
   function closeSheet() {
     setEditing(undefined)
-    if (params.has('ajouter')) {
-      const next = new URLSearchParams(params)
-      next.delete('ajouter')
-      setParams(next, { replace: true })
-    }
+    setScanned(undefined)
+    closeParam('ajouter')
   }
 
   const total = expenses ? sumCents(expenses) : null
@@ -74,11 +81,16 @@ export function ExpensesPage() {
         </Button>
       )}
       {canWrite && (
-        <Link to="/importer-releve">
-          <Button variant="secondary" block icon={<FileUp size={18} />}>
-            Importer un relevé bancaire
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+          <Button variant="secondary" block icon={<Camera size={18} />} onClick={() => setParams((p) => new URLSearchParams({ ...Object.fromEntries(p), scanner: '1' }))}>
+            Scanner un ticket
           </Button>
-        </Link>
+          <Link to="/importer-releve">
+            <Button variant="secondary" block icon={<FileUp size={18} />}>
+              Importer un relevé
+            </Button>
+          </Link>
+        </div>
       )}
 
       <Card title="Transactions" padded={expenses !== undefined && expenses.length === 0}>
@@ -98,8 +110,25 @@ export function ExpensesPage() {
       {!loading && categories.length > 0 && <BudgetSection month={month} categories={categories} expenses={expenses} budget={budget} />}
 
       {categories !== undefined && (
-        <ExpenseFormSheet key={editing?.id ?? 'new'} open={sheetOpen} onClose={closeSheet} categories={categories} expense={editing} defaultDate={monthDefaultDate(month)} />
+        <ExpenseFormSheet
+          key={editing?.id ?? scanned?.receiptPath ?? 'new'}
+          open={sheetOpen}
+          onClose={closeSheet}
+          categories={categories}
+          expense={editing}
+          defaultDate={monthDefaultDate(month)}
+          initial={scanned}
+        />
       )}
+
+      <ScanReceiptSheet
+        open={params.has('scanner')}
+        onClose={() => closeParam('scanner')}
+        onExtracted={(initial) => {
+          closeParam('scanner')
+          setScanned(initial)
+        }}
+      />
     </div>
   )
 }

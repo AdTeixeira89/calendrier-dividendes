@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, Circle, PiggyBank, Wallet } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AlertsCard } from '@/components/finance/AlertsCard'
+import { IncomeExpenseLineChart } from '@/components/finance/IncomeExpenseLineChart'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useDebts } from '@/hooks/useDebts'
@@ -9,6 +10,7 @@ import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
+import { useTrend } from '@/hooks/useTrend'
 import { aggregateDebts } from '@/utils/debt'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
@@ -28,6 +30,7 @@ export function HomePage() {
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
   const alerts = useFinancialAlerts(household.id)
+  const trend = useTrend(household.id, month, 6)
 
   const hasData = Boolean(expenses?.length || incomes?.length)
 
@@ -88,6 +91,13 @@ export function HomePage() {
       </section>
 
       {alerts && alerts.length > 0 && <AlertsCard alerts={alerts} />}
+
+      {trend && trend.some((p) => p.incomeCents > 0 || p.expenseCents > 0) && (
+        <Card title="Revenus et dépenses" subtitle="Mois par mois, 6 derniers mois">
+          {/* Mensualités de prêts ajoutées à chaque mois (montant actuel, faute d'historique), comme dans Analyse. */}
+          <IncomeExpenseLineChart points={trend.map((p) => ({ ...p, expenseCents: p.expenseCents + debtMonthlyCents }))} />
+        </Card>
+      )}
 
       {!hasData && (
         <Card title="Premiers pas" subtitle={`${doneCount} / ${steps.length} étapes`}>
