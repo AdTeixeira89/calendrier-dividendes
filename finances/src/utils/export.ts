@@ -103,7 +103,7 @@ export function buildFinancialSummaryText({ periodLabel, expenses, incomes, cate
     lines.push("Objectifs d'épargne :")
     for (const g of activeGoals) {
       const progress = g.targetCents > 0 ? Math.round((g.currentCents / g.targetCents) * 1000) / 10 : null
-      lines.push(`- ${g.name} : ${formatCents(g.currentCents)} sur ${formatCents(g.targetCents)}${progress !== null ? ` (${progress} %)` : ''}`)
+      lines.push(`- ${g.name} : ${formatCents(g.currentCents)}${g.targetCents > 0 ? ` sur ${formatCents(g.targetCents)}` : ' (sans objectif chiffré)'}${progress !== null ? ` (${progress} %)` : ''}`)
     }
     lines.push('')
   }

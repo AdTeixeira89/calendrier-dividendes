@@ -1,5 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
-import type { BaseEntity, Cents } from './common'
+import type { BaseEntity, Cents, Scope } from './common'
 
 /** households/{householdId}/savingsGoals/{id} */
 export interface SavingsGoal extends BaseEntity {
@@ -12,4 +12,8 @@ export interface SavingsGoal extends BaseEntity {
   /** Versement mensuel prévu, pour estimer la date d'atteinte. */
   plannedMonthlyCents: Cents
   archived: boolean
+  /** Absent sur les anciens objectifs : traités comme communs. */
+  scope?: Scope
+  /** Propriétaire quand l'épargne est personnelle. */
+  memberId?: string | null
 }
