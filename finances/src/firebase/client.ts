@@ -4,7 +4,7 @@ import {
   connectFirestoreEmulator,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
 } from 'firebase/firestore'
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions'
 import { connectStorageEmulator, getStorage } from 'firebase/storage'
@@ -19,7 +19,7 @@ auth.languageCode = 'fr'
 // Cache local persistant : lecture hors-ligne et écritures mises en file
 // d'attente, synchronisées automatiquement au retour de la connexion.
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager({}) }),
 })
 
 export const storage = getStorage(app)

@@ -1,5 +1,5 @@
 import { FirebaseError } from 'firebase/app'
-import { doc, getDoc, serverTimestamp, writeBatch, type DocumentData, type WriteBatch } from 'firebase/firestore'
+import { doc, getDoc, getDocFromCache, serverTimestamp, writeBatch, type DocumentData, type DocumentReference, type WriteBatch } from 'firebase/firestore'
 import { db } from '@/firebase/client'
 import { householdCol, householdItemDoc, type HouseholdCollection } from '@/firebase/paths'
 import type { AuditAction } from '@/types'
@@ -16,6 +16,26 @@ type FinancialCollection = Exclude<HouseholdCollection, 'members' | 'auditLog'>
 
 interface Actor {
   uid: string
+}
+
+const READ_TIMEOUT_MS = 4000
+
+/**
+ * Lecture « avant modification » qui ne doit jamais bloquer l'interface : le
+ * cache local d'abord (les listes affichées y sont déjà), sinon le serveur,
+ * mais au plus quelques secondes (réseau mobile instable) — le journal
+ * d'audit perd alors l'ancienne valeur plutôt que de laisser l'app figée.
+ */
+export async function readBefore(ref: DocumentReference): Promise<DocumentData | null> {
+  try {
+    const cached = await getDocFromCache(ref)
+    if (cached.exists()) return cached.data()
+  } catch {
+    // Pas dans le cache : on tente le serveur.
+  }
+  const server = getDoc(ref).then((snap) => snap.data() ?? null)
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), READ_TIMEOUT_MS))
+  return Promise.race([server, timeout]).catch(() => null)
 }
 
 export const SYNC_ERROR_EVENT = 'app:sync-error'
@@ -169,7 +189,7 @@ export async function updateItem(
   actor: Actor,
 ): Promise<void> {
   const ref = householdItemDoc(householdId, collectionName, id)
-  const before = (await getDoc(ref)).data() ?? null
+  const before = await readBefore(ref)
   const after = { ...before, ...changes }
   const batch = writeBatch(db)
   batch.update(ref, { ...changes, updatedBy: actor.uid, updatedAt: serverTimestamp() })
@@ -184,7 +204,7 @@ export async function deleteItem(
   actor: Actor,
 ): Promise<void> {
   const ref = householdItemDoc(householdId, collectionName, id)
-  const before = (await getDoc(ref)).data() ?? null
+  const before = await readBefore(ref)
   const batch = writeBatch(db)
   batch.delete(ref)
   batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'delete', before, null, actor))

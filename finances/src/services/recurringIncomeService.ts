@@ -1,10 +1,10 @@
-import { Timestamp, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { Timestamp, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { householdCol, householdItemDoc } from '@/firebase/paths'
 import type { EntityInput, RecurringIncome } from '@/types'
 import { monthKey } from '@/utils/month'
 import { occurrenceMonth } from '@/utils/recurringExpenses'
 import { dueIncomes, type DueIncome } from '@/utils/recurringIncomes'
-import { createItem, createItemOnce, updateItem } from './repository'
+import { createItem, createItemOnce, readBefore, updateItem } from './repository'
 
 interface Actor {
   uid: string
@@ -55,7 +55,7 @@ export async function syncCurrentIncome(householdId: string, income: RecurringIn
   const current = monthKey(new Date())
   const occurrence = dueIncomes(income, memberIds).find((o) => o.month === current)
   if (!occurrence) return
-  if (!(await getDoc(householdItemDoc(householdId, 'incomes', occurrence.id))).exists()) return
+  if (!(await readBefore(householdItemDoc(householdId, 'incomes', occurrence.id)))) return
   const { recurrenceId: _kept, ...changes } = incomeData(occurrence)
   void _kept
   await updateItem(householdId, 'incomes', occurrence.id, changes, actor)
@@ -65,9 +65,9 @@ export async function syncCurrentIncome(householdId: string, income: RecurringIn
 export async function skipIncomeOccurrence(householdId: string, incomeId: string, recurringId: string, actor: Actor): Promise<void> {
   const month = occurrenceMonth(incomeId, recurringId)
   if (!month) return
-  const snap = await getDoc(householdItemDoc(householdId, 'recurringIncomes', recurringId))
-  if (!snap.exists()) return
-  const skipped = (snap.data().skippedMonths as string[] | undefined) ?? []
+  const data = await readBefore(householdItemDoc(householdId, 'recurringIncomes', recurringId))
+  if (!data) return
+  const skipped = (data.skippedMonths as string[] | undefined) ?? []
   if (skipped.includes(month)) return
   await updateItem(householdId, 'recurringIncomes', recurringId, { skippedMonths: [...skipped, month] }, actor)
 }
