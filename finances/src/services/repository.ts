@@ -181,6 +181,31 @@ export async function createItemsOnce(
   return created
 }
 
+/**
+ * Crée ou remplace les champs d'un document à identifiant imposé (réglages) :
+ * création complète s'il n'existe pas, sinon mise à jour. Journalisé, sans
+ * attendre l'accusé serveur.
+ */
+export async function upsertItem(
+  householdId: string,
+  collectionName: FinancialCollection,
+  id: string,
+  data: DocumentData,
+  actor: Actor,
+): Promise<void> {
+  const ref = householdItemDoc(householdId, collectionName, id)
+  const before = await readBefore(ref)
+  const batch = writeBatch(db)
+  if (before) {
+    batch.update(ref, { ...data, updatedBy: actor.uid, updatedAt: serverTimestamp() })
+    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'update', before, { ...before, ...data }, actor))
+  } else {
+    batch.set(ref, { ...data, householdId, createdBy: actor.uid, createdAt: serverTimestamp(), updatedBy: actor.uid, updatedAt: serverTimestamp() })
+    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'create', null, data, actor))
+  }
+  commitInBackground(batch)
+}
+
 export async function updateItem(
   householdId: string,
   collectionName: FinancialCollection,
