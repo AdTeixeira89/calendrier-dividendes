@@ -1,4 +1,4 @@
-import type { Category, Cents, Subscription } from '@/types'
+import type { Category, Cents, Scope, Subscription } from '@/types'
 import { monthKey, monthRange, shiftMonth, type MonthKey } from './month'
 
 /** Une dépense automatique à créer : l'occurrence d'un abonnement ou d'une charge fixe pour un mois. */
@@ -11,6 +11,9 @@ export interface DueOccurrence {
   amountCents: Cents
   categoryId: string
   merchant: string
+  /** Espace de la dépense : commun, ou personnel d'un membre. */
+  scope: Scope
+  memberId: string | null
 }
 
 export function occurrenceId(subscriptionId: string, month: MonthKey): string {
@@ -81,6 +84,8 @@ export function dueOccurrences(subscription: Subscription, categories: Category[
       amountCents: subscription.amountCents,
       categoryId,
       merchant: subscription.name,
+      scope: subscription.scope === 'personal' ? 'personal' : 'shared',
+      memberId: subscription.scope === 'personal' ? (subscription.memberId ?? null) : null,
     })
   }
   return occurrences

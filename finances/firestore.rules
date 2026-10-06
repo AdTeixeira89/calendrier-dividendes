@@ -262,6 +262,37 @@ service cloud.firestore {
           (get(householdPath(hid)).data.ownerId == uid() && memberId != uid())
           || (memberId == uid() && get(householdPath(hid)).data.ownerId != uid())
         );
+
+        // ------------------------------------------- dépenses privées d'un membre
+        // Visibles et modifiables par ce membre seulement : aucun autre membre du
+        // foyer ne peut les lire (ni la fonction de liste, ni le journal : elles n'y figurent pas).
+        match /privateExpenses/{docId} {
+          function isOwner() {
+            return signedIn() && uid() == memberId && isMember(hid);
+          }
+
+          allow read: if isOwner();
+
+          allow create: if isOwner()
+            && canWrite(hid)
+            && incoming().householdId == hid
+            && incoming().createdBy == uid()
+            && incoming().updatedBy == uid()
+            && incoming().memberId == uid()
+            && incoming().createdAt == request.time
+            && incoming().updatedAt == request.time
+            && hasValidFinancialFields(incoming());
+
+          allow update: if isOwner()
+            && canWrite(hid)
+            && !changedKeys().hasAny(['householdId', 'createdBy', 'createdAt'])
+            && incoming().memberId == uid()
+            && incoming().updatedBy == uid()
+            && incoming().updatedAt == request.time
+            && hasValidFinancialFields(incoming());
+
+          allow delete: if isOwner() && canWrite(hid);
+        }
       }
 
       // ----------------------------------------------------------- auditLog

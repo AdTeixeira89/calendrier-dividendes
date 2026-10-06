@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Banknote, Plus, Repeat } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { IncomeFormSheet } from '@/components/finance/IncomeFormSheet'
+import { BudgetSplitSection } from '@/components/finance/BudgetSplitSection'
 import { CategoryIcon } from '@/components/finance/CategoryIcon'
 import { IncomeRow } from '@/components/finance/IncomeRow'
 import rowStyles from '@/components/finance/TransactionRow.module.css'
@@ -51,6 +52,8 @@ export function IncomesPage() {
           Ajouter un revenu
         </Button>
       )}
+
+      <BudgetSplitSection month={month} incomes={incomes} />
 
       <Card title="Revenus du mois" padded={incomes !== undefined && incomes.length === 0}>
         {incomes === undefined ? null : incomes.length === 0 ? (

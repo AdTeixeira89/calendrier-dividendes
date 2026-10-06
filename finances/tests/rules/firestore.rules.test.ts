@@ -253,6 +253,43 @@ describe('données financières', () => {
     await assertFails(getDoc(doc(db('bob'), `households/${HID}/recurringIncomes/r1`)))
   })
 
+  it('les dépenses privées ne sont lisibles ni modifiables que par leur propriétaire', async () => {
+    // Béa rejoint le foyer comme membre avec droit d'écriture.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const admin = ctx.firestore() as unknown as Firestore
+      await updateDoc(doc(admin, `households/${HID}`), { memberIds: ['alice', 'victor', 'bea'], 'roles.bea': 'member' })
+    })
+    const priv = (uid: string, extra: Record<string, unknown> = {}) => expense(uid, { scope: 'personal', memberId: uid, ...extra })
+    const path = (owner: string, id: string) => `households/${HID}/members/${owner}/privateExpenses/${id}`
+
+    await assertSucceeds(setDoc(doc(db('alice'), path('alice', 'p1')), priv('alice')))
+    await assertSucceeds(getDoc(doc(db('alice'), path('alice', 'p1'))))
+    await assertSucceeds(getDocs(collection(db('alice'), `households/${HID}/members/alice/privateExpenses`)))
+    await assertSucceeds(updateDoc(doc(db('alice'), path('alice', 'p1')), { amountCents: 500, updatedBy: 'alice', updatedAt: serverTimestamp() }))
+
+    // L'autre membre (écriture) et le lecteur ne voient rien, ne listent rien, n'écrivent rien chez Alice.
+    for (const other of ['bea', 'victor']) {
+      await assertFails(getDoc(doc(db(other), path('alice', 'p1'))))
+      await assertFails(getDocs(collection(db(other), `households/${HID}/members/alice/privateExpenses`)))
+      await assertFails(setDoc(doc(db(other), path('alice', 'p2')), priv('alice', { createdBy: other, updatedBy: other })))
+      await assertFails(deleteDoc(doc(db(other), path('alice', 'p1'))))
+    }
+    // Un non-membre non plus.
+    await assertFails(getDoc(doc(db('mallory'), path('alice', 'p1'))))
+
+    // Béa écrit dans son propre espace ; un lecteur ne le peut pas ; métadonnées vérifiées.
+    await assertSucceeds(setDoc(doc(db('bea'), path('bea', 'p1')), priv('bea')))
+    await assertFails(setDoc(doc(db('victor'), path('victor', 'p1')), priv('victor')))
+    await assertFails(setDoc(doc(db('alice'), path('alice', 'p3')), priv('alice', { createdBy: 'bea' })))
+    await assertFails(setDoc(doc(db('alice'), path('alice', 'p3')), priv('alice', { memberId: 'bea' })))
+    await assertFails(setDoc(doc(db('alice'), path('alice', 'p3')), priv('alice', { amountCents: 1.5 })))
+
+    // Elles n'apparaissent pas dans la collection partagée lue par tout le foyer.
+    const shared = await assertSucceeds(getDocs(collection(db('bea'), `households/${HID}/expenses`)))
+    if (shared.docs.some((d) => d.id === 'p1')) throw new Error('une dépense privée est visible dans la collection partagée')
+    await assertSucceeds(deleteDoc(doc(db('alice'), path('alice', 'p1'))))
+  })
+
   it('le journal des modifications est en ajout seul', async () => {
     const f = db('alice')
     const entry = {

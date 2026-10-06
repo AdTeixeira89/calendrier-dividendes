@@ -12,7 +12,9 @@ import type { Subscription } from '@/types'
 import type { SubscriptionPeriod } from '@/types/subscription'
 import { toUserMessage } from '@/utils/firebaseErrors'
 import { currentMonthKey, monthKey } from '@/utils/month'
+import { COMMON_SPACE, type Space } from '@/utils/spaces'
 import { CategoryPicker } from './CategoryPicker'
+import { SpaceFields } from './SpaceFields'
 import { ToggleRow } from './ToggleRow'
 
 /** Aujourd'hui au format AAAA-MM-JJ, en heure locale. */
@@ -27,9 +29,11 @@ interface SubscriptionFormSheetProps {
   open: boolean
   onClose: () => void
   subscription?: Subscription
+  /** Espace proposé à la création : celui affiché sur la page Dépenses. */
+  defaultSpace?: Space
 }
 
-export function SubscriptionFormSheet({ open, onClose, subscription }: SubscriptionFormSheetProps) {
+export function SubscriptionFormSheet({ open, onClose, subscription, defaultSpace }: SubscriptionFormSheetProps) {
   const user = useCurrentUser()
   const { household } = useHousehold()
   const categories = useCategories(household.id, 'expense')
@@ -39,6 +43,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
   const [categoryId, setCategoryId] = useState(subscription?.categoryId ?? '')
   const [autoExpense, setAutoExpense] = useState(subscription?.autoExpense ?? true)
   const [nextDate, setNextDate] = useState(subscription ? (subscription.nextDate ? fromTimestamp(subscription.nextDate) : '') : todayInput())
+  const [space, setSpace] = useState<Space>(subscription ? (subscription.scope === 'personal' && subscription.memberId ? subscription.memberId : COMMON_SPACE) : (defaultSpace ?? COMMON_SPACE))
   const [usage, setUsage] = useState<'frequent' | 'occasional' | 'rare' | ''>(subscription?.usage ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -61,13 +66,15 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
       usage: usage || null,
       archived: subscription?.archived ?? false,
       autoExpense,
+      scope: space === COMMON_SPACE ? ('shared' as const) : ('personal' as const),
+      memberId: space === COMMON_SPACE ? null : space,
       startMonth: keepsStart ? subscription.startMonth : nextDate ? monthKey(toTimestamp(nextDate).toDate()) : currentMonthKey(),
     }
     try {
       if (subscription) {
         await updateSubscription(household.id, subscription.id, data, user)
         const changed =
-          subscription.amountCents !== data.amountCents || subscription.name !== data.name || subscription.categoryId !== data.categoryId || fromTimestampOrNull(subscription.nextDate) !== nextDate
+          subscription.amountCents !== data.amountCents || subscription.name !== data.name || subscription.categoryId !== data.categoryId || (subscription.scope ?? 'shared') !== data.scope || (subscription.memberId ?? null) !== data.memberId || fromTimestampOrNull(subscription.nextDate) !== nextDate
         if (changed && categories) await syncCurrentOccurrence(household.id, { ...subscription, ...data, nextDate: data.nextDate }, categories, user)
       } else await createSubscription(household.id, data, user)
       onClose()
@@ -99,6 +106,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
           <TextField label="Montant" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} trailing={<span className="subtle">€</span>} />
           <SegmentedControl label="Période" value={period} onChange={setPeriod} options={[{ value: 'monthly', label: 'Mensuel' }, { value: 'yearly', label: 'Annuel' }]} />
         </div>
+        <SpaceFields space={space} onSpace={setSpace} />
         {categories && <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />}
         <TextField
           label="Date de la dépense"

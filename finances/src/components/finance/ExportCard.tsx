@@ -4,6 +4,7 @@ import { MonthNav } from './MonthNav'
 import { Button, Card, Notice } from '@/components/ui'
 import { useCategories } from '@/hooks/useCategories'
 import { useDebts } from '@/hooks/useDebts'
+import { commonExpenses } from '@/utils/spaces'
 import { useExpensesRange } from '@/hooks/useExpensesRange'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useIncomesRange } from '@/hooks/useIncomesRange'
@@ -33,7 +34,7 @@ export function ExportCard() {
   const periodLabel = from === to ? formatMonthKey(from) : `${formatMonthKey(from)} à ${formatMonthKey(to)}`
 
   function summaryText(): string {
-    return buildFinancialSummaryText({ periodLabel, expenses: expenses!, incomes: incomes!, categories: categories!, debts: debts!, savingsGoals: savingsGoals!, subscriptions: subscriptions! })
+    return buildFinancialSummaryText({ periodLabel, expenses: commonExpenses(expenses!), incomes: incomes!, categories: categories!, debts: debts!, savingsGoals: savingsGoals!, subscriptions: subscriptions! })
   }
 
   function onDownloadCsv() {

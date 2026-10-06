@@ -29,5 +29,9 @@ export const inviteDoc = (code: string) => doc(db, 'invites', code)
 export const householdCol = (householdId: string, name: HouseholdCollection) =>
   collection(db, 'households', householdId, name)
 
+/** Dépenses privées d'un membre : stockées sous son profil de foyer, lisibles par lui seul (voir firestore.rules). */
+export const privateExpensesCol = (householdId: string, uid: string) => collection(db, 'households', householdId, 'members', uid, 'privateExpenses')
+export const privateExpenseDoc = (householdId: string, uid: string, id: string) => doc(db, 'households', householdId, 'members', uid, 'privateExpenses', id)
+
 export const householdItemDoc = (householdId: string, name: HouseholdCollection, id: string) =>
   doc(db, 'households', householdId, name, id)

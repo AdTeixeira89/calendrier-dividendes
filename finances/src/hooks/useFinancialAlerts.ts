@@ -5,7 +5,7 @@ import { useAlertSettings } from './useAlertSettings'
 import { useBudget } from './useBudget'
 import { useCategories } from './useCategories'
 import { useDebts } from './useDebts'
-import { useMonthlyExpenses } from './useMonthlyExpenses'
+import { useCommonMonthlyExpenses } from './useMonthlyExpenses'
 import { useMonthlyIncomes } from './useMonthlyIncomes'
 import { useSubscriptions } from './useSubscriptions'
 
@@ -19,9 +19,9 @@ export function useFinancialAlerts(householdId: string): FinancialAlert[] | unde
   const month = currentMonthKey()
   const prevMonth = previousMonthKey(month)
   const settings = useAlertSettings(householdId)
-  const expenses = useMonthlyExpenses(householdId, month)
+  const expenses = useCommonMonthlyExpenses(householdId, month)
   const incomes = useMonthlyIncomes(householdId, month)
-  const prevExpenses = useMonthlyExpenses(householdId, prevMonth)
+  const prevExpenses = useCommonMonthlyExpenses(householdId, prevMonth)
   const prevIncomes = useMonthlyIncomes(householdId, prevMonth)
   const budget = useBudget(householdId, month)
   const categories = useCategories(householdId)

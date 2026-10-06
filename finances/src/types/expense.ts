@@ -22,6 +22,15 @@ export interface Expense extends BaseEntity {
   recurrenceId?: string | null
   /** Origine de la saisie quand elle n'est pas manuelle (relevé bancaire importé). */
   source?: 'import'
+  /** Reprise automatique d'une dépense récurrente du mois précédent. */
+  autoCopy?: boolean
+  /** Jour du mois prévu pour une dépense récurrente reprise (évite la dérive 31 → 28 → 28). */
+  recurringDay?: number
+  /**
+   * Renseigné côté appareil seulement (jamais écrit) : dépense privée de l'utilisateur,
+   * stockée dans son espace personnel et invisible pour les autres membres.
+   */
+  private?: boolean
 }
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {

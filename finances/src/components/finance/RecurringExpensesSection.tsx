@@ -5,6 +5,7 @@ import { useHousehold } from '@/hooks/useHousehold'
 import { useSubscriptions } from '@/hooks/useSubscriptions'
 import type { Subscription } from '@/types'
 import { formatCents } from '@/utils/money'
+import { COMMON_SPACE, type Space } from '@/utils/spaces'
 import { totalMonthlyCost } from '@/utils/subscriptions'
 import styles from './RecurringExpensesSection.module.css'
 import { SubscriptionFormSheet } from './SubscriptionFormSheet'
@@ -15,9 +16,11 @@ import { SubscriptionRow } from './SubscriptionRow'
  * de la page Dépenses. Chaque occurrence apparaît dans la liste des dépenses,
  * à sa date ; ici on ne gère que la règle (montant, date, catégorie).
  */
-export function RecurringExpensesSection() {
+export function RecurringExpensesSection({ space = COMMON_SPACE }: { space?: Space }) {
   const { household, canWrite } = useHousehold()
-  const subscriptions = useSubscriptions(household.id)
+  const allSubscriptions = useSubscriptions(household.id)
+  // Chaque règle appartient à un espace : on n'affiche que celui de la page.
+  const subscriptions = allSubscriptions?.filter((s) => (s.scope === 'personal' ? s.memberId : COMMON_SPACE) === space)
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Subscription | undefined>(undefined)
@@ -62,13 +65,14 @@ export function RecurringExpensesSection() {
         )}
       </Card>
       <SubscriptionFormSheet
-        key={editing?.id ?? (adding ? 'new' : 'closed')}
+        key={`${editing?.id ?? (adding ? "new" : "closed")}:${space}`}
         open={adding || Boolean(editing)}
         onClose={() => {
           setAdding(false)
           setEditing(undefined)
         }}
         subscription={editing}
+        defaultSpace={space}
       />
     </>
   )

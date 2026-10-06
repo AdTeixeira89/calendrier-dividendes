@@ -10,6 +10,8 @@ import { ExpenseRow } from '@/components/finance/ExpenseRow'
 import { ScanReceiptSheet } from '@/components/finance/ScanReceiptSheet'
 import { SpendingPaceChart } from '@/components/finance/SpendingPaceChart'
 import { Button, Card, EmptyState, StatCard } from '@/components/ui'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { useCurrentUser } from '@/hooks/useAuth'
 import { useCategories } from '@/hooks/useCategories'
 import { useBudget } from '@/hooks/useBudget'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -17,6 +19,7 @@ import { useMonthNav } from '@/hooks/useMonthNav'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import type { Expense } from '@/types'
 import { currentMonthKey, previousMonthKey } from '@/utils/month'
+import { COMMON_SPACE, inSpace, type Space } from '@/utils/spaces'
 import { spendingPace } from '@/utils/spendingPace'
 import { sumCents } from '@/utils/monthlyStats'
 
@@ -24,14 +27,31 @@ import { sumCents } from '@/utils/monthlyStats'
 const WRAP_LABEL = { whiteSpace: 'normal', lineHeight: 1.2, padding: '6px var(--space-2)' } as const
 
 export function ExpensesPage() {
-  const { household, canWrite } = useHousehold()
+  const { household, members, canWrite } = useHousehold()
+  const user = useCurrentUser()
   const { month, setMonth } = useMonthNav()
   const categories = useCategories(household.id, 'expense')
-  const expenses = useMonthlyExpenses(household.id, month)
+  const allExpenses = useMonthlyExpenses(household.id, month)
   const budget = useBudget(household.id, month)
   const prevMonth = previousMonthKey(month)
-  const prevExpenses = useMonthlyExpenses(household.id, prevMonth)
+  const allPrevExpenses = useMonthlyExpenses(household.id, prevMonth)
   const [params, setParams] = useSearchParams()
+  // Trois espaces séparés : Communes, puis un par membre ; ni totaux ni listes ne se mélangent.
+  const requested = params.get('espace')
+  const space: Space = requested && members.some((m) => m.uid === requested) ? requested : COMMON_SPACE
+  const spaceMember = members.find((m) => m.uid === space)
+  const expenses = allExpenses && inSpace(allExpenses, space)
+  const prevExpenses = allPrevExpenses && inSpace(allPrevExpenses, space)
+  const setSpace = (next: Space) =>
+    setParams(
+      (p) => {
+        const copy = new URLSearchParams(p)
+        if (next === COMMON_SPACE) copy.delete('espace')
+        else copy.set('espace', next)
+        return copy
+      },
+      { replace: true },
+    )
   const [editing, setEditing] = useState<Expense | undefined>(undefined)
   // Résultat du scan d'un ticket : ouvre le formulaire de dépense pré-rempli, à valider par l'utilisateur.
   const [scanned, setScanned] = useState<ExpenseFormInitial | undefined>(undefined)
@@ -71,7 +91,9 @@ export function ExpensesPage() {
 
       <MonthNav month={month} onChange={setMonth} />
 
-      <StatCard label="Total des dépenses" amount={total} tone="expense" icon={<Receipt size={16} />} higherIsBetter={false} />
+      <SegmentedControl label="Espace" value={space} onChange={setSpace} options={[{ value: COMMON_SPACE, label: 'Communes' }, ...members.map((m) => ({ value: m.uid, label: m.displayName }))]} />
+
+      <StatCard label={spaceMember ? `Dépenses de ${spaceMember.displayName}` : 'Total des dépenses communes'} amount={total} tone="expense" icon={<Receipt size={16} />} higherIsBetter={false} />
 
       {pace && (
         <Card title="Rythme des dépenses" subtitle="Cumul jour après jour, comparé au mois précédent">
@@ -97,7 +119,7 @@ export function ExpensesPage() {
         </div>
       )}
 
-      <RecurringExpensesSection />
+      <RecurringExpensesSection space={space} />
 
       <Card title="Transactions" padded={expenses !== undefined && expenses.length === 0}>
         {loading ? null : expenses.length === 0 ? (
@@ -111,18 +133,24 @@ export function ExpensesPage() {
             ))}
           </ul>
         )}
+        {spaceMember && spaceMember.uid !== user.uid && (
+          <p className="subtle" style={{ fontSize: 'var(--text-sm)', padding: 'var(--space-3)' }}>
+            Les dépenses que {spaceMember.displayName} a choisi de garder privées ne sont pas affichées.
+          </p>
+        )}
       </Card>
 
-      {!loading && categories.length > 0 && <BudgetSection month={month} categories={categories} expenses={expenses} budget={budget} />}
+      {!loading && space === COMMON_SPACE && categories.length > 0 && <BudgetSection month={month} categories={categories} expenses={expenses} budget={budget} />}
 
       {categories !== undefined && (
         <ExpenseFormSheet
-          key={editing?.id ?? scanned?.receiptPath ?? 'new'}
+          key={`${editing?.id ?? scanned?.receiptPath ?? 'new'}:${space}`}
           open={sheetOpen}
           onClose={closeSheet}
           categories={categories}
           expense={editing}
           defaultDate={monthDefaultDate(month)}
+          defaultSpace={space}
           initial={scanned}
         />
       )}

@@ -1,5 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
-import type { BaseEntity, Cents } from './common'
+import type { BaseEntity, Cents, Scope } from './common'
 
 export type SubscriptionPeriod = 'monthly' | 'yearly'
 
@@ -19,4 +19,7 @@ export interface Subscription extends BaseEntity {
   startMonth?: string
   /** Mois (AAAA-MM) dont la dépense a été supprimée à la main : elle ne revient pas. */
   skippedMonths?: string[]
+  /** Espace des dépenses générées : commun (défaut) ou personnel d'un membre. */
+  scope?: Scope
+  memberId?: string | null
 }

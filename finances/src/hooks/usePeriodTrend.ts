@@ -4,6 +4,7 @@ import { watchIncomesRange } from '@/services/incomeService'
 import type { Cents, Expense, Income } from '@/types'
 import { monthRange, type MonthKey } from '@/utils/month'
 import { buildPeriodPoints, periodStart, type PeriodPoint, type TrendPeriod } from '@/utils/trendPeriod'
+import { commonExpenses } from '@/utils/spaces'
 import { useKeyedSnapshot } from './useKeyedSnapshot'
 
 /** Revenus et dépenses sur la période choisie (semaines pour 1 mois, mois sinon). */
@@ -12,7 +13,7 @@ export function usePeriodTrend(householdId: string, month: MonthKey, period: Tre
   const end = Timestamp.fromDate(monthRange(month).end)
   const key = `${householdId}:${month}:${period}`
 
-  const expenses = useKeyedSnapshot<Expense[]>(key, (onChange) => watchExpensesRange(householdId, start, end, onChange, () => onChange([])))
+  const expenses = useKeyedSnapshot<Expense[]>(key, (onChange) => watchExpensesRange(householdId, start, end, (list) => onChange(commonExpenses(list)), () => onChange([])))
   const incomes = useKeyedSnapshot<Income[]>(key, (onChange) => watchIncomesRange(householdId, start, end, onChange, () => onChange([])))
 
   if (expenses === undefined || incomes === undefined) return undefined

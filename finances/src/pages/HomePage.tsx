@@ -3,19 +3,16 @@ import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, Circle, PiggyBank, Wallet } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AlertsCard } from '@/components/finance/AlertsCard'
-import { BudgetSplitCard } from '@/components/finance/BudgetSplitCard'
 import { IncomeExpenseLineChart } from '@/components/finance/IncomeExpenseLineChart'
 import { PeriodFilter } from '@/components/finance/PeriodFilter'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
-import { useBudgetSplit } from '@/hooks/useBudgetSplit'
 import { useDebts } from '@/hooks/useDebts'
 import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
-import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
+import { useCommonMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { usePeriodTrend } from '@/hooks/usePeriodTrend'
-import { householdSplit } from '@/utils/budgetSplit'
 import { aggregateDebts } from '@/utils/debt'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
@@ -30,14 +27,13 @@ export function HomePage() {
   const month = currentMonthKey()
   const prevMonth = previousMonthKey(month)
 
-  const expenses = useMonthlyExpenses(household.id, month)
+  const expenses = useCommonMonthlyExpenses(household.id, month)
   const incomes = useMonthlyIncomes(household.id, month)
-  const prevExpenses = useMonthlyExpenses(household.id, prevMonth)
+  const prevExpenses = useCommonMonthlyExpenses(household.id, prevMonth)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
   const alerts = useFinancialAlerts(household.id)
   const [period, setPeriod] = useState<TrendPeriod>('6m')
-  const budgetSplit = useBudgetSplit(household.id)
 
   const hasData = Boolean(expenses?.length || incomes?.length)
 
@@ -48,8 +44,6 @@ export function HomePage() {
   const trend = usePeriodTrend(household.id, month, period, debtMonthlyCents)
   const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
   const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
-
-  const split = budgetSplit && expenses && incomes ? householdSplit(members.map((m) => m.uid), budgetSplit, incomes, expenses, debtMonthlyCents) : null
 
   const steps = [
     { done: true, label: 'Créer votre foyer', to: '/foyer' },
@@ -105,8 +99,6 @@ export function HomePage() {
       </section>
 
       {alerts && alerts.length > 0 && <AlertsCard alerts={alerts} />}
-
-      {budgetSplit && split && <BudgetSplitCard settings={budgetSplit} split={split} />}
 
       {(period !== '6m' || trend?.some((p) => p.incomeCents > 0 || p.expenseCents > 0)) && (
         <Card title="Revenus et dépenses" subtitle={TREND_PERIODS.find((p) => p.value === period)?.full}>

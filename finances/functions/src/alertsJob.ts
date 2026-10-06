@@ -29,6 +29,9 @@ function monthBounds(month: string): { start: Date; end: Date } {
   return { start: new Date(Date.UTC(year!, m! - 1, 1)), end: new Date(Date.UTC(year!, m!, 1)) }
 }
 
+/** Dépenses communes seulement : les dépenses personnelles ne se mélangent pas aux suivis du foyer. */
+const commonOnly = (docs: QueryDocumentSnapshot[]) => docs.filter((d) => d.data().scope !== 'personal')
+
 const cents = (docs: QueryDocumentSnapshot[]) => docs.reduce((sum, d) => sum + (d.data().amountCents as number), 0)
 
 /** Rassemble, pour un foyer, exactement les données que la carte « Alertes » de l'app utilise. */
@@ -53,7 +56,7 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
   return {
     today,
     month,
-    expenses: expenses.docs.map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
+    expenses: commonOnly(expenses.docs).map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
     incomeCents: cents(incomes.docs),
     debtMonthlyCents: debts.docs.reduce((sum, d) => sum + ((d.data().monthlyPaymentCents as number) ?? 0) + ((d.data().insuranceCents as number) ?? 0), 0),
     budgetLines: (budget.data()?.lines as Record<string, number> | undefined) ?? {},
@@ -62,7 +65,7 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
       const data = d.data()
       return { id: d.id, name: data.name as string, amountCents: data.amountCents as number, period: data.period === 'yearly' ? ('yearly' as const) : ('monthly' as const), nextDate: data.nextDate?.toDate() ?? null, archived: Boolean(data.archived) }
     }),
-    previousMonth: { month: previousMonth, incomeCents: cents(prevIncomes.docs), expenseCents: cents(prevExpenses.docs) },
+    previousMonth: { month: previousMonth, incomeCents: cents(prevIncomes.docs), expenseCents: cents(commonOnly(prevExpenses.docs)) },
     settings: withDefaultSettings(settings.data() as Partial<AlertSettings> | undefined),
   }
 }

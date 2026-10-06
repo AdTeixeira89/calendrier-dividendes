@@ -49,6 +49,8 @@ async function leaveHousehold(db: Firestore, household: DocumentSnapshot, uid: s
   batch.update(household.ref, changes)
   batch.delete(household.ref.collection('members').doc(uid))
   await batch.commit()
+  // Ses dépenses privées vivent sous son profil de foyer : elles partent avec lui.
+  await db.recursiveDelete(household.ref.collection('members').doc(uid))
 }
 
 /**

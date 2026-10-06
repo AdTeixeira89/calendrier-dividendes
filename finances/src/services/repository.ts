@@ -1,7 +1,7 @@
 import { FirebaseError } from 'firebase/app'
 import { doc, getDoc, getDocFromCache, serverTimestamp, writeBatch, type DocumentData, type DocumentReference, type WriteBatch } from 'firebase/firestore'
 import { db } from '@/firebase/client'
-import { householdCol, householdItemDoc, type HouseholdCollection } from '@/firebase/paths'
+import { householdCol, householdItemDoc, privateExpenseDoc, type HouseholdCollection } from '@/firebase/paths'
 import type { AuditAction } from '@/types'
 import { changedFields, pick } from '@/utils/diff'
 
@@ -220,6 +220,70 @@ export async function updateItem(
   batch.update(ref, { ...changes, updatedBy: actor.uid, updatedAt: serverTimestamp() })
   batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'update', before, after, actor))
   commitInBackground(batch)
+}
+
+/**
+ * Dépenses privées : même schéma, mais rangées dans l'espace personnel de leur
+ * auteur et sans entrée dans le journal (lisible par tous les membres : il
+ * révélerait montant et libellé).
+ */
+export async function createPrivateExpense(householdId: string, data: DocumentData, actor: Actor): Promise<string> {
+  const ref = doc(householdCol(householdId, 'expenses'))
+  const batch = writeBatch(db)
+  batch.set(privateExpenseDoc(householdId, actor.uid, ref.id), stamp(householdId, data, actor))
+  commitInBackground(batch)
+  return ref.id
+}
+
+/** Création idempotente (identifiant imposé) d'une dépense privée : false si elle existe déjà. */
+export async function createPrivateExpenseOnce(householdId: string, id: string, data: DocumentData, actor: Actor): Promise<boolean> {
+  const ref = privateExpenseDoc(householdId, actor.uid, id)
+  if ((await getDoc(ref)).exists()) return false
+  const batch = writeBatch(db)
+  batch.set(ref, stamp(householdId, data, actor))
+  try {
+    await batch.commit()
+    return true
+  } catch (error) {
+    if (error instanceof FirebaseError && error.code === 'permission-denied') return false
+    throw error
+  }
+}
+
+export async function updatePrivateExpense(householdId: string, id: string, changes: DocumentData, actor: Actor): Promise<void> {
+  const batch = writeBatch(db)
+  batch.update(privateExpenseDoc(householdId, actor.uid, id), { ...changes, updatedBy: actor.uid, updatedAt: serverTimestamp() })
+  commitInBackground(batch)
+}
+
+export async function deletePrivateExpense(householdId: string, id: string, actor: Actor): Promise<void> {
+  const batch = writeBatch(db)
+  batch.delete(privateExpenseDoc(householdId, actor.uid, id))
+  commitInBackground(batch)
+}
+
+/**
+ * Passe une dépense du partagé au privé (ou l'inverse) en conservant son identifiant,
+ * dans un même batch : jamais visible aux deux endroits, jamais perdue.
+ */
+export async function moveExpense(householdId: string, id: string, data: DocumentData, toPrivate: boolean, actor: Actor): Promise<void> {
+  const publicRef = householdItemDoc(householdId, 'expenses', id)
+  const batch = writeBatch(db)
+  if (toPrivate) {
+    const before = await readBefore(publicRef)
+    batch.delete(publicRef)
+    batch.set(privateExpenseDoc(householdId, actor.uid, id), stamp(householdId, data, actor))
+    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, 'expenses', id, 'delete', before, null, actor))
+  } else {
+    batch.delete(privateExpenseDoc(householdId, actor.uid, id))
+    batch.set(publicRef, stamp(householdId, data, actor))
+    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, 'expenses', id, 'create', null, data, actor))
+  }
+  commitInBackground(batch)
+}
+
+function stamp(householdId: string, data: DocumentData, actor: Actor): DocumentData {
+  return { ...data, householdId, createdBy: actor.uid, createdAt: serverTimestamp(), updatedBy: actor.uid, updatedAt: serverTimestamp() }
 }
 
 export async function deleteItem(

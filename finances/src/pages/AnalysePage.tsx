@@ -7,7 +7,7 @@ import { useCategories } from '@/hooks/useCategories'
 import { useDebts } from '@/hooks/useDebts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
-import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
+import { useCommonMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { useTrend } from '@/hooks/useTrend'
 import { aggregateDebts } from '@/utils/debt'
@@ -19,9 +19,9 @@ export function AnalysePage() {
   const { household } = useHousehold()
   const { month, setMonth } = useMonthNav()
   const categories = useCategories(household.id, 'expense')
-  const expenses = useMonthlyExpenses(household.id, month)
+  const expenses = useCommonMonthlyExpenses(household.id, month)
   const incomes = useMonthlyIncomes(household.id, month)
-  const prevExpenses = useMonthlyExpenses(household.id, previousMonthKey(month))
+  const prevExpenses = useCommonMonthlyExpenses(household.id, previousMonthKey(month))
   const prevIncomes = useMonthlyIncomes(household.id, previousMonthKey(month))
   const trend = useTrend(household.id, month, 6)
   const debts = useDebts(household.id)

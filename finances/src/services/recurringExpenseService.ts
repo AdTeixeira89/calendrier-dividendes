@@ -3,7 +3,8 @@ import { householdItemDoc } from '@/firebase/paths'
 import type { Category, Subscription } from '@/types'
 import { monthKey } from '@/utils/month'
 import { dueOccurrences, occurrenceMonth, type DueOccurrence } from '@/utils/recurringExpenses'
-import { createItemOnce, updateItem } from './repository'
+import type { DueCopy } from '@/utils/recurringCopies'
+import { createItemOnce, createPrivateExpenseOnce, updateItem } from './repository'
 
 interface Actor {
   uid: string
@@ -23,8 +24,8 @@ export async function createDueExpenses(householdId: string, occurrences: DueOcc
         categoryId: o.categoryId,
         merchant: o.merchant,
         paymentMethod: 'direct_debit',
-        memberId: null,
-        scope: 'shared',
+        memberId: o.memberId,
+        scope: o.scope,
         kind: 'recurring',
         note: null,
         receiptPath: null,
@@ -51,7 +52,7 @@ export async function syncCurrentOccurrence(householdId: string, subscription: S
     householdId,
     'expenses',
     occurrence.id,
-    { amountCents: occurrence.amountCents, categoryId: occurrence.categoryId, merchant: occurrence.merchant, date: Timestamp.fromDate(occurrence.date) },
+    { amountCents: occurrence.amountCents, categoryId: occurrence.categoryId, merchant: occurrence.merchant, date: Timestamp.fromDate(occurrence.date), scope: occurrence.scope, memberId: occurrence.memberId },
     actor,
   )
 }
@@ -68,4 +69,15 @@ export async function skipOccurrence(householdId: string, expenseId: string, sub
   const skipped = (snap.data().skippedMonths as string[] | undefined) ?? []
   if (skipped.includes(month)) return
   await updateItem(householdId, 'subscriptions', subscriptionId, { skippedMonths: [...skipped, month] }, actor)
+}
+
+/** Crée les reprises du mois (communes dans le foyer, privées dans l'espace de leur auteur) ; celles qui existent déjà sont laissées. */
+export async function createDueCopies(householdId: string, copies: DueCopy[], actor: Actor): Promise<number> {
+  let created = 0
+  for (const c of copies) {
+    const data = { ...c.data, date: Timestamp.fromDate(c.data.date) }
+    const wasCreated = c.private ? await createPrivateExpenseOnce(householdId, c.id, data, actor) : await createItemOnce(householdId, 'expenses', c.id, data, actor)
+    if (wasCreated) created++
+  }
+  return created
 }

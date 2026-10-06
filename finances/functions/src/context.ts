@@ -33,7 +33,7 @@ export async function computeHouseholdFacts(db: Firestore, householdId: string, 
   const { start, end } = monthRange(monthKey)
   const householdRef = db.collection('households').doc(householdId)
 
-  const [expensesSnap, incomesSnap, debtsSnap, goalsSnap, subscriptionsSnap, categoriesSnap] = await Promise.all([
+  const [allExpensesSnap, incomesSnap, debtsSnap, goalsSnap, subscriptionsSnap, categoriesSnap] = await Promise.all([
     householdRef.collection('expenses').where('date', '>=', start).where('date', '<', end).get(),
     householdRef.collection('incomes').where('date', '>=', start).where('date', '<', end).get(),
     householdRef.collection('debts').where('archived', '==', false).get(),
@@ -41,6 +41,9 @@ export async function computeHouseholdFacts(db: Firestore, householdId: string, 
     householdRef.collection('subscriptions').where('archived', '==', false).get(),
     householdRef.collection('categories').get(),
   ])
+
+  // Dépenses communes seulement : les dépenses personnelles ne se mélangent pas aux suivis du foyer.
+  const expensesSnap = { docs: allExpensesSnap.docs.filter((d) => d.data().scope !== 'personal') }
 
   const categoryNames = new Map(categoriesSnap.docs.map((d) => [d.id, (d.data().name as string) ?? d.id]))
 

@@ -283,3 +283,9 @@ finances/
 | Taille du SDK Firebase (~190 ko gzip) | Chunk séparé mis en cache par le service worker |
 | Suppression d'un foyer (sous-collections) | Interdite côté client ; Cloud Function dédiée |
 | Clés IA/OCR exposées | Appels uniquement via Cloud Functions + Secret Manager |
+
+## 6 quinquies. Espaces de dépenses, confidentialité et reprise mensuelle
+
+- **Trois espaces** : « Communes » (`scope: shared`) et un espace par membre (`scope: personal`, `memberId`). Les totaux, alertes, graphiques de l'accueil, rapports et contexte IA ne comptent que les dépenses communes (`utils/spaces.ts`, filtres équivalents dans `functions/`).
+- **Dépenses privées** : stockées dans `households/{hid}/members/{uid}/privateExpenses/{id}`, lisibles et modifiables par leur seul propriétaire (règles testées). Elles ne passent ni par le journal d'audit ni par les fonctions serveur. `watchExpensesRange` fusionne la collection partagée et l'espace privé de l'utilisateur ; passer une dépense de partagée à privée la déplace avec le même identifiant (`moveExpense`).
+- **Reprise mensuelle** (`hooks/useMonthlyCopies.ts`, `utils/recurringCopies.ts`) : les dépenses de type « Récurrente » du mois précédent sont recopiées (id `{origine}_{AAAA-MM}`, idempotent entre appareils), à partir de leur jour ; une reprise supprimée à la main est mémorisée (`settings/recurringCopies`) et ne revient pas. Les règles issues d'un abonnement gardent leur propre mécanisme.
