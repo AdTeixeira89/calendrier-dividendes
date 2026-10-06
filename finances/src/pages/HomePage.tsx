@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, Circle, PiggyBank, Wallet } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AlertsCard } from '@/components/finance/AlertsCard'
 import { BudgetSplitCard } from '@/components/finance/BudgetSplitCard'
 import { IncomeExpenseLineChart } from '@/components/finance/IncomeExpenseLineChart'
+import { PeriodFilter } from '@/components/finance/PeriodFilter'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
 import { useBudgetSplit } from '@/hooks/useBudgetSplit'
@@ -12,13 +14,14 @@ import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
-import { useTrend } from '@/hooks/useTrend'
+import { usePeriodTrend } from '@/hooks/usePeriodTrend'
 import { householdSplit } from '@/utils/budgetSplit'
 import { aggregateDebts } from '@/utils/debt'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
 import { percentChange } from '@/utils/money'
 import { summarizeMonth, withDebtCharges } from '@/utils/monthlyStats'
+import { TREND_PERIODS, type TrendPeriod } from '@/utils/trendPeriod'
 import styles from './HomePage.module.css'
 
 export function HomePage() {
@@ -33,7 +36,7 @@ export function HomePage() {
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
   const alerts = useFinancialAlerts(household.id)
-  const trend = useTrend(household.id, month, 6)
+  const [period, setPeriod] = useState<TrendPeriod>('6m')
   const budgetSplit = useBudgetSplit(household.id)
 
   const hasData = Boolean(expenses?.length || incomes?.length)
@@ -42,6 +45,7 @@ export function HomePage() {
   // entière : elles s'ajoutent aux dépenses enregistrées, même si elles ne
   // sont pas saisies comme des dépenses individuelles.
   const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
+  const trend = usePeriodTrend(household.id, month, period, debtMonthlyCents)
   const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
   const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
 
@@ -63,6 +67,7 @@ export function HomePage() {
       <section aria-label="Situation du mois" className={styles.stats}>
         <StatCard
           label="Revenus"
+          to="/revenus"
           amount={summary?.incomeCents ?? null}
           tone="income"
           icon={<ArrowUpRight size={16} />}
@@ -71,6 +76,7 @@ export function HomePage() {
         />
         <StatCard
           label="Dépenses"
+          to="/depenses"
           amount={summary?.expenseCents ?? null}
           tone="expense"
           icon={<ArrowDownRight size={16} />}
@@ -80,6 +86,7 @@ export function HomePage() {
         />
         <StatCard
           label="Épargne"
+          to="/epargne"
           amount={summary?.savingsCents ?? null}
           tone="saving"
           icon={<PiggyBank size={16} />}
@@ -88,6 +95,7 @@ export function HomePage() {
         />
         <StatCard
           label="Reste à vivre"
+          to="/analyse"
           amount={summary?.livingAllowanceCents ?? null}
           tone="accent"
           icon={<Wallet size={16} />}
@@ -100,10 +108,10 @@ export function HomePage() {
 
       {budgetSplit && split && <BudgetSplitCard settings={budgetSplit} split={split} />}
 
-      {trend && trend.some((p) => p.incomeCents > 0 || p.expenseCents > 0) && (
-        <Card title="Revenus et dépenses" subtitle="Mois par mois, 6 derniers mois">
-          {/* Mensualités de prêts ajoutées à chaque mois (montant actuel, faute d'historique), comme dans Analyse. */}
-          <IncomeExpenseLineChart points={trend.map((p) => ({ ...p, expenseCents: p.expenseCents + debtMonthlyCents }))} />
+      {(period !== '6m' || trend?.some((p) => p.incomeCents > 0 || p.expenseCents > 0)) && (
+        <Card title="Revenus et dépenses" subtitle={TREND_PERIODS.find((p) => p.value === period)?.full}>
+          <PeriodFilter value={period} onChange={setPeriod} />
+          {trend && <IncomeExpenseLineChart points={trend} />}
         </Card>
       )}
 

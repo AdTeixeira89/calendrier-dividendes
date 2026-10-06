@@ -1,0 +1,38 @@
+.group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0 0;
+}
+
+/* Bouton de 44 px de haut pour le doigt ; seule la pastille, discrète, est visible. */
+.option {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pill {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+}
+
+.selected .pill {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+  border-radius: var(--radius-md);
+}

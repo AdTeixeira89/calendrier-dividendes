@@ -23,7 +23,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
-      <BottomNav onQuickAdd={openQuickAdd} />
+      <BottomNav />
       <QuickAddSheet open={quickAddOpen} onClose={() => setQuickAddOpen(false)} />
       <StatusBanners />
     </div>

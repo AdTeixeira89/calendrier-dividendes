@@ -1,23 +1,22 @@
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { toneSolid } from '@/components/ui/tone'
-import type { TrendPoint } from '@/hooks/useTrend'
+import type { PeriodPoint } from '@/utils/trendPeriod'
 import { formatCents } from '@/utils/money'
-import { formatMonthKey } from '@/utils/month'
 
 /** Revenus et dépenses mois par mois : l'écart entre les deux lignes est ce qui reste (ou manque) chaque mois. */
-export function IncomeExpenseLineChart({ points }: { points: TrendPoint[] }) {
+export function IncomeExpenseLineChart({ points }: { points: PeriodPoint[] }) {
   const data = points.map((p) => ({
-    month: formatMonthKey(p.month).replace(/ \d{4}$/, '').slice(0, 3),
+    month: p.label,
     Revenus: p.incomeCents / 100,
     Dépenses: p.expenseCents / 100,
   }))
 
   return (
-    <div style={{ width: '100%', height: 220 }} role="img" aria-label="Revenus et dépenses de chacun des derniers mois">
+    <div style={{ width: '100%', height: 220 }} role="img" aria-label="Revenus et dépenses sur la période choisie">
       <ResponsiveContainer>
         <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 12 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" />
-          <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} />
+          <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} interval="preserveStartEnd" minTickGap={14} />
           <YAxis hide domain={[0, 'auto']} />
           <Tooltip
             formatter={(value) => formatCents(Math.round(Number(value) * 100))}

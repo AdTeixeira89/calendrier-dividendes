@@ -96,3 +96,9 @@
 .under {
   color: var(--success);
 }
+
+@media (pointer: coarse) {
+  .input {
+    height: 44px;
+  }
+}

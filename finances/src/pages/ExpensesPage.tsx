@@ -19,6 +19,9 @@ import { currentMonthKey, previousMonthKey } from '@/utils/month'
 import { spendingPace } from '@/utils/spendingPace'
 import { sumCents } from '@/utils/monthlyStats'
 
+/** Deux boutons côte à côte sur petit écran : le libellé passe à la ligne plutôt que de faire déborder la page. */
+const WRAP_LABEL = { whiteSpace: 'normal', lineHeight: 1.2, padding: '6px var(--space-2)' } as const
+
 export function ExpensesPage() {
   const { household, canWrite } = useHousehold()
   const { month, setMonth } = useMonthNav()
@@ -81,12 +84,12 @@ export function ExpensesPage() {
         </Button>
       )}
       {canWrite && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-          <Button variant="secondary" block icon={<Camera size={18} />} onClick={() => setParams((p) => new URLSearchParams({ ...Object.fromEntries(p), scanner: '1' }))}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-3)' }}>
+          <Button variant="secondary" block style={WRAP_LABEL} icon={<Camera size={18} />} onClick={() => setParams((p) => new URLSearchParams({ ...Object.fromEntries(p), scanner: '1' }))}>
             Scanner un ticket
           </Button>
-          <Link to="/importer-releve">
-            <Button variant="secondary" block icon={<FileUp size={18} />}>
+          <Link to="/importer-releve" style={{ display: 'block', minWidth: 0 }}>
+            <Button variant="secondary" block style={WRAP_LABEL} icon={<FileUp size={18} />}>
               Importer un relevé
             </Button>
           </Link>

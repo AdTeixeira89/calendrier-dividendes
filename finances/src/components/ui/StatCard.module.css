@@ -71,3 +71,27 @@
   font-size: var(--text-xs);
   color: var(--text-subtle);
 }
+
+.link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+}
+
+.link:hover {
+  text-decoration: none;
+}
+
+.link:active .card {
+  transform: scale(0.985);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.link .card {
+  height: 100%;
+}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { TrendingDown, TrendingUp } from 'lucide-react'
 import type { Cents } from '@/types'
 import { formatCents, formatPercent } from '@/utils/money'
@@ -18,13 +19,15 @@ interface StatCardProps {
   /** Une hausse est-elle une bonne nouvelle ? (vrai pour revenus/épargne, faux pour dépenses). */
   higherIsBetter?: boolean
   footnote?: ReactNode
+  /** Rend toute la carte cliquable vers cette page. */
+  to?: string
 }
 
-export function StatCard({ label, amount, displayValue, tone = 'accent', icon, change, higherIsBetter = true, footnote }: StatCardProps) {
+export function StatCard({ label, amount, displayValue, tone = 'accent', icon, change, higherIsBetter = true, footnote, to }: StatCardProps) {
   const hasChange = change !== undefined && change !== null && Number.isFinite(change)
   const positive = hasChange && (change > 0) === higherIsBetter
   const value = displayValue ?? (amount === null ? '—' : formatCents(amount, 'EUR', { compact: true }))
-  return (
+  const card = (
     <article className={styles.card} style={{ ['--tone' as string]: toneColor(tone) }}>
       <div className={styles.head}>
         {icon && <span className={styles.icon}>{icon}</span>}
@@ -41,5 +44,12 @@ export function StatCard({ label, amount, displayValue, tone = 'accent', icon, c
         footnote && <p className={styles.footnote}>{footnote}</p>
       )}
     </article>
+  )
+  return to ? (
+    <Link to={to} className={styles.link}>
+      {card}
+    </Link>
+  ) : (
+    card
   )
 }

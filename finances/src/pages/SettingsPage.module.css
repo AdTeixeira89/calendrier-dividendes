@@ -28,3 +28,9 @@
   color: var(--text);
   box-shadow: var(--shadow);
 }
+
+@media (pointer: coarse) {
+  .segment {
+    min-height: 44px;
+  }
+}

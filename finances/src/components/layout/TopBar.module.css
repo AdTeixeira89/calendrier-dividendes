@@ -58,3 +58,10 @@
     display: none;
   }
 }
+
+/* Zone tactile de 44 px autour de l'avatar sans le grossir. */
+.avatar::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
