@@ -49,8 +49,12 @@ export function occurrenceDate(month: MonthKey, day: number): Date {
  * Mensuel : chaque mois. Annuel : seulement le mois anniversaire, pour le
  * montant entier (c'est ce qui sort réellement du compte). Le jour est celui
  * du prélèvement (date saisie), borné à la fin du mois (un 31 devient un 30).
+ *
+ * Une occurrence n'est comptée qu'à partir de sa date : tant que le jour du
+ * prélèvement n'est pas arrivé, rien n'est créé (`includeFuture` sert
+ * uniquement à réaligner une dépense déjà créée après modification).
  */
-export function dueOccurrences(subscription: Subscription, categories: Category[], today: Date = new Date()): DueOccurrence[] {
+export function dueOccurrences(subscription: Subscription, categories: Category[], today: Date = new Date(), options: { includeFuture?: boolean } = {}): DueOccurrence[] {
   if (subscription.archived || subscription.autoExpense === false) return []
   const current = monthKey(today)
   const start = subscription.startMonth ?? current
@@ -62,15 +66,18 @@ export function dueOccurrences(subscription: Subscription, categories: Category[
   const day = billing?.getDate() ?? 1
   const anniversaryMonthIndex = (billing ?? monthRange(start).start).getMonth()
 
+  const endOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
   const occurrences: DueOccurrence[] = []
   for (const month of monthsBetween(start, current)) {
     if (subscription.skippedMonths?.includes(month)) continue
     if (subscription.period === 'yearly' && monthRange(month).start.getMonth() !== anniversaryMonthIndex) continue
+    const date = occurrenceDate(month, day)
+    if (!options.includeFuture && date > endOfToday) continue
     occurrences.push({
       id: occurrenceId(subscription.id, month),
       subscriptionId: subscription.id,
       month,
-      date: occurrenceDate(month, day),
+      date,
       amountCents: subscription.amountCents,
       categoryId,
       merchant: subscription.name,

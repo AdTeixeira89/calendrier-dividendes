@@ -38,7 +38,7 @@ describe('dueOccurrences', () => {
 
   it('prélève le jour saisi, borné à la fin du mois', () => {
     const s = sub({ startMonth: '2026-01', nextDate: Timestamp.fromDate(new Date(2026, 0, 31, 12)) })
-    const dates = dueOccurrences(s, categories, new Date(2026, 3, 15)).map((o) => o.date.getDate())
+    const dates = dueOccurrences(s, categories, new Date(2026, 3, 30)).map((o) => o.date.getDate())
     expect(dates).toEqual([31, 28, 31, 30])
   })
 
@@ -58,6 +58,25 @@ describe('dueOccurrences', () => {
   it('range dans « Autres » un abonnement sans catégorie, et ne crée rien sans aucune catégorie', () => {
     expect(dueOccurrences(sub({ categoryId: null }), categories, oct3)[0]!.categoryId).toBe('autres')
     expect(dueOccurrences(sub({ categoryId: null }), [], oct3)).toEqual([])
+  })
+})
+
+describe('prise en compte à partir de la date', () => {
+  const oct15 = Timestamp.fromDate(new Date(2026, 9, 15, 12))
+
+  it('ne compte pas la dépense avant son jour (15 octobre, aujourd’hui le 5)', () => {
+    expect(dueOccurrences(sub({ startMonth: '2026-10', nextDate: oct15 }), categories, new Date(2026, 9, 5))).toEqual([])
+  })
+
+  it('la compte le jour dit, avec cette date, puis à chaque mois', () => {
+    const [o] = dueOccurrences(sub({ startMonth: '2026-10', nextDate: oct15 }), categories, new Date(2026, 9, 15, 8))
+    expect(o!.date).toEqual(new Date(2026, 9, 15, 12))
+    const months = dueOccurrences(sub({ startMonth: '2026-10', nextDate: oct15 }), categories, new Date(2026, 10, 20)).map((x) => x.date.toDateString())
+    expect(months).toEqual([new Date(2026, 9, 15).toDateString(), new Date(2026, 10, 15).toDateString()])
+  })
+
+  it('« includeFuture » permet de réaligner une dépense déjà créée', () => {
+    expect(dueOccurrences(sub({ startMonth: '2026-10', nextDate: oct15 }), categories, new Date(2026, 9, 5), { includeFuture: true })).toHaveLength(1)
   })
 })
 

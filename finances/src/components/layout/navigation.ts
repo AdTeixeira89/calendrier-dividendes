@@ -9,7 +9,6 @@ import {
   Landmark,
   PiggyBank,
   Receipt,
-  Repeat,
   Settings,
   Users,
   Wallet,
@@ -34,7 +33,6 @@ export const PRIMARY_NAV: NavItem[] = [
 /** Menu secondaire (page « Plus » sur mobile, rail latéral sur desktop). */
 export const SECONDARY_NAV: NavItem[] = [
   { to: '/patrimoine', label: 'Patrimoine', icon: Landmark },
-  { to: '/abonnements', label: 'Abonnements', icon: Repeat },
   { to: '/ia', label: 'IA Finance', icon: Bot },
   { to: '/foyer', label: 'Foyer & membres', icon: Users },
   { to: '/parametres', label: 'Paramètres', icon: Settings },

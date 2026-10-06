@@ -1,0 +1,52 @@
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title strong {
+  font-size: var(--text-base);
+}
+
+.title span {
+  font-size: var(--text-sm);
+}
+
+.chevron {
+  flex: none;
+  color: var(--text-subtle);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.open .chevron {
+  transform: rotate(180deg);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-4);
+}
+
+.panel > p,
+.panel > button {
+  margin-inline: var(--space-3);
+}

@@ -74,7 +74,10 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
     try {
       if (expense) await updateExpense(household.id, expense.id, data, user)
       else if (fixedMonthly) {
-        // La dépense saisie couvre son propre mois ; la charge fixe prend le relais dès le mois suivant.
+        // Comptée à partir de la date choisie : si elle est déjà passée, la dépense saisie couvre son mois et la
+        // charge fixe prend le relais le mois suivant ; si elle est à venir, rien n'est compté avant ce jour-là.
+        const first = data.date.toDate()
+        const upcoming = first > new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999)
         const subscriptionId = await createSubscription(
           household.id,
           {
@@ -86,11 +89,11 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
             usage: null,
             archived: false,
             autoExpense: true,
-            startMonth: shiftMonth(monthKey(data.date.toDate()), 1),
+            startMonth: upcoming ? monthKey(first) : shiftMonth(monthKey(first), 1),
           },
           user,
         )
-        await createExpense(household.id, { ...data, recurrenceId: subscriptionId }, user)
+        if (!upcoming) await createExpense(household.id, { ...data, recurrenceId: subscriptionId }, user)
       } else await createExpense(household.id, data, user)
       onClose()
     } catch (err) {
@@ -130,8 +133,8 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
         )}
         {expense?.recurrenceId && (
           <Notice tone="info">
-            Dépense ajoutée automatiquement chaque mois. Cette modification ne change que ce mois-ci ; pour les mois suivants, modifiez la charge dans
-            Abonnements et charges fixes.
+            Dépense ajoutée automatiquement chaque mois. Cette modification ne change que ce mois-ci ; pour les mois suivants, modifiez-la dans
+            « Dépenses récurrentes ».
           </Notice>
         )}
         <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
@@ -145,7 +148,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
         {!expense && (
           <ToggleRow
             label="Même montant chaque mois"
-            description="Eau, assurance, loyer… ajoutée automatiquement aux dépenses de chaque mois, même si la consommation varie."
+            description="Eau, assurance, loyer… ajoutée automatiquement chaque mois, à partir de la date choisie, même si la consommation varie."
             checked={fixedMonthly}
             onChange={setFixedMonthly}
           />

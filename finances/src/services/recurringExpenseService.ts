@@ -44,7 +44,7 @@ export async function createDueExpenses(householdId: string, occurrences: DueOcc
  */
 export async function syncCurrentOccurrence(householdId: string, subscription: Subscription, categories: Category[], actor: Actor): Promise<void> {
   const current = monthKey(new Date())
-  const occurrence = dueOccurrences(subscription, categories).find((o) => o.month === current)
+  const occurrence = dueOccurrences(subscription, categories, new Date(), { includeFuture: true }).find((o) => o.month === current)
   if (!occurrence) return
   if (!(await getDoc(householdItemDoc(householdId, 'expenses', occurrence.id))).exists()) return
   await updateItem(

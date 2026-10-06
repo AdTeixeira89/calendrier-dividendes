@@ -6,7 +6,6 @@ import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
-import { AbonnementsPage } from '@/pages/AbonnementsPage'
 import { AnalysePage } from '@/pages/AnalysePage'
 import { CategoriesPage } from '@/pages/CategoriesPage'
 import { DettePage } from '@/pages/DettePage'
@@ -54,7 +53,8 @@ export default function App() {
                     <Route path="analyse" element={<AnalysePage />} />
                     <Route path="patrimoine" element={<PatrimoinePage />} />
                     <Route path="objectifs" element={<Navigate to="/epargne" replace />} />
-                    <Route path="abonnements" element={<AbonnementsPage />} />
+                    {/* Anciennes adresses : les abonnements vivent désormais dans « Dépenses récurrentes » de la page Dépenses. */}
+                    <Route path="abonnements" element={<Navigate to="/depenses" replace />} />
                     <Route path="documents" element={<DocumentsPage />} />
                     <Route path="ia" element={<IAFinancePage />} />
                     <Route path="foyer" element={<HouseholdPage />} />

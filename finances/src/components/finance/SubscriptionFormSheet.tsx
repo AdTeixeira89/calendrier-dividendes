@@ -11,9 +11,15 @@ import { createSubscription, deleteSubscription, updateSubscription } from '@/se
 import type { Subscription } from '@/types'
 import type { SubscriptionPeriod } from '@/types/subscription'
 import { toUserMessage } from '@/utils/firebaseErrors'
-import { currentMonthKey } from '@/utils/month'
+import { currentMonthKey, monthKey } from '@/utils/month'
 import { CategoryPicker } from './CategoryPicker'
 import { ToggleRow } from './ToggleRow'
+
+/** Aujourd'hui au format AAAA-MM-JJ, en heure locale. */
+function todayInput(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 const fromTimestampOrNull = (t: Subscription['nextDate']) => (t ? fromTimestamp(t) : '')
 
@@ -32,7 +38,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
   const [period, setPeriod] = useState<SubscriptionPeriod>(subscription?.period ?? 'monthly')
   const [categoryId, setCategoryId] = useState(subscription?.categoryId ?? '')
   const [autoExpense, setAutoExpense] = useState(subscription?.autoExpense ?? true)
-  const [nextDate, setNextDate] = useState(subscription?.nextDate ? fromTimestamp(subscription.nextDate) : '')
+  const [nextDate, setNextDate] = useState(subscription ? (subscription.nextDate ? fromTimestamp(subscription.nextDate) : '') : todayInput())
   const [usage, setUsage] = useState<'frequent' | 'occasional' | 'rare' | ''>(subscription?.usage ?? '')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -44,7 +50,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
     if (autoExpense && !categoryId) return setError('Choisissez une catégorie : la dépense automatique y sera rangée.')
     setError(null)
     setLoading(true)
-    // Le suivi (re)démarre ce mois-ci à la création, ou quand on réactive la dépense automatique.
+    // Le suivi démarre au mois de la date choisie (la dépense n'est comptée qu'à partir de ce jour), ou ce mois-ci sans date.
     const keepsStart = subscription?.startMonth && (subscription.autoExpense ?? true)
     const data = {
       name: name.trim(),
@@ -55,7 +61,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
       usage: usage || null,
       archived: subscription?.archived ?? false,
       autoExpense,
-      startMonth: keepsStart ? subscription.startMonth : currentMonthKey(),
+      startMonth: keepsStart ? subscription.startMonth : nextDate ? monthKey(toTimestamp(nextDate).toDate()) : currentMonthKey(),
     }
     try {
       if (subscription) {
@@ -85,25 +91,25 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={subscription ? 'Modifier cet abonnement ou cette charge' : 'Nouvel abonnement ou charge fixe'}>
+    <Sheet open={open} onClose={onClose} title={subscription ? 'Modifier cette dépense récurrente' : 'Nouvelle dépense récurrente'}>
       <form className="stack" onSubmit={onSubmit} noValidate>
         {error && <Notice tone="danger">{error}</Notice>}
-        <TextField label="Nom" placeholder="Ex. Netflix, Spotify, Internet…" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <TextField label="Nom" placeholder="Ex. Netflix, Eau, Assurance, Internet…" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <TextField label="Montant" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} trailing={<span className="subtle">€</span>} />
           <SegmentedControl label="Période" value={period} onChange={setPeriod} options={[{ value: 'monthly', label: 'Mensuel' }, { value: 'yearly', label: 'Annuel' }]} />
         </div>
         {categories && <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />}
         <TextField
-          label="Prochain prélèvement (facultatif)"
+          label="Date de la dépense"
           type="date"
           value={nextDate}
           onChange={(e) => setNextDate(e.target.value)}
-          hint="Le jour du prélèvement : il sert au rappel et à la date de la dépense automatique."
+          hint="Comptée à partir de ce jour, puis chaque mois (ou chaque année) à la même date."
         />
         <ToggleRow
-          label="Ajouter aux dépenses chaque mois"
-          description="Une dépense de ce montant est créée automatiquement, sans ressaisie."
+          label="Ajouter aux dépenses automatiquement"
+          description="Une dépense de ce montant est créée à la date choisie, sans ressaisie."
           checked={autoExpense}
           onChange={setAutoExpense}
         />
@@ -114,7 +120,7 @@ export function SubscriptionFormSheet({ open, onClose, subscription }: Subscript
           <option value="rare">Rare</option>
         </Select>
         <Button type="submit" size="lg" block loading={loading}>
-          {subscription ? 'Enregistrer' : "Ajouter l'abonnement"}
+          {subscription ? 'Enregistrer' : 'Ajouter la dépense récurrente'}
         </Button>
         {subscription && (
           <ConfirmButton
