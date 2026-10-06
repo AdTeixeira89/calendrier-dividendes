@@ -53,7 +53,7 @@ export async function currentPushSubscription(): Promise<PushSubscription | null
 export async function enablePush(uid: string): Promise<void> {
   const permission = await Notification.requestPermission()
   if (permission !== 'granted') {
-    throw new Error("Notifications refusées. Pour les autoriser : Réglages de l'iPhone → Notifications → Foyer.")
+    throw new Error("Notifications refusées. Pour les autoriser : Réglages de l'iPhone → Notifications → Monelya.")
   }
   const registration = await serviceWorker()
   const subscription =

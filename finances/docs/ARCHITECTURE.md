@@ -1,4 +1,4 @@
-# Foyer — Architecture
+# Monelya — Architecture
 
 Application de gestion financière familiale : PWA React + TypeScript + Firebase.
 Principe UX absolu : **comprendre sa situation financière en moins de 30 secondes.**

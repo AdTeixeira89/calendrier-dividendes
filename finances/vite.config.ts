@@ -36,8 +36,8 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'Foyer — Finances familiales',
-        short_name: 'Foyer',
+        name: 'Monelya — Finances familiales',
+        short_name: 'Monelya',
         description: 'Votre directeur financier personnel : revenus, dépenses, épargne, dettes et patrimoine du foyer.',
         lang: 'fr',
         start_url: '.',

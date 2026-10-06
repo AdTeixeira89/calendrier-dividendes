@@ -171,7 +171,7 @@ export const sendTestPush = onCall({ secrets: [VAPID_PRIVATE_KEY] }, async (requ
   if (subscriptions.empty) throw new HttpsError('failed-precondition', "Aucun appareil n'est abonné aux notifications.")
   const delivered = await sendToSubscriptions(
     subscriptions.docs,
-    { title: 'Foyer', body: 'Les notifications fonctionnent sur cet appareil.', url: '/parametres', tag: 'test' },
+    { title: 'Monelya', body: 'Les notifications fonctionnent sur cet appareil.', url: '/parametres', tag: 'test' },
     webPushSender(),
   )
   if (delivered === 0) throw new HttpsError('failed-precondition', "L'abonnement de cet appareil a expiré : réactivez les notifications.")

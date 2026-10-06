@@ -1,4 +1,4 @@
-# Foyer — application mobile de finances familiales
+# Monelya — application mobile de finances familiales
 
 Finalité : une vraie application grand public, publiée à terme sur le Google Play Store et l'App Store.
 Ce n'est ni un prototype ni une application web provisoire. Priorité absolue : résoudre de vrais problèmes

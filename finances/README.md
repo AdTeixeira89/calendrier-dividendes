@@ -1,4 +1,4 @@
-# Foyer — Finances familiales
+# Monelya — Finances familiales
 
 PWA de gestion financière pour le foyer : revenus, dépenses, épargne, dettes, patrimoine, partagés entre
 les membres du foyer. React + TypeScript + Firebase. Architecture détaillée : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

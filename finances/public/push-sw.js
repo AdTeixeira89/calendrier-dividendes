@@ -11,7 +11,7 @@ self.addEventListener('push', (event) => {
   }
   const scope = self.registration.scope
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'Foyer', {
+    self.registration.showNotification(payload.title || 'Monelya', {
       body: payload.body || '',
       tag: payload.tag,
       icon: new URL('pwa-192x192.png', scope).href,

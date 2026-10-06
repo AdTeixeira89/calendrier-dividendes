@@ -40,7 +40,7 @@ export function PushNotificationsCard() {
         {support === 'needs-install' && (
           <Notice tone="info">
             Sur iPhone, les notifications ne fonctionnent qu'avec l'application installée : Safari → Partager → « Sur l'écran d'accueil », puis
-            ouvrez Foyer depuis l'écran d'accueil et revenez ici.
+            ouvrez Monelya depuis l'écran d'accueil et revenez ici.
           </Notice>
         )}
         {support === 'unsupported' && <Notice tone="info">Ce navigateur ne permet pas les notifications.</Notice>}
