@@ -49,7 +49,8 @@ export interface AlertInput {
   incomeCents: number
   /** Mensualités de prêts (capital + assurance), comptées comme charges fixes. */
   debtMonthlyCents: number
-  budgetLines: Record<string, number>
+  /** Budget global des dépenses communes (0 = aucun). */
+  budgetCents: number
   categoryNames: Record<string, string>
   subscriptions: { id: string; name: string; amountCents: number; period: 'monthly' | 'yearly'; nextDate: Date | null; archived: boolean }[]
   previousMonth: { month: string; incomeCents: number; expenseCents: number } | null
@@ -94,31 +95,26 @@ export function evaluateAlerts(input: AlertInput): FinancialAlert[] {
   const alerts: FinancialAlert[] = []
   const totalExpensesCents = input.expenses.reduce((sum, e) => sum + e.amountCents, 0) + input.debtMonthlyCents
 
-  if (settings.budget.enabled) {
-    const actual = new Map<string, number>()
-    for (const e of input.expenses) actual.set(e.categoryId, (actual.get(e.categoryId) ?? 0) + e.amountCents)
-    for (const [categoryId, plannedCents] of Object.entries(input.budgetLines)) {
-      if (plannedCents <= 0) continue
-      const spent = actual.get(categoryId) ?? 0
-      const name = input.categoryNames[categoryId] ?? 'Catégorie'
-      const percent = Math.round((spent / plannedCents) * 100)
-      if (spent > plannedCents) {
-        alerts.push({
-          key: `budget-exceeded:${input.month}:${categoryId}`,
-          severity: 'danger',
-          title: `Budget « ${name} » dépassé`,
-          message: `${formatCents(spent)} dépensés pour un budget de ${formatCents(plannedCents)} (+${formatCents(spent - plannedCents)}).`,
-          link: '/depenses',
-        })
-      } else if (percent >= settings.budget.warnPercent) {
-        alerts.push({
-          key: `budget-warning:${input.month}:${categoryId}`,
-          severity: 'warning',
-          title: `Budget « ${name} » à ${percent} %`,
-          message: `${formatCents(spent)} dépensés sur ${formatCents(plannedCents)} : il reste ${formatCents(plannedCents - spent)}.`,
-          link: '/depenses',
-        })
-      }
+  // Un seul budget global : dépenses communes et mensualités de prêts, comme dans le suivi de l'application.
+  if (settings.budget.enabled && input.budgetCents > 0) {
+    const planned = input.budgetCents
+    const percent = Math.round((totalExpensesCents / planned) * 100)
+    if (totalExpensesCents > planned) {
+      alerts.push({
+        key: `budget-exceeded:${input.month}`,
+        severity: 'danger',
+        title: 'Budget commun dépassé',
+        message: `${formatCents(totalExpensesCents)} dépensés pour un budget de ${formatCents(planned)} (+${formatCents(totalExpensesCents - planned)}).`,
+        link: '/depenses',
+      })
+    } else if (percent >= settings.budget.warnPercent) {
+      alerts.push({
+        key: `budget-warning:${input.month}`,
+        severity: 'warning',
+        title: `Budget commun à ${percent} %`,
+        message: `${formatCents(totalExpensesCents)} dépensés sur ${formatCents(planned)} : il reste ${formatCents(planned - totalExpensesCents)}.`,
+        link: '/depenses',
+      })
     }
   }
 

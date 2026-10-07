@@ -289,3 +289,9 @@ finances/
 - **Trois espaces** : « Communes » (`scope: shared`) et un espace par membre (`scope: personal`, `memberId`). Les totaux, alertes, graphiques de l'accueil, rapports et contexte IA ne comptent que les dépenses communes (`utils/spaces.ts`, filtres équivalents dans `functions/`).
 - **Dépenses privées** : stockées dans `households/{hid}/members/{uid}/privateExpenses/{id}`, lisibles et modifiables par leur seul propriétaire (règles testées). Elles ne passent ni par le journal d'audit ni par les fonctions serveur. `watchExpensesRange` fusionne la collection partagée et l'espace privé de l'utilisateur ; passer une dépense de partagée à privée la déplace avec le même identifiant (`moveExpense`).
 - **Reprise mensuelle** (`hooks/useMonthlyCopies.ts`, `utils/recurringCopies.ts`) : les dépenses de type « Récurrente » du mois précédent sont recopiées (id `{origine}_{AAAA-MM}`, idempotent entre appareils), à partir de leur jour ; une reprise supprimée à la main est mémorisée (`settings/recurringCopies`) et ne revient pas. Les règles issues d'un abonnement gardent leur propre mécanisme.
+
+## 6 sexies. Budget global des dépenses communes
+
+- **Un seul budget** : `settings/budgetGlobal.totalCents` (facultatif) ; à défaut, le total des sommes versées au budget commun (`settings/budgetSplit`). Règle partagée app/functions : `functions/src/shared/budget.ts`. Les anciens budgets par catégorie (`budgets/{mois}`) ne sont plus lus ni demandés.
+- **Suivi** (`utils/budgetSplit.ts`, `hooks/useCommonBudget.ts`) : dépensé = dépenses communes + mensualités de prêts ; reste du foyer = budget − dépensé ; reste de chaque personne = ce qu'elle a versé − sa part des dépenses (proportionnelle à son versement). Le salaire n'intervient pas.
+- « Épargne » (accueil) = total des objectifs d'épargne ; le solde « revenus − dépenses » n'est jamais présenté comme de l'épargne.

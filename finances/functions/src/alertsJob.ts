@@ -1,5 +1,6 @@
 import { FieldValue, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { evaluateAlerts, withDefaultSettings, type AlertInput, type AlertSettings, type FinancialAlert } from './shared/alerts.js'
+import { commonBudgetCents } from './shared/budget.js'
 import type { PushPayload } from './shared/push.js'
 
 export interface StoredPushSubscription {
@@ -41,13 +42,14 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
   const cur = monthBounds(month)
   const prev = monthBounds(previousMonth)
 
-  const [expenses, incomes, prevExpenses, prevIncomes, debts, budget, categories, subscriptions, settings] = await Promise.all([
+  const [expenses, incomes, prevExpenses, prevIncomes, debts, budgetGlobal, budgetSplit, categories, subscriptions, settings] = await Promise.all([
     ref.collection('expenses').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
     ref.collection('incomes').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
     ref.collection('expenses').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
     ref.collection('incomes').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
     ref.collection('debts').get(),
-    ref.collection('budgets').doc(month).get(),
+    ref.collection('settings').doc('budgetGlobal').get(),
+    ref.collection('settings').doc('budgetSplit').get(),
     ref.collection('categories').get(),
     ref.collection('subscriptions').get(),
     ref.collection('settings').doc('alerts').get(),
@@ -59,7 +61,7 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
     expenses: commonOnly(expenses.docs).map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
     incomeCents: cents(incomes.docs),
     debtMonthlyCents: debts.docs.reduce((sum, d) => sum + ((d.data().monthlyPaymentCents as number) ?? 0) + ((d.data().insuranceCents as number) ?? 0), 0),
-    budgetLines: (budget.data()?.lines as Record<string, number> | undefined) ?? {},
+    budgetCents: commonBudgetCents(budgetGlobal.data()?.totalCents as number | null | undefined, budgetSplit.data()?.plans as Record<string, { commonCents?: number }> | undefined),
     categoryNames: Object.fromEntries(categories.docs.map((d) => [d.id, d.data().name as string])),
     subscriptions: subscriptions.docs.map((d) => {
       const data = d.data()

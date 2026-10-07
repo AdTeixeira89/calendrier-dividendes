@@ -53,7 +53,7 @@ export function IncomesPage() {
         </Button>
       )}
 
-      <BudgetSplitSection month={month} incomes={incomes} />
+      <BudgetSplitSection month={month} />
 
       <Card title="Revenus du mois" padded={incomes !== undefined && incomes.length === 0}>
         {incomes === undefined ? null : incomes.length === 0 ? (

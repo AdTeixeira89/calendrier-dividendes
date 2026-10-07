@@ -65,7 +65,7 @@ export function AlertSettingsCard({ initial }: { initial: AlertSettings }) {
     <Card title="Alertes" subtitle="Communes à tout le foyer : carte de l'accueil et notifications.">
       <form className="stack" onSubmit={onSubmit}>
         {status && <Notice tone={status.tone}>{status.text}</Notice>}
-        <Rule label="Budgets" description="Catégorie proche de son budget ou dépassée." checked={settings.budget.enabled} onChange={(enabled) => update('budget', { enabled })} disabled={readOnly}>
+        <Rule label="Budgets" description="Budget des dépenses communes proche d'être atteint ou dépassé." checked={settings.budget.enabled} onChange={(enabled) => update('budget', { enabled })} disabled={readOnly}>
           <NumberSetting label="Prévenir à partir de" suffix="% du budget" value={settings.budget.warnPercent} min={50} max={100} onChange={(warnPercent) => update('budget', { warnPercent })} disabled={readOnly} />
         </Rule>
         <Rule label="Dépenses > revenus" description="Les dépenses du mois (prêts compris) dépassent les revenus." checked={settings.overspend.enabled} onChange={(enabled) => update('overspend', { enabled })} disabled={readOnly} />

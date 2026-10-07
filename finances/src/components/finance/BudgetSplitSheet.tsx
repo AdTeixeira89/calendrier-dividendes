@@ -4,9 +4,8 @@ import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { saveBudgetSplit } from '@/services/budgetSplitService'
 import type { Cents } from '@/types'
-import { EMPTY_PLAN, type BudgetSplitSettings, type HouseholdSplit, type MemberPlan } from '@/utils/budgetSplit'
+import { EMPTY_PLAN, type BudgetSplitSettings, type MemberPlan } from '@/utils/budgetSplit'
 import { toUserMessage } from '@/utils/firebaseErrors'
-import { formatCents } from '@/utils/money'
 import { AmountField } from './AmountField'
 
 interface BudgetSplitSheetProps {
@@ -14,12 +13,11 @@ interface BudgetSplitSheetProps {
   onClose: () => void
   householdId: string
   settings: BudgetSplitSettings
-  split: HouseholdSplit
 }
 
 type Field = keyof MemberPlan
 
-export function BudgetSplitSheet({ open, onClose, householdId, settings, split }: BudgetSplitSheetProps) {
+export function BudgetSplitSheet({ open, onClose, householdId, settings }: BudgetSplitSheetProps) {
   const user = useCurrentUser()
   const { members } = useHousehold()
   const [plans, setPlans] = useState<Record<string, MemberPlan>>(() => Object.fromEntries(members.map((m) => [m.uid, settings.plans[m.uid] ?? EMPTY_PLAN])))
@@ -49,26 +47,18 @@ export function BudgetSplitSheet({ open, onClose, householdId, settings, split }
       <form className="stack" onSubmit={onSubmit} noValidate>
         {error && <Notice tone="danger">{error}</Notice>}
         <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
-          Montants mensuels. Le reste personnel est calculé à partir des revenus du mois de chaque personne.
+          Montants mensuels. « Versé au budget commun » est ce que chaque personne met réellement dans les dépenses du foyer ; épargne et investissement restent à part.
         </p>
         {members.map((m) => {
           const plan = plans[m.uid] ?? EMPTY_PLAN
-          const salary = split.members.find((s) => s.memberId === m.uid)?.salaryCents ?? 0
-          const remaining = salary - plan.commonCents - plan.savingsCents - plan.investCents
           return (
             <fieldset key={m.uid} className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
               <legend style={{ fontWeight: 600, marginBottom: 8 }}>{m.displayName}</legend>
-              <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
-                Revenus du mois : {formatCents(salary)}
-              </p>
               <AmountField label="Versé au budget commun" value={plan.commonCents || null} onChange={(c) => setField(m.uid, 'commonCents', c)} />
               <div className="row" style={{ alignItems: 'flex-start' }}>
                 <AmountField label="Épargne" value={plan.savingsCents || null} onChange={(c) => setField(m.uid, 'savingsCents', c)} />
                 <AmountField label="Investissement" value={plan.investCents || null} onChange={(c) => setField(m.uid, 'investCents', c)} />
               </div>
-              <p className="num" style={{ fontSize: 'var(--text-sm)', color: remaining < 0 ? 'var(--danger)' : undefined }}>
-                Reste personnel : {formatCents(remaining)}
-              </p>
             </fieldset>
           )
         })}

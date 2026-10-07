@@ -10,7 +10,7 @@ function input(overrides: Partial<AlertInput> = {}): AlertInput {
     expenses: [],
     incomeCents: 0,
     debtMonthlyCents: 0,
-    budgetLines: {},
+    budgetCents: 0,
     categoryNames: { food: 'Alimentation' },
     subscriptions: [],
     previousMonth: null,
@@ -21,23 +21,28 @@ function input(overrides: Partial<AlertInput> = {}): AlertInput {
 
 describe('evaluateAlerts — budgets', () => {
   it('signale un budget dépassé', () => {
-    const alerts = evaluateAlerts(input({ budgetLines: { food: 30000 }, expenses: [{ amountCents: 32000, categoryId: 'food' }] }))
+    const alerts = evaluateAlerts(input({ budgetCents: 30000, expenses: [{ amountCents: 32000, categoryId: 'food' }] }))
     expect(alerts).toHaveLength(1)
-    expect(alerts[0]!.key).toBe('budget-exceeded:2026-09:food')
+    expect(alerts[0]!.key).toBe('budget-exceeded:2026-09')
     expect(alerts[0]!.severity).toBe('danger')
     expect(normalize(alerts[0]!.message)).toContain('+20,00 €')
   })
 
   it('prévient à partir du seuil réglé', () => {
-    const alerts = evaluateAlerts(input({ budgetLines: { food: 30000 }, expenses: [{ amountCents: 27500, categoryId: 'food' }] }))
-    expect(alerts.map((a) => a.key)).toEqual(['budget-warning:2026-09:food'])
+    const alerts = evaluateAlerts(input({ budgetCents: 30000, expenses: [{ amountCents: 27500, categoryId: 'food' }] }))
+    expect(alerts.map((a) => a.key)).toEqual(['budget-warning:2026-09'])
     expect(alerts[0]!.title).toContain('92 %')
   })
 
+  it('compte les mensualités de prêts dans le budget global, et ignore l’absence de budget', () => {
+    expect(evaluateAlerts(input({ budgetCents: 30000, debtMonthlyCents: 31000 }))[0]!.key).toBe('budget-exceeded:2026-09')
+    expect(evaluateAlerts(input({ budgetCents: 0, expenses: [{ amountCents: 99999, categoryId: 'food' }] }))).toEqual([])
+  })
+
   it('reste silencieux sous le seuil ou si la règle est désactivée', () => {
-    expect(evaluateAlerts(input({ budgetLines: { food: 30000 }, expenses: [{ amountCents: 10000, categoryId: 'food' }] }))).toEqual([])
+    expect(evaluateAlerts(input({ budgetCents: 30000, expenses: [{ amountCents: 10000, categoryId: 'food' }] }))).toEqual([])
     const settings = withDefaultSettings({ budget: { enabled: false, warnPercent: 90 } })
-    expect(evaluateAlerts(input({ settings, budgetLines: { food: 100 }, expenses: [{ amountCents: 5000, categoryId: 'food' }] }))).toEqual([])
+    expect(evaluateAlerts(input({ settings, budgetCents: 100, expenses: [{ amountCents: 5000, categoryId: 'food' }] }))).toEqual([])
   })
 })
 
@@ -103,7 +108,7 @@ describe('evaluateAlerts — ordre', () => {
       input({
         incomeCents: 1000,
         expenses: [{ amountCents: 30000, categoryId: 'food' }],
-        budgetLines: { food: 100000 },
+        budgetCents: 100000,
         subscriptions: [{ id: 's', name: 'Spotify', amountCents: 1000, period: 'monthly', archived: false, nextDate: new Date(2026, 8, 21) }],
         previousMonth: { month: '2026-08', incomeCents: 1000, expenseCents: 1000 },
       }),

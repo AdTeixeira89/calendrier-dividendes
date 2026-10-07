@@ -1,106 +1,90 @@
 import { useState } from 'react'
-import { Card } from '@/components/ui'
+import { Pencil } from 'lucide-react'
+import { Button, Card, ProgressBar } from '@/components/ui'
 import { useCurrentUser } from '@/hooks/useAuth'
+import { useCommonBudget } from '@/hooks/useCommonBudget'
 import { useHousehold } from '@/hooks/useHousehold'
-import { setBudgetLine } from '@/services/budgetService'
-import type { Budget, Category, Expense } from '@/types'
+import { saveGlobalBudget } from '@/services/budgetGlobalService'
 import type { MonthKey } from '@/utils/month'
-import { totalsByCategory } from '@/utils/monthlyStats'
-import { formatCents, parseAmountToCents } from '@/utils/money'
-import { CategoryIcon } from './CategoryIcon'
-import styles from './BudgetSection.module.css'
+import { formatCents } from '@/utils/money'
+import { AmountField } from './AmountField'
+import styles from './BudgetSplitCard.module.css'
 
-interface BudgetSectionProps {
-  month: MonthKey
-  categories: Category[]
-  expenses: Expense[]
-  budget: Budget | null | undefined
-}
+const eur = (cents: number) => formatCents(cents, 'EUR', { compact: true })
 
-/** « Budget prévu / Réel / Écart » par catégorie, pour le mois affiché (cahier des charges §6). */
-export function BudgetSection({ month, categories, expenses, budget }: BudgetSectionProps) {
+/**
+ * Budget des dépenses communes du mois : un seul budget global (celui inscrit, sinon le
+ * total versé par chacun), ce qui est dépensé, ce qu'il reste, et le reste de chaque personne.
+ */
+export function BudgetSection({ month }: { month: MonthKey }) {
   const user = useCurrentUser()
-  const { household, canWrite } = useHousehold()
-  const actualByCategory = new Map(totalsByCategory(expenses).map((t) => [t.categoryId, t.amountCents]))
-  const roots = categories.filter((c) => !c.parentId && !c.archived)
-
-  return (
-    <Card title="Budget du mois" subtitle="Prévu, réel et écart par catégorie">
-      <ul className={styles.list}>
-        {roots.map((category) => (
-          <BudgetRow
-            key={category.id}
-            category={category}
-            plannedCents={budget?.lines[category.id] ?? 0}
-            actualCents={actualByCategory.get(category.id) ?? 0}
-            editable={canWrite}
-            onSave={(cents) => void setBudgetLine(household.id, month, category.id, cents, user)}
-          />
-        ))}
-      </ul>
-    </Card>
-  )
-}
-
-function BudgetRow({
-  category,
-  plannedCents,
-  actualCents,
-  editable,
-  onSave,
-}: {
-  category: Category
-  plannedCents: number
-  actualCents: number
-  editable: boolean
-  onSave: (cents: number) => void
-}) {
+  const { household, members, canWrite } = useHousehold()
+  const budget = useCommonBudget(month)
   const [editing, setEditing] = useState(false)
-  const [raw, setRaw] = useState(plannedCents > 0 ? String(plannedCents / 100).replace('.', ',') : '')
-  const variance = actualCents - plannedCents
+  const [cents, setCents] = useState<number | null>(null)
+  if (!budget) return null
+  const { split, overrideCents } = budget
+  const over = split.commonRemainingCents < 0
+  const used = split.budgetCents > 0 ? (split.commonSpentCents / split.budgetCents) * 100 : 0
+  const nameOf = (uid: string) => members.find((m) => m.uid === uid)?.displayName ?? 'Membre'
 
-  function commit() {
-    const cents = parseAmountToCents(raw)
-    if (cents !== null && cents >= 0) onSave(cents)
+  function save(value: number | null) {
+    void saveGlobalBudget(household.id, value, user)
     setEditing(false)
   }
 
   return (
-    <li className={styles.row}>
-      <div className={styles.rowHead}>
-        <CategoryIcon icon={category.icon} color={category.color} size="sm" />
-        <span className={styles.name}>{category.name}</span>
-      </div>
-      <div className={styles.figures}>
-        <span className={styles.figure}>
-          <span className={styles.figureLabel}>Budget</span>
-          {editing ? (
-            <input
-              className={styles.input}
-              autoFocus
-              inputMode="decimal"
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => e.key === 'Enter' && commit()}
-            />
-          ) : (
-            <button type="button" className={styles.planned} disabled={!editable} onClick={() => setEditing(true)}>
-              {plannedCents > 0 ? formatCents(plannedCents, 'EUR', { compact: true }) : 'Définir'}
-            </button>
+    <Card title="Budget des dépenses communes" subtitle="Un seul budget pour tout le foyer" action={canWrite && !editing ? <Button variant="ghost" size="sm" icon={<Pencil size={16} />} onClick={() => { setCents(overrideCents ?? (split.budgetCents || null)); setEditing(true) }}>{split.budgetCents > 0 ? 'Modifier' : 'Définir'}</Button> : undefined}>
+      {editing ? (
+        <div className="stack">
+          <AmountField label="Budget global du mois" value={cents} onChange={setCents} autoFocus />
+          <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
+            Un seul montant pour toutes les dépenses communes (charges fixes, courses, électricité…), pas un budget par catégorie. Sans montant, on prend le total versé par chacun.
+          </p>
+          <div className="row">
+            <Button block onClick={() => save(cents)}>
+              Enregistrer
+            </Button>
+            {overrideCents !== null && (
+              <Button variant="secondary" block onClick={() => save(null)}>
+                Total des versements
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : split.budgetCents <= 0 ? (
+        <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
+          Aucun budget pour l’instant : définissez un montant global, ou réglez la part versée par chacun dans « Répartition des revenus » (page Revenus).
+        </p>
+      ) : (
+        <>
+          <div className={styles.envelope}>
+            <div className={styles.line}>
+              <strong>{over ? 'Budget dépassé' : 'Reste du budget'}</strong>
+              <strong className="num" style={{ color: over ? 'var(--danger)' : undefined }}>
+                {over ? `de ${eur(-split.commonRemainingCents)}` : eur(split.commonRemainingCents)}
+              </strong>
+            </div>
+            <ProgressBar value={used} tone={over ? 'expense' : 'saving'} label="Budget commun consommé" size="lg" />
+            <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
+              {eur(split.commonSpentCents)} dépensés sur {eur(split.budgetCents)}
+              {overrideCents === null && ' (total versé par chacun)'} · prêts compris
+            </p>
+          </div>
+          {split.commonCents > 0 && (
+            <ul className={styles.members}>
+              {split.members
+                .filter((m) => m.commonCents > 0)
+                .map((m) => (
+                  <li key={m.memberId} className="subtle">
+                    <strong style={{ color: 'var(--text)' }}>{nameOf(m.memberId)}</strong> : versé {eur(m.commonCents)} · part dépensée {eur(m.spentShareCents)} ·{' '}
+                    <span style={m.leftCents < 0 ? { color: 'var(--danger)' } : undefined}>reste {eur(m.leftCents)}</span>
+                  </li>
+                ))}
+            </ul>
           )}
-        </span>
-        <span className={styles.figure}>
-          <span className={styles.figureLabel}>Réel</span>
-          <span className="num">{formatCents(actualCents, 'EUR', { compact: true })}</span>
-        </span>
-        <span className={styles.figure}>
-          <span className={styles.figureLabel}>Écart</span>
-          <span className={`num ${styles.variance} ${variance > 0 ? styles.over : variance < 0 ? styles.under : ''}`}>
-            {variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${formatCents(variance, 'EUR', { compact: true })}`}
-          </span>
-        </span>
-      </div>
-    </li>
+        </>
+      )}
+    </Card>
   )
 }

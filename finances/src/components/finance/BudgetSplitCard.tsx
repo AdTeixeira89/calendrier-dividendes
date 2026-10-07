@@ -23,10 +23,10 @@ export function BudgetSplitCard({ settings, split }: BudgetSplitCardProps) {
   const [editing, setEditing] = useState(false)
   const panelId = useId()
   const configured = members.some((m) => !planIsEmpty(settings.plans[m.uid]))
-  const sheet = <BudgetSplitSheet key={JSON.stringify(settings.plans)} open={editing} onClose={() => setEditing(false)} householdId={household.id} settings={settings} split={split} />
+  const sheet = <BudgetSplitSheet key={JSON.stringify(settings.plans)} open={editing} onClose={() => setEditing(false)} householdId={household.id} settings={settings} />
   const over = split.commonRemainingCents < 0
   const summary = !configured ? 'À régler' : over ? `Budget commun dépassé de ${eur(-split.commonRemainingCents)}` : `Budget commun : ${eur(split.commonRemainingCents)} restants`
-  const used = split.commonCents > 0 ? (split.commonSpentCents / split.commonCents) * 100 : 0
+  const used = split.budgetCents > 0 ? (split.commonSpentCents / split.budgetCents) * 100 : 0
 
   return (
     <>
@@ -55,7 +55,7 @@ export function BudgetSplitCard({ settings, split }: BudgetSplitCardProps) {
                     <span className="num">{eur(split.incomeCents)}</span>
                   </li>
                   <li className={styles.line}>
-                    <span>Budget commun</span>
+                    <span>Versé au budget commun</span>
                     <span className="num">{eur(split.commonCents)}</span>
                   </li>
                   <li className={styles.line}>
@@ -65,10 +65,6 @@ export function BudgetSplitCard({ settings, split }: BudgetSplitCardProps) {
                   <li className={styles.line}>
                     <span>Investissement</span>
                     <span className="num">{eur(split.investCents)}</span>
-                  </li>
-                  <li className={`${styles.line} ${styles.total}`}>
-                    <span>Reste personnel</span>
-                    <span className="num">{eur(split.personalCents)}</span>
                   </li>
                 </ul>
 
@@ -81,15 +77,15 @@ export function BudgetSplitCard({ settings, split }: BudgetSplitCardProps) {
                   </div>
                   <ProgressBar value={used} tone={over ? 'expense' : 'saving'} label="Budget commun consommé" size="lg" />
                   <p className="subtle" style={{ fontSize: 'var(--text-sm)' }}>
-                    {eur(split.commonSpentCents)} dépensés sur {eur(split.commonCents)} (dépenses communes et mensualités de prêts)
+                    {eur(split.commonSpentCents)} dépensés sur {eur(split.budgetCents)} (dépenses communes et mensualités de prêts)
                   </p>
                 </div>
 
                 <ul className={styles.members}>
                   {split.members.map((m) => (
                     <li key={m.memberId} className="subtle">
-                      <strong style={{ color: 'var(--text)' }}>{members.find((x) => x.uid === m.memberId)?.displayName ?? 'Membre'}</strong> : {eur(m.salaryCents)} → {eur(m.commonCents)} commun · {eur(m.savingsCents)} épargne ·{' '}
-                      {eur(m.investCents)} investi · reste {eur(m.remainingCents)}
+                      <strong style={{ color: 'var(--text)' }}>{members.find((x) => x.uid === m.memberId)?.displayName ?? 'Membre'}</strong> : versé {eur(m.commonCents)} · reste {eur(m.leftCents)} · épargne {eur(m.savingsCents)} · investi{' '}
+                      {eur(m.investCents)}
                     </li>
                   ))}
                 </ul>

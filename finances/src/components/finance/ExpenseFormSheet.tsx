@@ -14,6 +14,7 @@ import { monthKey, shiftMonth } from '@/utils/month'
 import { COMMON_SPACE, expenseSpace, spaceFields, type Space } from '@/utils/spaces'
 import { CategoryPicker } from './CategoryPicker'
 import { AmountField } from './AmountField'
+import { NewCategoryInline } from './NewCategoryInline'
 import { SpaceFields, type Privacy } from './SpaceFields'
 import { ToggleRow } from './ToggleRow'
 
@@ -150,6 +151,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
           </Notice>
         )}
         <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
+        <NewCategoryInline onCreated={setCategoryId} />
         <TextField
           label={ruleMode ? 'Nom de la charge fixe' : 'Commerçant (facultatif)'}
           placeholder={ruleMode ? 'Ex. Eau, assurance habitation…' : undefined}

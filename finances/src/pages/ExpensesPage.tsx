@@ -13,7 +13,7 @@ import { Button, Card, EmptyState, StatCard } from '@/components/ui'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useCategories } from '@/hooks/useCategories'
-import { useBudget } from '@/hooks/useBudget'
+import { useCommonBudget } from '@/hooks/useCommonBudget'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
@@ -32,7 +32,7 @@ export function ExpensesPage() {
   const { month, setMonth } = useMonthNav()
   const categories = useCategories(household.id, 'expense')
   const allExpenses = useMonthlyExpenses(household.id, month)
-  const budget = useBudget(household.id, month)
+  const commonBudget = useCommonBudget(month)
   const prevMonth = previousMonthKey(month)
   const allPrevExpenses = useMonthlyExpenses(household.id, prevMonth)
   const [params, setParams] = useSearchParams()
@@ -74,7 +74,8 @@ export function ExpensesPage() {
   const loading = categories === undefined || expenses === undefined
   const toPaceInput = (list: Expense[]) => list.map((e) => ({ amountCents: e.amountCents, date: e.date.toDate() }))
   const pace = expenses && prevExpenses && (expenses.length > 0 || prevExpenses.length > 0) ? spendingPace(month, toPaceInput(expenses), prevMonth, toPaceInput(prevExpenses)) : null
-  const budgetTotal = budget ? Object.values(budget.lines).reduce((sum, cents) => sum + cents, 0) : null
+  // Budget global des dépenses communes : repère du graphique, affiché dans l'espace Communes seulement.
+  const budgetTotal = space === COMMON_SPACE && commonBudget && commonBudget.split.budgetCents > 0 ? commonBudget.split.budgetCents : null
 
   return (
     <div className="stack animate-in">
@@ -140,7 +141,7 @@ export function ExpensesPage() {
         )}
       </Card>
 
-      {!loading && space === COMMON_SPACE && categories.length > 0 && <BudgetSection month={month} categories={categories} expenses={expenses} budget={budget} />}
+      {space === COMMON_SPACE && <BudgetSection month={month} />}
 
       {categories !== undefined && (
         <ExpenseFormSheet

@@ -7,28 +7,25 @@ import { useCategories } from '@/hooks/useCategories'
 import { useDebts } from '@/hooks/useDebts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
+import { useCommonBudget } from '@/hooks/useCommonBudget'
 import { useCommonMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
-import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { useTrend } from '@/hooks/useTrend'
 import { aggregateDebts } from '@/utils/debt'
-import { formatPercent, percentChange } from '@/utils/money'
-import { previousMonthKey } from '@/utils/month'
-import { summarizeMonth, withDebtCharges } from '@/utils/monthlyStats'
+import { formatPercent } from '@/utils/money'
 
 export function AnalysePage() {
   const { household } = useHousehold()
   const { month, setMonth } = useMonthNav()
   const categories = useCategories(household.id, 'expense')
   const expenses = useCommonMonthlyExpenses(household.id, month)
-  const incomes = useMonthlyIncomes(household.id, month)
-  const prevExpenses = useCommonMonthlyExpenses(household.id, previousMonthKey(month))
-  const prevIncomes = useMonthlyIncomes(household.id, previousMonthKey(month))
   const trend = useTrend(household.id, month, 6)
   const debts = useDebts(household.id)
+  const commonBudget = useCommonBudget(month)
+  const hasBudget = Boolean(commonBudget && commonBudget.split.budgetCents > 0)
+  // Épargne = ce qui est réellement mis de côté (épargne + investissement prévus), jamais « revenus − dépenses ».
+  const savingsRate = commonBudget && commonBudget.split.incomeCents > 0 && commonBudget.split.savingsCents + commonBudget.split.investCents > 0 ? ((commonBudget.split.savingsCents + commonBudget.split.investCents) / commonBudget.split.incomeCents) * 100 : null
 
   const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
-  const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
-  const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
 
   return (
     <div className="stack animate-in">
@@ -39,16 +36,15 @@ export function AnalysePage() {
         <StatCard
           label="Taux d'épargne"
           amount={null}
-          displayValue={summary?.savingsRate !== null && summary?.savingsRate !== undefined ? formatPercent(summary.savingsRate) : '—'}
+          displayValue={savingsRate === null ? '—' : formatPercent(savingsRate)}
           tone="saving"
-          footnote={summary?.savingsRate === null || summary?.savingsRate === undefined ? 'Aucun revenu ce mois-ci' : undefined}
+          footnote={savingsRate === null ? 'Réglez la répartition des revenus' : 'Épargne et investissement prévus / revenus'}
         />
         <StatCard
           label="Reste à vivre"
-          amount={summary?.livingAllowanceCents ?? null}
+          amount={hasBudget ? commonBudget!.split.commonRemainingCents : null}
           tone="accent"
-          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
-          footnote="Après charges fixes et mensualités de prêts"
+          footnote={hasBudget ? 'Reste du budget des dépenses communes' : 'Définissez le budget commun'}
         />
       </section>
 

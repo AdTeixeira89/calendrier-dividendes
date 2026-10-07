@@ -68,7 +68,7 @@ describe('buildFinancialSummaryText', () => {
     expect(text).toContain('septembre 2026')
     expect(text).toContain('Revenus totaux : 3 000,00 €')
     expect(text).toContain('Dépenses totales : 42,00 €')
-    expect(text).toContain("taux d'épargne : 98.6 %")
+    expect(text).toContain('Solde du mois (revenus − dépenses, avant épargne) : 2 958,00 € (98.6 % des revenus)')
     expect(text).toContain('Alimentation : 42,00 €')
     expect(text).toContain('Prêt maison')
     expect(text).toContain('Vacances')

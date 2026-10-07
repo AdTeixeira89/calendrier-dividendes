@@ -7,7 +7,9 @@ import { IncomeExpenseLineChart } from '@/components/finance/IncomeExpenseLineCh
 import { PeriodFilter } from '@/components/finance/PeriodFilter'
 import { Card, StatCard } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
+import { useCommonBudget } from '@/hooks/useCommonBudget'
 import { useDebts } from '@/hooks/useDebts'
+import { useSavingsGoals } from '@/hooks/useSavingsGoals'
 import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useCommonMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
@@ -32,6 +34,9 @@ export function HomePage() {
   const prevExpenses = useCommonMonthlyExpenses(household.id, prevMonth)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const debts = useDebts(household.id)
+  const savingsGoals = useSavingsGoals(household.id)
+  const commonBudget = useCommonBudget(month)
+  const hasBudget = Boolean(commonBudget && commonBudget.split.budgetCents > 0)
   const alerts = useFinancialAlerts(household.id)
   const [period, setPeriod] = useState<TrendPeriod>('6m')
 
@@ -81,20 +86,18 @@ export function HomePage() {
         <StatCard
           label="Épargne"
           to="/epargne"
-          amount={summary?.savingsCents ?? null}
+          amount={savingsGoals ? savingsGoals.reduce((total, g) => total + g.currentCents, 0) : null}
           tone="saving"
           icon={<PiggyBank size={16} />}
-          change={summary && prevSummary ? percentChange(summary.savingsCents, prevSummary.savingsCents) : null}
-          footnote="Revenus − dépenses (dont crédits)"
+          footnote="Total de vos objectifs d'épargne"
         />
         <StatCard
           label="Reste à vivre"
-          to="/analyse"
-          amount={summary?.livingAllowanceCents ?? null}
+          to="/depenses"
+          amount={hasBudget ? commonBudget!.split.commonRemainingCents : null}
           tone="accent"
           icon={<Wallet size={16} />}
-          change={summary && prevSummary ? percentChange(summary.livingAllowanceCents, prevSummary.livingAllowanceCents) : null}
-          footnote="Après charges fixes et mensualités de prêts"
+          footnote={hasBudget ? 'Reste du budget des dépenses communes' : 'Définissez le budget commun'}
         />
       </section>
 

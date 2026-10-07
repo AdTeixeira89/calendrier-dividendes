@@ -75,7 +75,7 @@ export function buildFinancialSummaryText({ periodLabel, expenses, incomes, cate
   lines.push('')
   lines.push(`Revenus totaux : ${formatCents(totalIncome)}`)
   lines.push(`Dépenses totales : ${formatCents(totalExpenses)}`)
-  lines.push(`Épargne du mois : ${formatCents(savings)}${savingsRate !== null ? ` (taux d'épargne : ${savingsRate} %)` : ''}`)
+  lines.push(`Solde du mois (revenus − dépenses, avant épargne) : ${formatCents(savings)}${savingsRate !== null ? ` (${savingsRate} % des revenus)` : ''}`)
   lines.push('')
 
   const byCategory = totalsByCategory(expenses)
