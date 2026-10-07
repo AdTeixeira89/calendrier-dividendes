@@ -14,10 +14,17 @@ export function IncomeExpenseLineChart({ points }: { points: PeriodPoint[] }) {
   return (
     <div style={{ width: '100%', height: 220 }} role="img" aria-label="Revenus et dépenses sur la période choisie">
       <ResponsiveContainer>
-        <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 12 }}>
+        <LineChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} interval="preserveStartEnd" minTickGap={14} />
-          <YAxis hide domain={[0, 'auto']} />
+          <YAxis
+            domain={[0, 'auto']}
+            width={48}
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+            tickFormatter={(value: number) => formatCents(Math.round(value * 100), 'EUR', { compact: true })}
+          />
           <Tooltip
             formatter={(value) => formatCents(Math.round(Number(value) * 100))}
             contentStyle={{ background: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13 }}

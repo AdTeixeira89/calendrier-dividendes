@@ -1,12 +1,10 @@
 import { evaluateAlerts, type FinancialAlert } from '@shared/alerts'
-import { aggregateDebts } from '@/utils/debt'
 import { currentMonthKey, previousMonthKey } from '@/utils/month'
 import { useAlertSettings } from './useAlertSettings'
 import { useBudgetSplit } from './useBudgetSplit'
 import { useGlobalBudget } from './useGlobalBudget'
 import { commonBudgetCents } from '@shared/budget'
 import { useCategories } from './useCategories'
-import { useDebts } from './useDebts'
 import { useCommonMonthlyExpenses } from './useMonthlyExpenses'
 import { useMonthlyIncomes } from './useMonthlyIncomes'
 import { useSubscriptions } from './useSubscriptions'
@@ -29,9 +27,8 @@ export function useFinancialAlerts(householdId: string): FinancialAlert[] | unde
   const budgetSplit = useBudgetSplit(householdId)
   const categories = useCategories(householdId)
   const subscriptions = useSubscriptions(householdId)
-  const debts = useDebts(householdId)
 
-  if (!settings || !expenses || !incomes || !prevExpenses || !prevIncomes || budgetOverride === undefined || !budgetSplit || !categories || !subscriptions || !debts) {
+  if (!settings || !expenses || !incomes || !prevExpenses || !prevIncomes || budgetOverride === undefined || !budgetSplit || !categories || !subscriptions) {
     return undefined
   }
 
@@ -40,7 +37,6 @@ export function useFinancialAlerts(householdId: string): FinancialAlert[] | unde
     month,
     expenses: expenses.map((e) => ({ amountCents: e.amountCents, categoryId: e.categoryId })),
     incomeCents: sum(incomes),
-    debtMonthlyCents: aggregateDebts(debts).totalMonthlyCents,
     budgetCents: commonBudgetCents(budgetOverride, budgetSplit.plans),
     categoryNames: Object.fromEntries(categories.map((c) => [c.id, c.name])),
     subscriptions: subscriptions.map((s) => ({ id: s.id, name: s.name, amountCents: s.amountCents, period: s.period, nextDate: s.nextDate?.toDate() ?? null, archived: s.archived })),

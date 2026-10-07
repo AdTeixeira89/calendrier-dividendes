@@ -20,6 +20,8 @@ export interface Debt extends BaseEntity {
   insuranceCents: Cents
   feesCents: Cents
   archived: boolean
+  /** Mois (AAAA-MM) dont la mensualité a été supprimée à la main des dépenses : elle ne revient pas. */
+  skippedMonths?: string[]
 }
 
 export const DEBT_TYPE_LABELS: Record<DebtType, string> = {

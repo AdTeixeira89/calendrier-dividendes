@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useAutoIncomes } from '@/hooks/useAutoIncomes'
+import { useDebtExpenses } from '@/hooks/useDebtExpenses'
 import { useMonthlyCopies } from '@/hooks/useMonthlyCopies'
 import { useRecurringExpenses } from '@/hooks/useRecurringExpenses'
 import { BottomNav } from './BottomNav'
@@ -15,6 +16,7 @@ export function AppShell() {
   useRecurringExpenses()
   useAutoIncomes()
   useMonthlyCopies()
+  useDebtExpenses()
   const openQuickAdd = () => setQuickAddOpen(true)
   return (
     <div className={styles.shell}>

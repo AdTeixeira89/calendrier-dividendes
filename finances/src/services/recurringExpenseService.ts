@@ -4,6 +4,7 @@ import type { Category, Subscription } from '@/types'
 import { monthKey } from '@/utils/month'
 import { dueOccurrences, occurrenceMonth, type DueOccurrence } from '@/utils/recurringExpenses'
 import type { DueCopy } from '@/utils/recurringCopies'
+import { findCreditsCategory, type DueDebtPayment } from '@/utils/debtExpenses'
 import { createItemOnce, createPrivateExpenseOnce, updateItem } from './repository'
 
 interface Actor {
@@ -64,11 +65,15 @@ export async function syncCurrentOccurrence(householdId: string, subscription: S
 export async function skipOccurrence(householdId: string, expenseId: string, subscriptionId: string, actor: Actor): Promise<void> {
   const month = occurrenceMonth(expenseId, subscriptionId)
   if (!month) return
-  const snap = await getDoc(householdItemDoc(householdId, 'subscriptions', subscriptionId))
-  if (!snap.exists()) return
-  const skipped = (snap.data().skippedMonths as string[] | undefined) ?? []
-  if (skipped.includes(month)) return
-  await updateItem(householdId, 'subscriptions', subscriptionId, { skippedMonths: [...skipped, month] }, actor)
+  // La règle d'origine est un abonnement ou, à défaut, un prêt dont la mensualité a été supprimée.
+  for (const collection of ['subscriptions', 'debts'] as const) {
+    const snap = await getDoc(householdItemDoc(householdId, collection, subscriptionId))
+    if (!snap.exists()) continue
+    const skipped = (snap.data().skippedMonths as string[] | undefined) ?? []
+    if (skipped.includes(month)) return
+    await updateItem(householdId, collection, subscriptionId, { skippedMonths: [...skipped, month] }, actor)
+    return
+  }
 }
 
 /** Crée les reprises du mois (communes dans le foyer, privées dans l'espace de leur auteur) ; celles qui existent déjà sont laissées. */
@@ -77,6 +82,43 @@ export async function createDueCopies(householdId: string, copies: DueCopy[], ac
   for (const c of copies) {
     const data = { ...c.data, date: Timestamp.fromDate(c.data.date) }
     const wasCreated = c.private ? await createPrivateExpenseOnce(householdId, c.id, data, actor) : await createItemOnce(householdId, 'expenses', c.id, data, actor)
+    if (wasCreated) created++
+  }
+  return created
+}
+
+/**
+ * Inscrit les mensualités de prêt dues dans les dépenses communes (catégorie « Crédits », créée
+ * au besoin), à leur date ; celles qui existent déjà sont laissées telles quelles.
+ */
+export async function createDueDebtExpenses(householdId: string, payments: DueDebtPayment[], categories: Category[], actor: Actor): Promise<number> {
+  if (payments.length === 0) return 0
+  let categoryId = findCreditsCategory(categories)?.id
+  if (!categoryId) {
+    categoryId = 'credits'
+    await createItemOnce(householdId, 'categories', categoryId, { name: 'Crédits', kind: 'expense', parentId: null, icon: 'landmark', color: 'debt', order: 998, archived: false }, actor)
+  }
+  let created = 0
+  for (const p of payments) {
+    const wasCreated = await createItemOnce(
+      householdId,
+      'expenses',
+      p.id,
+      {
+        amountCents: p.amountCents,
+        date: Timestamp.fromDate(p.date),
+        categoryId,
+        merchant: p.merchant,
+        paymentMethod: 'direct_debit',
+        memberId: null,
+        scope: 'shared',
+        kind: 'recurring',
+        note: null,
+        receiptPath: null,
+        recurrenceId: p.debtId,
+      },
+      actor,
+    )
     if (wasCreated) created++
   }
   return created

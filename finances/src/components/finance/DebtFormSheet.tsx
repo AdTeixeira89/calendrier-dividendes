@@ -105,7 +105,7 @@ export function DebtFormSheet({ open, onClose, debt }: DebtFormSheetProps) {
           <TextField label="Taux annuel (facultatif)" inputMode="decimal" value={annualRate} onChange={(e) => setAnnualRate(e.target.value)} trailing={<span className="subtle">%</span>} />
           <TextField label="Durée initiale, en mois (facultatif)" inputMode="numeric" value={termMonths} onChange={(e) => setTermMonths(e.target.value)} />
         </div>
-        <TextField label="Date de début" type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        <TextField label="Date de début" type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)} hint="Le jour de cette date est celui de chaque mensualité : elle est inscrite dans vos dépenses ce jour-là, chaque mois." />
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <TextField
             label="Mensualité (hors assurance)"

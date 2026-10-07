@@ -1,9 +1,7 @@
 import { useMemo } from 'react'
 import { householdSplit, type BudgetSplitSettings, type HouseholdSplit } from '@/utils/budgetSplit'
-import { aggregateDebts } from '@/utils/debt'
 import type { MonthKey } from '@/utils/month'
 import { useBudgetSplit } from './useBudgetSplit'
-import { useDebts } from './useDebts'
 import { useGlobalBudget } from './useGlobalBudget'
 import { useHousehold } from './useHousehold'
 import { useCommonMonthlyExpenses } from './useMonthlyExpenses'
@@ -19,11 +17,9 @@ export function useCommonBudget(month: MonthKey): { settings: BudgetSplitSetting
   const override = useGlobalBudget(household.id)
   const incomes = useMonthlyIncomes(household.id, month)
   const expenses = useCommonMonthlyExpenses(household.id, month)
-  const debts = useDebts(household.id)
 
   return useMemo(() => {
     if (!settings || override === undefined || !incomes || !expenses) return undefined
-    const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
-    return { settings, overrideCents: override, split: householdSplit(members.map((m) => m.uid), settings, incomes, expenses, debtMonthlyCents, override) }
-  }, [settings, override, incomes, expenses, debts, members])
+    return { settings, overrideCents: override, split: householdSplit(members.map((m) => m.uid), settings, incomes, expenses, override) }
+  }, [settings, override, incomes, expenses, members])
 }

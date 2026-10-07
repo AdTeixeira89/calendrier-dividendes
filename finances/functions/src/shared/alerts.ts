@@ -47,8 +47,6 @@ export interface AlertInput {
   month: string
   expenses: { amountCents: number; categoryId: string }[]
   incomeCents: number
-  /** Mensualités de prêts (capital + assurance), comptées comme charges fixes. */
-  debtMonthlyCents: number
   /** Budget global des dépenses communes (0 = aucun). */
   budgetCents: number
   categoryNames: Record<string, string>
@@ -93,7 +91,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = { danger: 0, warning: 1, i
 export function evaluateAlerts(input: AlertInput): FinancialAlert[] {
   const { settings } = input
   const alerts: FinancialAlert[] = []
-  const totalExpensesCents = input.expenses.reduce((sum, e) => sum + e.amountCents, 0) + input.debtMonthlyCents
+  const totalExpensesCents = input.expenses.reduce((sum, e) => sum + e.amountCents, 0)
 
   // Un seul budget global : dépenses communes et mensualités de prêts, comme dans le suivi de l'application.
   if (settings.budget.enabled && input.budgetCents > 0) {
@@ -148,7 +146,7 @@ export function evaluateAlerts(input: AlertInput): FinancialAlert[] {
 
   if (settings.savingsRate.enabled && input.previousMonth && input.previousMonth.incomeCents > 0) {
     const { month, incomeCents, expenseCents } = input.previousMonth
-    const rate = ((incomeCents - expenseCents - input.debtMonthlyCents) / incomeCents) * 100
+    const rate = ((incomeCents - expenseCents) / incomeCents) * 100
     if (rate < settings.savingsRate.minPercent) {
       const [year, m] = month.split('-').map(Number)
       const label = monthName.format(new Date(year!, m! - 1, 1))

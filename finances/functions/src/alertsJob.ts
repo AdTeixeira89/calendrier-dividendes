@@ -42,12 +42,11 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
   const cur = monthBounds(month)
   const prev = monthBounds(previousMonth)
 
-  const [expenses, incomes, prevExpenses, prevIncomes, debts, budgetGlobal, budgetSplit, categories, subscriptions, settings] = await Promise.all([
+  const [expenses, incomes, prevExpenses, prevIncomes, budgetGlobal, budgetSplit, categories, subscriptions, settings] = await Promise.all([
     ref.collection('expenses').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
     ref.collection('incomes').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
     ref.collection('expenses').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
     ref.collection('incomes').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
-    ref.collection('debts').get(),
     ref.collection('settings').doc('budgetGlobal').get(),
     ref.collection('settings').doc('budgetSplit').get(),
     ref.collection('categories').get(),
@@ -60,7 +59,6 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
     month,
     expenses: commonOnly(expenses.docs).map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
     incomeCents: cents(incomes.docs),
-    debtMonthlyCents: debts.docs.reduce((sum, d) => sum + ((d.data().monthlyPaymentCents as number) ?? 0) + ((d.data().insuranceCents as number) ?? 0), 0),
     budgetCents: commonBudgetCents(budgetGlobal.data()?.totalCents as number | null | undefined, budgetSplit.data()?.plans as Record<string, { commonCents?: number }> | undefined),
     categoryNames: Object.fromEntries(categories.docs.map((d) => [d.id, d.data().name as string])),
     subscriptions: subscriptions.docs.map((d) => {

@@ -9,7 +9,6 @@ function input(overrides: Partial<AlertInput> = {}): AlertInput {
     month: '2026-09',
     expenses: [],
     incomeCents: 0,
-    debtMonthlyCents: 0,
     budgetCents: 0,
     categoryNames: { food: 'Alimentation' },
     subscriptions: [],
@@ -34,8 +33,8 @@ describe('evaluateAlerts — budgets', () => {
     expect(alerts[0]!.title).toContain('92 %')
   })
 
-  it('compte les mensualités de prêts dans le budget global, et ignore l’absence de budget', () => {
-    expect(evaluateAlerts(input({ budgetCents: 30000, debtMonthlyCents: 31000 }))[0]!.key).toBe('budget-exceeded:2026-09')
+  it('compte les mensualités de prêts (dépenses créées à leur date) dans le budget global, et ignore l’absence de budget', () => {
+    expect(evaluateAlerts(input({ budgetCents: 30000, expenses: [{ amountCents: 31000, categoryId: 'credits' }] }))[0]!.key).toBe('budget-exceeded:2026-09')
     expect(evaluateAlerts(input({ budgetCents: 0, expenses: [{ amountCents: 99999, categoryId: 'food' }] }))).toEqual([])
   })
 
@@ -48,7 +47,7 @@ describe('evaluateAlerts — budgets', () => {
 
 describe('evaluateAlerts — dépenses supérieures aux revenus', () => {
   it('compte les mensualités de prêts comme des dépenses', () => {
-    const alerts = evaluateAlerts(input({ incomeCents: 200000, debtMonthlyCents: 90000, expenses: [{ amountCents: 120000, categoryId: 'x' }] }))
+    const alerts = evaluateAlerts(input({ incomeCents: 200000, expenses: [{ amountCents: 210000, categoryId: 'x' }] }))
     expect(alerts.map((a) => a.key)).toEqual(['overspend:2026-09'])
     expect(normalize(alerts[0]!.message)).toContain('100,00 €')
   })

@@ -12,18 +12,18 @@ const plans = {
 
 describe('budget commun', () => {
   it('reproduit l’exemple du foyer (2 800 € versés, 2 300 € dépensés, 500 € restants)', () => {
-    const result = householdSplit(['a', 'b'], { plans }, [income('a', 350_000), income('b', 250_000)], [expense(180_000, 'shared'), expense(20_000, 'personal')], 50_000)
+    const result = householdSplit(['a', 'b'], { plans }, [income('a', 350_000), income('b', 250_000)], [expense(180_000, 'shared'), expense(50_000, 'shared'), expense(20_000, 'personal')])
     expect(result.incomeCents).toBe(600_000)
     expect(result.commonCents).toBe(280_000)
     expect(result.budgetCents).toBe(280_000)
     expect(result.savingsCents).toBe(130_000)
     expect(result.investCents).toBe(80_000)
-    expect(result.commonSpentCents).toBe(230_000) // dépense personnelle exclue, prêts inclus
+    expect(result.commonSpentCents).toBe(230_000) // dépense personnelle exclue, mensualité de prêt incluse (dépense commune)
     expect(result.commonRemainingCents).toBe(50_000)
   })
 
   it('suit le reste de chaque personne à partir de ce qu’elle a versé, jamais de son salaire', () => {
-    const result = householdSplit(['a', 'b'], { plans }, [income('a', 999_999), income('b', 1)], [expense(230_000, 'shared')], 0)
+    const result = householdSplit(['a', 'b'], { plans }, [income('a', 999_999), income('b', 1)], [expense(230_000, 'shared')])
     const [a, b] = result.members
     expect(a!.spentShareCents).toBe(123_214) // 150 000 / 280 000 des 230 000
     expect(a!.leftCents).toBe(26_786)
@@ -33,13 +33,13 @@ describe('budget commun', () => {
   })
 
   it('un budget global inscrit remplace le total des versements', () => {
-    const result = householdSplit(['a', 'b'], { plans }, [], [expense(100_000, 'shared')], 0, 270_000)
+    const result = householdSplit(['a', 'b'], { plans }, [], [expense(100_000, 'shared')], 270_000)
     expect(result.budgetCents).toBe(270_000)
     expect(result.commonRemainingCents).toBe(170_000)
   })
 
   it('signale un dépassement par un reste négatif', () => {
-    const result = householdSplit(['a'], { plans: { a: { commonCents: 100_000, savingsCents: 0, investCents: 0 } } }, [], [expense(120_000, 'shared')], 0)
+    const result = householdSplit(['a'], { plans: { a: { commonCents: 100_000, savingsCents: 0, investCents: 0 } } }, [], [expense(120_000, 'shared')])
     expect(result.commonRemainingCents).toBe(-20_000)
     expect(result.members[0]!.leftCents).toBe(-20_000)
   })

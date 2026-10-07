@@ -192,16 +192,18 @@ export async function upsertItem(
   id: string,
   data: DocumentData,
   actor: Actor,
+  options: { audit?: boolean } = {},
 ): Promise<void> {
+  const audit = options.audit ?? true
   const ref = householdItemDoc(householdId, collectionName, id)
   const before = await readBefore(ref)
   const batch = writeBatch(db)
   if (before) {
     batch.update(ref, { ...data, updatedBy: actor.uid, updatedAt: serverTimestamp() })
-    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'update', before, { ...before, ...data }, actor))
+    if (audit) batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'update', before, { ...before, ...data }, actor))
   } else {
     batch.set(ref, { ...data, householdId, createdBy: actor.uid, createdAt: serverTimestamp(), updatedBy: actor.uid, updatedAt: serverTimestamp() })
-    batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'create', null, data, actor))
+    if (audit) batch.set(doc(householdCol(householdId, 'auditLog')), auditEntry(householdId, collectionName, id, 'create', null, data, actor))
   }
   commitInBackground(batch)
 }

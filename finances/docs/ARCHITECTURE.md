@@ -295,3 +295,9 @@ finances/
 - **Un seul budget** : `settings/budgetGlobal.totalCents` (facultatif) ; à défaut, le total des sommes versées au budget commun (`settings/budgetSplit`). Règle partagée app/functions : `functions/src/shared/budget.ts`. Les anciens budgets par catégorie (`budgets/{mois}`) ne sont plus lus ni demandés.
 - **Suivi** (`utils/budgetSplit.ts`, `hooks/useCommonBudget.ts`) : dépensé = dépenses communes + mensualités de prêts ; reste du foyer = budget − dépensé ; reste de chaque personne = ce qu'elle a versé − sa part des dépenses (proportionnelle à son versement). Le salaire n'intervient pas.
 - « Épargne » (accueil) = total des objectifs d'épargne ; le solde « revenus − dépenses » n'est jamais présenté comme de l'épargne.
+
+## 6 septies. Accueil personnalisable, prêts en dépenses, répartition par catégorie
+
+- **Préférences d'accueil** (`settings/prefs-{uid}`, sans journal) : « Dépenses » et « Épargne » s'affichent en Communes (défaut) ou Perso, par titulaire de compte, d'un appareil à l'autre (`hooks/useHomePrefs.ts`). Le graphique et la carte Dépenses suivent la même préférence.
+- **Mensualités de prêt** (`utils/debtExpenses.ts`, `hooks/useDebtExpenses.ts`) : une dépense commune `{prêt}_{AAAA-MM}` (catégorie « Crédits », créée au besoin) est inscrite au jour de la date de début du prêt, chaque mois, à partir de la saisie du prêt jusqu'à la fin de sa durée. Plus aucun ajout « fantôme » des mensualités aux totaux.
+- **Répartition par catégorie** (`utils/categoryBreakdown.ts`) : regroupe sous-catégories dans leur parent, additionne, trie, calcule les parts et regroupe le reste en « Autres » ; alimente le diagramme de la page Analyse.

@@ -37,7 +37,7 @@ export interface HouseholdSplit {
   budgetCents: Cents
   savingsCents: Cents
   investCents: Cents
-  /** Dépensé sur le budget commun : dépenses communes + mensualités de prêts. */
+  /** Dépensé sur le budget commun : dépenses communes (mensualités de prêts comprises, inscrites à leur date). */
   commonSpentCents: Cents
   /** Budget global − dépensé (négatif = dépassement). */
   commonRemainingCents: Cents
@@ -57,11 +57,10 @@ export function householdSplit(
   settings: BudgetSplitSettings,
   incomes: Income[],
   expenses: Expense[],
-  debtMonthlyCents: Cents,
   budgetOverrideCents: Cents | null = null,
 ): HouseholdSplit {
   const commonCents = memberIds.reduce((t, id) => t + (settings.plans[id]?.commonCents ?? 0), 0)
-  const commonSpentCents = sumCents(expenses.filter((e) => e.scope === 'shared')) + debtMonthlyCents
+  const commonSpentCents = sumCents(expenses.filter((e) => e.scope === 'shared'))
   const budgetCents = commonBudgetCents(budgetOverrideCents, Object.fromEntries(memberIds.map((id) => [id, settings.plans[id] ?? EMPTY_PLAN])))
   const members = memberIds.map((id): MemberSplit => {
     const plan = settings.plans[id] ?? EMPTY_PLAN

@@ -6,34 +6,40 @@ import { AlertsCard } from '@/components/finance/AlertsCard'
 import { IncomeExpenseLineChart } from '@/components/finance/IncomeExpenseLineChart'
 import { PeriodFilter } from '@/components/finance/PeriodFilter'
 import { Card, StatCard } from '@/components/ui'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth, useCurrentUser } from '@/hooks/useAuth'
 import { useCommonBudget } from '@/hooks/useCommonBudget'
-import { useDebts } from '@/hooks/useDebts'
+import { useHomePrefs } from '@/hooks/useHomePrefs'
 import { useSavingsGoals } from '@/hooks/useSavingsGoals'
 import { useFinancialAlerts } from '@/hooks/useFinancialAlerts'
 import { useHousehold } from '@/hooks/useHousehold'
-import { useCommonMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
+import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { usePeriodTrend } from '@/hooks/usePeriodTrend'
-import { aggregateDebts } from '@/utils/debt'
+import { ScopeFilter } from '@/components/finance/ScopeFilter'
+import { savingsTotal } from '@/utils/savingsView'
+import { commonExpenses, inSpace } from '@/utils/spaces'
 import { greeting } from '@/utils/dates'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
 import { percentChange } from '@/utils/money'
-import { summarizeMonth, withDebtCharges } from '@/utils/monthlyStats'
+import { summarizeMonth } from '@/utils/monthlyStats'
 import { TREND_PERIODS, type TrendPeriod } from '@/utils/trendPeriod'
 import styles from './HomePage.module.css'
 
 export function HomePage() {
   const { profile } = useAuth()
+  const user = useCurrentUser()
   const { household, members } = useHousehold()
   const month = currentMonthKey()
   const prevMonth = previousMonthKey(month)
 
-  const expenses = useCommonMonthlyExpenses(household.id, month)
+  const { prefs, setPref } = useHomePrefs(household.id)
+  const allExpenses = useMonthlyExpenses(household.id, month)
+  const allPrevExpenses = useMonthlyExpenses(household.id, prevMonth)
+  // « Dépenses » suit la préférence du titulaire : communes (par défaut) ou ses dépenses personnelles.
+  const expenses = allExpenses && (prefs.expenses === 'personal' ? inSpace(allExpenses, user.uid) : commonExpenses(allExpenses))
+  const prevExpenses = allPrevExpenses && (prefs.expenses === 'personal' ? inSpace(allPrevExpenses, user.uid) : commonExpenses(allPrevExpenses))
   const incomes = useMonthlyIncomes(household.id, month)
-  const prevExpenses = useCommonMonthlyExpenses(household.id, prevMonth)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
-  const debts = useDebts(household.id)
   const savingsGoals = useSavingsGoals(household.id)
   const commonBudget = useCommonBudget(month)
   const hasBudget = Boolean(commonBudget && commonBudget.split.budgetCents > 0)
@@ -42,13 +48,10 @@ export function HomePage() {
 
   const hasData = Boolean(expenses?.length || incomes?.length)
 
-  // Les mensualités de prêts (capital + assurance) sont une charge fixe à part
-  // entière : elles s'ajoutent aux dépenses enregistrées, même si elles ne
-  // sont pas saisies comme des dépenses individuelles.
-  const debtMonthlyCents = debts ? aggregateDebts(debts).totalMonthlyCents : 0
-  const trend = usePeriodTrend(household.id, month, period, debtMonthlyCents)
-  const summary = expenses && incomes ? withDebtCharges(summarizeMonth(expenses, incomes), debtMonthlyCents) : null
-  const prevSummary = prevExpenses && prevIncomes ? withDebtCharges(summarizeMonth(prevExpenses, prevIncomes), debtMonthlyCents) : null
+  // Les mensualités de prêts sont des dépenses communes inscrites à leur date : rien à ajouter ici.
+  const trend = usePeriodTrend(household.id, month, period, prefs.expenses)
+  const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
+  const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
 
   const steps = [
     { done: true, label: 'Créer votre foyer', to: '/foyer' },
@@ -71,7 +74,7 @@ export function HomePage() {
           tone="income"
           icon={<ArrowUpRight size={16} />}
           change={summary && prevSummary ? percentChange(summary.incomeCents, prevSummary.incomeCents) : null}
-          footnote="Aucun revenu saisi"
+          footnote={summary?.incomeCents ? undefined : 'Aucun revenu saisi'}
         />
         <StatCard
           label="Dépenses"
@@ -81,15 +84,17 @@ export function HomePage() {
           icon={<ArrowDownRight size={16} />}
           higherIsBetter={false}
           change={summary && prevSummary ? percentChange(summary.expenseCents, prevSummary.expenseCents) : null}
-          footnote={debtMonthlyCents > 0 ? 'Dont mensualités de prêts' : 'Aucune dépense saisie'}
+          footnote={prefs.expenses === 'personal' ? 'Vos dépenses personnelles' : 'Aucune dépense saisie'}
+          action={<ScopeFilter label="Dépenses affichées" value={prefs.expenses} onChange={(v) => setPref('expenses', v)} communeLabel="dépenses communes" align="start" />}
         />
         <StatCard
           label="Épargne"
           to="/epargne"
-          amount={savingsGoals ? savingsGoals.reduce((total, g) => total + g.currentCents, 0) : null}
+          amount={savingsGoals ? savingsTotal(savingsGoals, prefs.savings, user.uid) : null}
           tone="saving"
           icon={<PiggyBank size={16} />}
-          footnote="Total de vos objectifs d'épargne"
+          footnote={prefs.savings === 'personal' ? 'Votre épargne personnelle' : 'Épargne commune (objectifs en couple)'}
+          action={<ScopeFilter label="Épargne affichée" value={prefs.savings} onChange={(v) => setPref('savings', v)} communeLabel="épargne commune" align="start" />}
         />
         <StatCard
           label="Reste à vivre"
@@ -104,7 +109,11 @@ export function HomePage() {
       {alerts && alerts.length > 0 && <AlertsCard alerts={alerts} />}
 
       {(period !== '6m' || trend?.some((p) => p.incomeCents > 0 || p.expenseCents > 0)) && (
-        <Card title="Revenus et dépenses" subtitle={TREND_PERIODS.find((p) => p.value === period)?.full}>
+        <Card
+          title="Revenus et dépenses"
+          subtitle={`${TREND_PERIODS.find((p) => p.value === period)?.full}${prefs.expenses === 'personal' ? ' · vos finances personnelles' : ' · dépenses communes'}`}
+          action={<ScopeFilter label="Dépenses affichées" value={prefs.expenses} onChange={(v) => setPref('expenses', v)} communeLabel="dépenses communes" />}
+        >
           <PeriodFilter value={period} onChange={setPeriod} />
           {trend && <IncomeExpenseLineChart points={trend} />}
         </Card>

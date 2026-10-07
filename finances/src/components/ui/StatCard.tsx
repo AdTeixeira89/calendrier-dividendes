@@ -21,9 +21,11 @@ interface StatCardProps {
   footnote?: ReactNode
   /** Rend toute la carte cliquable vers cette page. */
   to?: string
+  /** Petit contrôle à droite du titre (ex. choix Communes / Perso). */
+  action?: ReactNode
 }
 
-export function StatCard({ label, amount, displayValue, tone = 'accent', icon, change, higherIsBetter = true, footnote, to }: StatCardProps) {
+export function StatCard({ label, amount, displayValue, tone = 'accent', icon, change, higherIsBetter = true, footnote, to, action }: StatCardProps) {
   const hasChange = change !== undefined && change !== null && Number.isFinite(change)
   const positive = hasChange && (change > 0) === higherIsBetter
   const value = displayValue ?? (amount === null ? '—' : formatCents(amount, 'EUR', { compact: true }))
@@ -43,6 +45,7 @@ export function StatCard({ label, amount, displayValue, tone = 'accent', icon, c
       ) : (
         footnote && <p className={styles.footnote}>{footnote}</p>
       )}
+      {action && <div style={{ margin: 'var(--space-1) 0 -12px -8px' }}>{action}</div>}
     </article>
   )
   return to ? (

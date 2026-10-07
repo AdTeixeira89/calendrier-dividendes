@@ -42,10 +42,8 @@ const WEEKS: { from: number; to: number }[] = [
 
 /**
  * Points du graphique : par semaine pour « 1 mois », par mois sinon.
- * Les mensualités de prêts (montant actuel, faute d'historique) sont ajoutées
- * aux dépenses : réparties sur les 4 semaines, entières chaque mois.
  */
-export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses: Expense[], incomes: Income[], debtMonthlyCents: Cents): PeriodPoint[] {
+export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses: Expense[], incomes: Income[]): PeriodPoint[] {
   if (period === '1m') {
     const inMonth = (item: { date: { toDate(): Date } }) => monthKey(item.date.toDate()) === month
     return WEEKS.map(({ from, to }) => {
@@ -53,7 +51,7 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
       return {
         label: to >= 28 ? `${from}–fin` : `${from}–${to}`,
         incomeCents: incomes.filter(inWeek).reduce((t, i) => t + i.amountCents, 0),
-        expenseCents: expenses.filter(inWeek).reduce((t, e) => t + e.amountCents, 0) + Math.round(debtMonthlyCents / WEEKS.length),
+        expenseCents: expenses.filter(inWeek).reduce((t, e) => t + e.amountCents, 0),
       }
     })
   }
@@ -74,6 +72,6 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
   return months.map((m) => ({
     label: shortMonth(m, withYear),
     incomeCents: incomes.filter((i) => monthKey(i.date.toDate()) === m).reduce((t, i) => t + i.amountCents, 0),
-    expenseCents: expenses.filter((e) => monthKey(e.date.toDate()) === m).reduce((t, e) => t + e.amountCents, 0) + debtMonthlyCents,
+    expenseCents: expenses.filter((e) => monthKey(e.date.toDate()) === m).reduce((t, e) => t + e.amountCents, 0),
   }))
 }
