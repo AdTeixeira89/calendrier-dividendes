@@ -116,8 +116,8 @@ async function generateMonthlyReport(householdId: string, monthKey: string, apiK
     })
 }
 
-/** Bilan mensuel automatique : le 1er de chaque mois pour tous les foyers. */
-export const monthlyReport = onSchedule({ schedule: '0 6 1 * *', timeZone: 'Europe/Paris', secrets: [ANTHROPIC_API_KEY] }, async () => {
+/** Bilan mensuel automatique : le 6 de chaque mois (le mois budgétaire s'est terminé le 5), pour tous les foyers. */
+export const monthlyReport = onSchedule({ schedule: '0 6 6 * *', timeZone: 'Europe/Paris', secrets: [ANTHROPIC_API_KEY] }, async () => {
   const db = getFirestore()
   const monthKey = previousMonthKey()
   const households = await db.collection('households').get()

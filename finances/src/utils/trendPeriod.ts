@@ -1,6 +1,7 @@
 import type { Cents } from '@/types'
 import type { Expense } from '@/types/expense'
 import type { Income } from '@/types/income'
+import { budgetMonthBounds, budgetMonthKey } from './budgetMonth'
 import { formatMonthKey, monthKey, monthRange, shiftMonth, type MonthKey } from './month'
 
 export type TrendPeriod = '1m' | '3m' | '6m' | '12m' | 'all'
@@ -21,7 +22,14 @@ export interface PeriodPoint {
 
 const MONTHS_BY_PERIOD: Record<Exclude<TrendPeriod, '1m' | 'all'>, number> = { '3m': 3, '6m': 6, '12m': 12 }
 
-/** Début de la plage à lire dans Firestore pour la période demandée. */
+/** Premier mois de la période (null pour « depuis le début »). */
+export function periodFirstMonth(period: TrendPeriod, month: MonthKey): MonthKey | null {
+  if (period === 'all') return null
+  if (period === '1m') return month
+  return shiftMonth(month, -(MONTHS_BY_PERIOD[period] - 1))
+}
+
+/** Début de la plage de revenus à lire dans Firestore pour la période demandée (mois civils). */
 export function periodStart(period: TrendPeriod, month: MonthKey): Date {
   if (period === '1m') return monthRange(month).start
   if (period === 'all') return new Date(2000, 0, 1)
@@ -33,32 +41,37 @@ function shortMonth(key: MonthKey, withYear: boolean): string {
   return withYear ? `${name} ${key.slice(2, 4)}` : name
 }
 
-const WEEKS: { from: number; to: number }[] = [
-  { from: 1, to: 7 },
-  { from: 8, to: 14 },
-  { from: 15, to: 21 },
-  { from: 22, to: 31 },
-]
+const WEEK_COUNT = 4
 
 /**
- * Points du graphique : par semaine pour « 1 mois », par mois sinon.
+ * Points du graphique : par semaine pour « 1 mois » (le mois budgétaire du 6 au 5), par mois sinon.
+ * Les dépenses sont rangées par mois budgétaire (celles du 1er au 5 comptent pour le mois précédent) ;
+ * les revenus restent par mois civil.
  */
 export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses: Expense[], incomes: Income[]): PeriodPoint[] {
   if (period === '1m') {
-    const inMonth = (item: { date: { toDate(): Date } }) => monthKey(item.date.toDate()) === month
-    return WEEKS.map(({ from, to }) => {
-      const inWeek = (item: { date: { toDate(): Date } }) => inMonth(item) && item.date.toDate().getDate() >= from && item.date.toDate().getDate() <= to
-      return {
-        label: to >= 28 ? `${from}–fin` : `${from}–${to}`,
-        incomeCents: incomes.filter(inWeek).reduce((t, i) => t + i.amountCents, 0),
-        expenseCents: expenses.filter(inWeek).reduce((t, e) => t + e.amountCents, 0),
-      }
-    })
+    const { start, end } = budgetMonthBounds(month)
+    const dayMs = 86_400_000
+    const span = Math.round((end.getTime() - start.getTime()) / dayMs)
+    const weekOf = (date: Date) => {
+      const offset = Math.floor((date.getTime() - start.getTime()) / dayMs)
+      return offset < 0 || offset >= span ? -1 : Math.min(WEEK_COUNT - 1, Math.floor(offset / 7))
+    }
+    const label = (week: number) => {
+      const first = new Date(start.getFullYear(), start.getMonth(), start.getDate() + week * 7)
+      if (week < WEEK_COUNT - 1) return `${first.getDate()}–${new Date(first.getFullYear(), first.getMonth(), first.getDate() + 6).getDate()}`
+      return `${first.getDate()}–${new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1).getDate()}`
+    }
+    return Array.from({ length: WEEK_COUNT }, (_, week) => ({
+      label: label(week),
+      incomeCents: incomes.filter((i) => weekOf(i.date.toDate()) === week).reduce((t, i) => t + i.amountCents, 0),
+      expenseCents: expenses.filter((e) => weekOf(e.date.toDate()) === week).reduce((t, e) => t + e.amountCents, 0),
+    }))
   }
 
   let first: MonthKey
   if (period === 'all') {
-    const dates = [...expenses, ...incomes].map((i) => monthKey(i.date.toDate()))
+    const dates = [...expenses.map((e) => budgetMonthKey(e.date.toDate())), ...incomes.map((i) => monthKey(i.date.toDate()))]
     const earliest = dates.length > 0 ? dates.reduce((a, b) => (a < b ? a : b)) : month
     const previous = shiftMonth(month, -1)
     first = earliest < previous ? earliest : previous
@@ -72,6 +85,6 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
   return months.map((m) => ({
     label: shortMonth(m, withYear),
     incomeCents: incomes.filter((i) => monthKey(i.date.toDate()) === m).reduce((t, i) => t + i.amountCents, 0),
-    expenseCents: expenses.filter((e) => monthKey(e.date.toDate()) === m).reduce((t, e) => t + e.amountCents, 0),
+    expenseCents: expenses.filter((e) => budgetMonthKey(e.date.toDate()) === m).reduce((t, e) => t + e.amountCents, 0),
   }))
 }

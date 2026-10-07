@@ -24,7 +24,7 @@ export function ExportCard() {
   const [copied, setCopied] = useState(false)
 
   const categories = useCategories(household.id)
-  const expenses = useExpensesRange(household.id, from, to)
+  const expenses = useExpensesRange(household.id, from, to, 'budget')
   const incomes = useIncomesRange(household.id, from, to)
   const debts = useDebts(household.id)
   const savingsGoals = useSavingsGoals(household.id)

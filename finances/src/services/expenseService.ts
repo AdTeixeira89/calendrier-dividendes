@@ -3,7 +3,7 @@ import { auth } from '@/firebase/client'
 import { householdCol, householdItemDoc, privateExpensesCol } from '@/firebase/paths'
 import type { EntityInput, Expense } from '@/types'
 import type { MonthKey } from '@/utils/month'
-import { monthTimestampRange } from '@/utils/month'
+import { budgetMonthTimestampRange } from '@/utils/budgetMonth'
 import {
   createItem,
   createPrivateExpense,
@@ -121,14 +121,14 @@ export function watchExpensesRange(
   }
 }
 
-/** Dépenses d'un mois donné, les plus récentes en premier. */
+/** Dépenses d'un mois budgétaire (du 6 au 5), les plus récentes en premier. */
 export function watchMonthlyExpenses(
   householdId: string,
   month: MonthKey,
   onChange: (expenses: Expense[]) => void,
   onError: (error: Error) => void,
 ): () => void {
-  const { start, end } = monthTimestampRange(month)
+  const { start, end } = budgetMonthTimestampRange(month)
   return watchExpensesRange(householdId, start, end, onChange, onError)
 }
 

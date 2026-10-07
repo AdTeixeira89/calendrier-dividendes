@@ -1,5 +1,6 @@
 import { evaluateAlerts, type FinancialAlert } from '@shared/alerts'
-import { currentMonthKey, previousMonthKey } from '@/utils/month'
+import { currentBudgetMonthKey } from '@/utils/budgetMonth'
+import { previousMonthKey } from '@/utils/month'
 import { useAlertSettings } from './useAlertSettings'
 import { useBudgetSplit } from './useBudgetSplit'
 import { useGlobalBudget } from './useGlobalBudget'
@@ -16,7 +17,8 @@ const sum = (items: { amountCents: number }[]) => items.reduce((total, i) => tot
  * règles que les notifications push envoyées par la Cloud Function.
  */
 export function useFinancialAlerts(householdId: string): FinancialAlert[] | undefined {
-  const month = currentMonthKey()
+  // Mois budgétaire (du 6 au 5), comme dans la notification quotidienne.
+  const month = currentBudgetMonthKey()
   const prevMonth = previousMonthKey(month)
   const settings = useAlertSettings(householdId)
   const expenses = useCommonMonthlyExpenses(householdId, month)

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useCurrentUser } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
-import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
+import { useCalendarMonthExpenses } from '@/hooks/useMonthlyExpenses'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { createDueCopies } from '@/services/recurringExpenseService'
 import { reportSyncError } from '@/services/repository'
@@ -18,7 +18,7 @@ export function useMonthlyCopies(): void {
   const user = useCurrentUser()
   const { household, canWrite } = useHousehold()
   const online = useOnlineStatus()
-  const previous = useMonthlyExpenses(household.id, previousMonthKey(currentMonthKey()))
+  const previous = useCalendarMonthExpenses(household.id, previousMonthKey(currentMonthKey()))
   const handled = useRef(new Set<string>())
 
   useEffect(() => {

@@ -19,6 +19,7 @@ import { ScopeFilter } from '@/components/finance/ScopeFilter'
 import { savingsTotal } from '@/utils/savingsView'
 import { commonExpenses, inSpace } from '@/utils/spaces'
 import { greeting } from '@/utils/dates'
+import { currentBudgetMonthKey } from '@/utils/budgetMonth'
 import { currentMonthKey, formatMonthKey, previousMonthKey } from '@/utils/month'
 import { percentChange } from '@/utils/money'
 import { summarizeMonth } from '@/utils/monthlyStats'
@@ -30,18 +31,21 @@ export function HomePage() {
   const user = useCurrentUser()
   const { household, members } = useHousehold()
   const month = currentMonthKey()
+  // Dépenses : mois budgétaire (du 6 au 5) ; du 1er au 5, on est encore dans le mois précédent.
+  const expenseMonth = currentBudgetMonthKey()
+  const prevExpenseMonth = previousMonthKey(expenseMonth)
   const prevMonth = previousMonthKey(month)
 
   const { prefs, setPref } = useHomePrefs(household.id)
-  const allExpenses = useMonthlyExpenses(household.id, month)
-  const allPrevExpenses = useMonthlyExpenses(household.id, prevMonth)
+  const allExpenses = useMonthlyExpenses(household.id, expenseMonth)
+  const allPrevExpenses = useMonthlyExpenses(household.id, prevExpenseMonth)
   // « Dépenses » suit la préférence du titulaire : communes (par défaut) ou ses dépenses personnelles.
   const expenses = allExpenses && (prefs.expenses === 'personal' ? inSpace(allExpenses, user.uid) : commonExpenses(allExpenses))
   const prevExpenses = allPrevExpenses && (prefs.expenses === 'personal' ? inSpace(allPrevExpenses, user.uid) : commonExpenses(allPrevExpenses))
   const incomes = useMonthlyIncomes(household.id, month)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const savingsGoals = useSavingsGoals(household.id)
-  const commonBudget = useCommonBudget(month)
+  const commonBudget = useCommonBudget(expenseMonth)
   const hasBudget = Boolean(commonBudget && commonBudget.split.budgetCents > 0)
   const alerts = useFinancialAlerts(household.id)
   const [period, setPeriod] = useState<TrendPeriod>('6m')
@@ -49,7 +53,7 @@ export function HomePage() {
   const hasData = Boolean(expenses?.length || incomes?.length)
 
   // Les mensualités de prêts sont des dépenses communes inscrites à leur date : rien à ajouter ici.
-  const trend = usePeriodTrend(household.id, month, period, prefs.expenses)
+  const trend = usePeriodTrend(household.id, expenseMonth, period, prefs.expenses)
   const summary = expenses && incomes ? summarizeMonth(expenses, incomes) : null
   const prevSummary = prevExpenses && prevIncomes ? summarizeMonth(prevExpenses, prevIncomes) : null
 

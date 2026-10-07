@@ -18,7 +18,8 @@ import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import type { Expense } from '@/types'
-import { currentMonthKey, previousMonthKey } from '@/utils/month'
+import { currentBudgetMonthKey, formatBudgetPeriod } from '@/utils/budgetMonth'
+import { previousMonthKey } from '@/utils/month'
 import { COMMON_SPACE, inSpace, type Space } from '@/utils/spaces'
 import { spendingPace } from '@/utils/spendingPace'
 import { sumCents } from '@/utils/monthlyStats'
@@ -29,7 +30,7 @@ const WRAP_LABEL = { whiteSpace: 'normal', lineHeight: 1.2, padding: '6px var(--
 export function ExpensesPage() {
   const { household, members, canWrite } = useHousehold()
   const user = useCurrentUser()
-  const { month, setMonth } = useMonthNav()
+  const { month, setMonth } = useMonthNav('budget')
   const categories = useCategories(household.id, 'expense')
   const allExpenses = useMonthlyExpenses(household.id, month)
   const commonBudget = useCommonBudget(month)
@@ -90,7 +91,10 @@ export function ExpensesPage() {
         }
       />
 
-      <MonthNav month={month} onChange={setMonth} />
+      <MonthNav month={month} onChange={setMonth} kind="budget" />
+      <p className="subtle" style={{ fontSize: 'var(--text-sm)', textAlign: 'center', marginTop: 'calc(var(--space-2) * -1)' }}>
+        Dépenses {formatBudgetPeriod(month)} · celles du 1er au 5 comptent pour le mois précédent
+      </p>
 
       <SegmentedControl label="Espace" value={space} onChange={setSpace} options={[{ value: COMMON_SPACE, label: 'Communes' }, ...members.map((m) => ({ value: m.uid, label: m.displayName }))]} />
 
@@ -169,5 +173,8 @@ export function ExpensesPage() {
 }
 
 function monthDefaultDate(month: string): string {
-  return month === currentMonthKey() ? new Date().toISOString().slice(0, 10) : `${month}-01`
+  if (month !== currentBudgetMonthKey()) return `${month}-06`
+  // Date locale (pas UTC) : autour de minuit, un jour de décalage changerait de mois budgétaire.
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }

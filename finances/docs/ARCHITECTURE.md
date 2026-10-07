@@ -301,3 +301,9 @@ finances/
 - **Préférences d'accueil** (`settings/prefs-{uid}`, sans journal) : « Dépenses » et « Épargne » s'affichent en Communes (défaut) ou Perso, par titulaire de compte, d'un appareil à l'autre (`hooks/useHomePrefs.ts`). Le graphique et la carte Dépenses suivent la même préférence.
 - **Mensualités de prêt** (`utils/debtExpenses.ts`, `hooks/useDebtExpenses.ts`) : une dépense commune `{prêt}_{AAAA-MM}` (catégorie « Crédits », créée au besoin) est inscrite au jour de la date de début du prêt, chaque mois, à partir de la saisie du prêt jusqu'à la fin de sa durée. Plus aucun ajout « fantôme » des mensualités aux totaux.
 - **Répartition par catégorie** (`utils/categoryBreakdown.ts`) : regroupe sous-catégories dans leur parent, additionne, trie, calcule les parts et regroupe le reste en « Autres » ; alimente le diagramme de la page Analyse.
+
+## 6 octies. Mois budgétaire (du 6 au 5)
+
+- Les **dépenses** sont comptées par mois budgétaire : du 6 d'un mois au 5 du suivant ; une dépense du 1er au 5 compte pour le mois précédent (`functions/src/shared/budgetMonth.ts`, partagé app/functions ; constante `BUDGET_MONTH_START_DAY`).
+- S'appliquent : listes et totaux, graphiques (accueil, analyse, rythme des dépenses), budget commun, alertes (app et fonction quotidienne), bilan mensuel (envoyé le 6), export. Les **revenus** restent par mois civil.
+- Inchangés : les dates des dépenses, la création des récurrentes / mensualités de prêt / reprises (par mois civil, à leur date), la détection de doublons à l'import.

@@ -1,3 +1,4 @@
+import { budgetMonthBounds } from './shared/budgetMonth.js'
 import type { Firestore } from 'firebase-admin/firestore'
 import { sumCents, savingsRatePercent, type Cents } from './money.js'
 
@@ -31,10 +32,12 @@ function formatCents(cents: Cents): string {
  */
 export async function computeHouseholdFacts(db: Firestore, householdId: string, monthKey: string): Promise<HouseholdFacts> {
   const { start, end } = monthRange(monthKey)
+  // Dépenses : mois budgétaire (du 6 au 5) ; revenus : mois civil.
+  const cycle = budgetMonthBounds(monthKey)
   const householdRef = db.collection('households').doc(householdId)
 
   const [allExpensesSnap, incomesSnap, debtsSnap, goalsSnap, subscriptionsSnap, categoriesSnap] = await Promise.all([
-    householdRef.collection('expenses').where('date', '>=', start).where('date', '<', end).get(),
+    householdRef.collection('expenses').where('date', '>=', cycle.start).where('date', '<', cycle.end).get(),
     householdRef.collection('incomes').where('date', '>=', start).where('date', '<', end).get(),
     householdRef.collection('debts').where('archived', '==', false).get(),
     householdRef.collection('savingsGoals').where('archived', '==', false).get(),

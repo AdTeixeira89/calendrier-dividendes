@@ -13,7 +13,7 @@ import { formatPercent } from '@/utils/money'
 
 export function AnalysePage() {
   const { household } = useHousehold()
-  const { month, setMonth } = useMonthNav()
+  const { month, setMonth } = useMonthNav('budget')
   const categories = useCategories(household.id, 'expense')
   const expenses = useCommonMonthlyExpenses(household.id, month)
   const trend = useTrend(household.id, month, 6)
@@ -26,7 +26,7 @@ export function AnalysePage() {
   return (
     <div className="stack animate-in">
       <PageHeader title="Analyse" subtitle="La répartition et l'évolution de vos finances." />
-      <MonthNav month={month} onChange={setMonth} />
+      <MonthNav month={month} onChange={setMonth} kind="budget" />
 
       <section className="grid-cards" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
         <StatCard

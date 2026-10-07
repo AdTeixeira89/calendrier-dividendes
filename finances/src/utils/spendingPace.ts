@@ -1,7 +1,9 @@
 import type { Cents } from '@/types'
-import { monthRange, type MonthKey } from './month'
+import { budgetMonthBounds } from './budgetMonth'
+import type { MonthKey } from './month'
 
 export interface PacePoint {
+  /** Jour du mois budgétaire (1 = le 6 du mois civil). */
   day: number
   /** Cumul du mois affiché ; null après aujourd'hui (jours pas encore vécus). */
   currentCents: Cents | null
@@ -9,24 +11,35 @@ export interface PacePoint {
   previousCents: Cents | null
 }
 
+const DAY_MS = 86_400_000
+
 function daysIn(month: MonthKey): number {
-  const { start, end } = monthRange(month)
-  return Math.round((end.getTime() - start.getTime()) / 86_400_000)
+  const { start, end } = budgetMonthBounds(month)
+  return Math.round((end.getTime() - start.getTime()) / DAY_MS)
 }
 
-function cumulativeByDay(expenses: { amountCents: Cents; date: Date }[], days: number): Cents[] {
+/** Rang du jour dans le mois budgétaire (0 = le 6), en jours calendaires. */
+function dayIndex(date: Date, start: Date): number {
+  const a = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  const b = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())
+  return Math.round((a - b) / DAY_MS)
+}
+
+function cumulativeByDay(expenses: { amountCents: Cents; date: Date }[], month: MonthKey): Cents[] {
+  const days = daysIn(month)
+  const { start } = budgetMonthBounds(month)
   const perDay = new Array<Cents>(days).fill(0)
   for (const e of expenses) {
-    const day = e.date.getDate()
-    if (day >= 1 && day <= days) perDay[day - 1]! += e.amountCents
+    const i = dayIndex(e.date, start)
+    if (i >= 0 && i < days) perDay[i]! += e.amountCents
   }
   let running = 0
   return perDay.map((cents) => (running += cents))
 }
 
 /**
- * Dépenses cumulées jour après jour, comparées au mois précédent : on voit
- * d'un coup d'œil si l'on dépense plus vite ou moins vite que d'habitude.
+ * Dépenses cumulées jour après jour sur le mois budgétaire (du 6 au 5), comparées au mois
+ * précédent : on voit d'un coup d'œil si l'on dépense plus vite ou moins vite que d'habitude.
  */
 export function spendingPace(
   month: MonthKey,
@@ -37,11 +50,11 @@ export function spendingPace(
 ): PacePoint[] {
   const days = daysIn(month)
   const prevDays = daysIn(previousMonth)
-  const current = cumulativeByDay(expenses, days)
-  const previous = cumulativeByDay(previousExpenses, prevDays)
-  const { start } = monthRange(month)
-  const isCurrent = today.getFullYear() === start.getFullYear() && today.getMonth() === start.getMonth()
-  const lastDay = isCurrent ? today.getDate() : today < start ? 0 : days
+  const current = cumulativeByDay(expenses, month)
+  const previous = cumulativeByDay(previousExpenses, previousMonth)
+  const { start } = budgetMonthBounds(month)
+  const todayIndex = dayIndex(today, start)
+  const lastDay = todayIndex < 0 ? 0 : todayIndex >= days ? days : todayIndex + 1
 
   return Array.from({ length: Math.max(days, prevDays) }, (_, i) => ({
     day: i + 1,

@@ -1,6 +1,7 @@
 import { FieldValue, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { evaluateAlerts, withDefaultSettings, type AlertInput, type AlertSettings, type FinancialAlert } from './shared/alerts.js'
 import { commonBudgetCents } from './shared/budget.js'
+import { BUDGET_MONTH_START_DAY, budgetMonthBounds, budgetMonthKey } from './shared/budgetMonth.js'
 import type { PushPayload } from './shared/push.js'
 
 export interface StoredPushSubscription {
@@ -37,15 +38,21 @@ const cents = (docs: QueryDocumentSnapshot[]) => docs.reduce((sum, d) => sum + (
 
 /** Rassemble, pour un foyer, exactement les données que la carte « Alertes » de l'app utilise. */
 export async function loadAlertInput(db: Firestore, householdId: string, now: Date): Promise<AlertInput> {
-  const { today, month, previousMonth } = parisCalendar(now)
+  const paris = parisCalendar(now)
+  const { today } = paris
+  // Dépenses : mois budgétaire (du 6 au 5) ; du 1er au 5, c'est encore le mois précédent. Revenus : mois civils.
+  const month = budgetMonthKey(today)
+  const previousMonth = budgetMonthKey(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 2, BUDGET_MONTH_START_DAY))
   const ref = db.collection('households').doc(householdId)
   const cur = monthBounds(month)
   const prev = monthBounds(previousMonth)
+  const curCycle = budgetMonthBounds(month)
+  const prevCycle = budgetMonthBounds(previousMonth)
 
   const [expenses, incomes, prevExpenses, prevIncomes, budgetGlobal, budgetSplit, categories, subscriptions, settings] = await Promise.all([
-    ref.collection('expenses').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
+    ref.collection('expenses').where('date', '>=', curCycle.start).where('date', '<', curCycle.end).get(),
     ref.collection('incomes').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
-    ref.collection('expenses').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
+    ref.collection('expenses').where('date', '>=', prevCycle.start).where('date', '<', prevCycle.end).get(),
     ref.collection('incomes').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
     ref.collection('settings').doc('budgetGlobal').get(),
     ref.collection('settings').doc('budgetSplit').get(),
