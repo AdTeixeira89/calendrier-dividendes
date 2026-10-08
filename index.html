@@ -2,10 +2,17 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0E1420" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Dividendes" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <title>Calendrier Dividendes</title>
 <meta name="description" content="Calendrier de dividendes et de résultats trimestriels pour votre portefeuille d'actions." />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -461,91 +468,300 @@ footer.app-footer{
 .ticker-suggest-item .tk{ font-family: var(--font-mono); font-weight:700; color: var(--forest); flex-shrink:0; }
 .ticker-suggest-item .nm{ flex:1; color: var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ticker-suggest-item .ex{ font-size:10.5px; color: var(--ink-soft); flex-shrink:0; }
+
+/* ============================================================
+   MISE EN PAGE TÉLÉPHONE — 4 écrans + barre d'onglets
+   (le thème « poste de contrôle » ci-dessus est conservé)
+   ============================================================ */
+html{ -webkit-text-size-adjust:100%; }
+body{ padding: env(safe-area-inset-top,0px) 0 calc(92px + env(safe-area-inset-bottom,0px)); overscroll-behavior-y: none; }
+button{ touch-action: manipulation; }
+
+.app-bar{
+  position: sticky; top:0; z-index:30;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding: calc(10px + env(safe-area-inset-top,0px)) 16px 8px;
+  margin-top: calc(-1 * env(safe-area-inset-top,0px));
+  background: rgba(14,20,32,.92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.app-bar h1{ font-size:22px; letter-spacing:-.01em; }
+.app-bar-actions{ display:flex; gap:8px; }
+.app-bar .btn-icon{ width:44px; height:44px; font-size:18px; }
+
+.chips{ display:flex; gap:8px; overflow-x:auto; padding: 12px 16px 4px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.chips::-webkit-scrollbar{ display:none; }
+.chips button{
+  flex:0 0 auto; min-height:40px; padding:0 16px; border-radius:999px;
+  border:1px solid var(--line); background:var(--card); color:var(--ink-soft);
+  font-size:14px; font-weight:600; white-space:nowrap;
+}
+.chips button.active{ background:var(--forest); border-color:var(--forest); color:var(--paper); font-weight:700; }
+
+.screens{ max-width:720px; margin:0 auto; padding: 0 16px; }
+.screen{ display:none; }
+.screen.active{ display:block; }
+.screen-title{ font-size:20px; margin: 18px 0 12px; }
+.screen-title small{ display:block; font-family:var(--font-body); font-weight:400; font-size:13px; color:var(--ink-soft); margin-top:3px; }
+
+/* bannière rappels */
+.notif-banner{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin: 14px 0 0; padding:12px 14px; border-radius:var(--radius-lg);
+  background:var(--forest-tint); border:1px solid rgba(45,226,230,.28);
+}
+.notif-banner[hidden]{ display:none; }
+.nb-text{ display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--ink-soft); min-width:0; }
+.nb-text b{ color:var(--ink); font-size:14px; }
+.nb-actions{ display:flex; gap:6px; flex-shrink:0; }
+.nb-actions .btn{ min-height:40px; }
+
+/* prochain versement */
+.next-pay{
+  margin-top:18px; padding:18px 18px 18px 20px; background:var(--card);
+  border:1px solid var(--line); border-left:4px solid var(--gold); border-radius:var(--radius-lg);
+}
+.next-when{ font-size:14px; color:var(--ink-soft); font-weight:600; }
+.next-amount{ font-family:var(--font-display); font-size:38px; font-weight:700; color:var(--gold); line-height:1.1; margin:6px 0 4px; letter-spacing:-.02em; }
+.next-who{ font-size:14px; color:var(--ink); }
+
+/* liste par mois */
+.pay-month{ margin-top:22px; }
+.pay-month-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:0 4px 8px; }
+.pay-month-head h3{ font-size:16px; text-transform:capitalize; }
+.pay-month-total{ font-family:var(--font-mono); font-size:14px; font-weight:600; color:var(--gold); }
+.pay-row{
+  display:grid; grid-template-columns: 46px 40px 1fr auto; align-items:center; gap:12px;
+  width:100%; min-height:68px; padding:10px 14px; text-align:left; color:var(--ink);
+  background:var(--card); border:0; border-bottom:1px solid var(--line);
+}
+.pay-month > .pay-row:first-of-type{ border-radius:var(--radius-lg) var(--radius-lg) 0 0; }
+.pay-month > .pay-row:last-of-type{ border-radius:0 0 var(--radius-lg) var(--radius-lg); border-bottom:0; }
+.pay-month > .pay-row:only-of-type{ border-radius:var(--radius-lg); }
+.pay-row:active{ background:var(--paper-alt); }
+.pay-row.is-today{ box-shadow: inset 4px 0 0 var(--gold); }
+.pay-day{ display:flex; flex-direction:column; align-items:center; line-height:1.1; }
+.pay-day b{ font-family:var(--font-display); font-size:20px; }
+.pay-day span{ font-size:11px; color:var(--ink-soft); }
+.pay-meta{ min-width:0; }
+.pay-meta .tk{ font-family:var(--font-mono); font-weight:600; font-size:14px; }
+.pay-meta .nm{ font-size:12.5px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pay-amt{ text-align:right; display:flex; flex-direction:column; }
+.pay-amt b{ font-family:var(--font-mono); font-size:15px; color:var(--gold); }
+.pay-amt span{ font-size:11.5px; color:var(--ink-soft); }
+.more-btn{ width:100%; justify-content:center; min-height:48px; margin-top:20px; }
+.fine-print{ font-size:12px; color:var(--ink-soft); text-align:center; margin:14px 8px 0; line-height:1.45; }
+.empty-state.big{ padding:48px 16px; font-size:15px; line-height:1.5; }
+.empty-state.big .em-icon{ font-size:34px; }
+
+/* calendrier */
+.cal-controls{ display:flex; flex-direction:column; gap:12px; margin-bottom:14px; }
+.cal-controls .view-switch{ align-self:stretch; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; }
+.cal-controls .view-switch button{ min-height:42px; font-size:14px; }
+.cal-controls .date-nav{ justify-content:space-between; }
+.cal-controls .date-nav button{ width:44px; height:44px; font-size:18px; }
+.cal-controls #todayBtn{ width:auto; height:44px; padding:0 16px; }
+#periodLabel{ min-width:0; flex:1; font-size:19px; }
+.cal-controls .filters{ justify-content:space-between; gap:12px; }
+.cal-controls .filters select{ min-height:40px; font-size:15px; }
+.logo-legend{ padding:0 0 12px; }
+.month-card{ padding:12px; }
+.month-grid{ gap:4px; }
+.month-day{ min-height:54px; padding:5px 4px; }
+.month-day.today{ border-color:var(--forest); }
+
+/* portefeuille */
+.holdings-list{ max-height:none; overflow:visible; padding-right:0; gap:0; }
+.holdings-group-label{ margin:20px 4px 8px; font-size:13px; color:var(--ink-soft); font-weight:700; }
+.holding-row{
+  display:flex; align-items:center; gap:12px; width:100%; min-height:72px; padding:10px 14px;
+  background:var(--card); border:0; border-bottom:1px solid var(--line); color:var(--ink); text-align:left; border-radius:0;
+}
+.holdings-group-label + .holding-row, .holdings-list > .holding-row:first-child{ border-radius:var(--radius-lg) var(--radius-lg) 0 0; }
+.holding-row:last-child, .holding-row:has(+ .holdings-group-label){ border-radius:0 0 var(--radius-lg) var(--radius-lg); border-bottom:0; }
+.holding-row:only-child{ border-radius:var(--radius-lg); }
+.holding-row:active{ background:var(--paper-alt); }
+.holding-meta .tk{ font-size:14px; }
+.holding-meta .tk .qty{ color:var(--ink-soft); font-weight:400; margin-left:4px; }
+.holding-meta .nm{ font-size:12.5px; }
+.holding-meta .sched{ font-size:12px; color:var(--forest); margin-top:2px; }
+.holding-year{ text-align:right; display:flex; flex-direction:column; flex-shrink:0; }
+.holding-year b{ font-family:var(--font-mono); font-size:14px; color:var(--gold); }
+.holding-year span{ font-size:11.5px; color:var(--ink-soft); }
+.portfolio-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:6px; }
+.sum-row{ font-size:14px; padding:6px 0; }
+.data-actions{ display:grid; gap:8px; margin-top:24px; }
+.data-actions .btn{ min-height:48px; justify-content:center; font-size:14px; }
+.data-actions h3{ font-size:15px; margin:6px 0 2px; }
+
+/* totaux */
+.stats-section{ display:block; padding:0; }
+.stats-section > *{ margin-bottom:14px; }
+
+/* tab bar */
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:40;
+  display:grid; grid-template-columns: 1fr 1fr 76px 1fr 1fr; align-items:end;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom,0px));
+  background: rgba(14,20,32,.96); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top:1px solid var(--line);
+}
+.tabbar [data-tab]{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  min-height:56px; background:none; border:0; color:var(--ink-soft); font-size:11.5px; font-weight:600;
+}
+.tabbar [data-tab] svg{ width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.tabbar [data-tab].active{ color:var(--forest); }
+.tab-add{
+  justify-self:center; align-self:center; width:58px; height:58px; margin-top:-22px; border-radius:50%; border:0;
+  background:linear-gradient(135deg,var(--forest),var(--navy)); color:var(--paper);
+  font-size:32px; font-weight:400; line-height:1; box-shadow: 0 6px 20px rgba(0,0,0,.5), 0 0 22px rgba(45,226,230,.35);
+}
+.tab-add:active{ transform:scale(.96); }
+
+.toast{ bottom: calc(100px + env(safe-area-inset-bottom,0px)) !important; }
+
+/* fenêtres : feuille plein-largeur en bas d'écran */
+@media (max-width:700px){
+  .modal-overlay{ align-items:flex-end !important; padding:0 !important; }
+  .modal{ width:100% !important; max-width:none !important; max-height:92vh; overflow-y:auto; border-radius:20px 20px 0 0 !important; padding-bottom:calc(22px + env(safe-area-inset-bottom,0px)); }
+  .field input, .field select{ font-size:16px; min-height:46px; }
+  .field-row{ grid-template-columns:1fr; gap:0; }
+  .modal-close{ width:44px; height:44px; margin:-8px -8px 0 0; font-size:24px; }
+  .modal-actions .btn{ min-height:46px; }
+  .month-grid .chip{ font-size:0; width:7px; height:7px; min-height:0; padding:0; border-radius:50%; border:0; display:inline-block; }
+  .month-grid .chip-div{ background:var(--gold); }
+  .month-grid .chip-earn{ background:var(--navy); }
+  .month-grid .chip.estimate{ opacity:.55; background:transparent; border:1.5px solid currentColor; box-sizing:border-box; }
+  .month-grid .chip-div.estimate{ color:var(--gold); }
+  .month-grid .chip-earn.estimate{ color:var(--navy); }
+  .day-chips{ flex-direction:row; flex-wrap:wrap; gap:4px; }
+  .month-grid .chip-more{ font-size:10px; }
+  .month-dow{ font-size:11px; }
+}
+.notif-status{ font-size:13px; color:var(--ink-soft); margin:0 0 10px; line-height:1.45; }
+.notif-actions{ display:grid; gap:8px; margin-bottom:8px; }
+.notif-actions .btn{ min-height:46px; justify-content:center; }
+@media (min-width:701px){ .tabbar{ left:50%; right:auto; width:560px; transform:translateX(-50%); border-radius:20px 20px 0 0; border:1px solid var(--line); border-bottom:0; } }
+
+/* corrections de lisibilité */
+body{ background:
+  radial-gradient(ellipse 900px 500px at 15% -10%, rgba(45,226,230,0.10), transparent 60%),
+  radial-gradient(ellipse 700px 500px at 100% 10%, rgba(157,107,255,0.09), transparent 55%),
+  var(--paper); }
+.next-hint{ margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--ink-soft); line-height:1.4; }
+.holdings-group-label{ border-top:0 !important; padding-top:0 !important; font-family:var(--font-body); text-transform:none; letter-spacing:0; }
+.filters{ align-items:center; }
+.filters label.checkbox{ min-height:40px; }
+@media (max-width:700px){
+  .modal-actions{ position:sticky; bottom:calc(-22px - env(safe-area-inset-bottom,0px)); margin:22px -22px calc(-22px - env(safe-area-inset-bottom,0px)); padding:12px 22px calc(12px + env(safe-area-inset-bottom,0px)); background:var(--card); border-top:1px solid var(--line); }
+}
+.pay-amt .conf{ color:var(--forest); font-weight:600; }
+.pay-amt .conf.soft{ color:var(--ink-soft); font-weight:400; }
+.app-bar h1{ display:flex; align-items:center; gap:10px; }
+.app-logo{ width:34px; height:34px; border-radius:9px; }
 </style>
 </head>
 <body>
 
-<header class="site-header">
-  <div class="brand">
-    <div class="brand-mark">÷</div>
-    <div>
-      <h1>Calendrier Dividendes</h1>
-      <p class="tagline">Vos versements, vos résultats, votre année en un coup d'œil.</p>
-    </div>
-  </div>
-  <div class="header-actions">
-    <button class="btn btn-primary" id="addStockBtn">+ Ajouter une action</button>
-    <button class="btn btn-ghost btn-icon" id="accountsBtn" title="Comptes / portefeuilles" aria-label="Comptes">👛</button>
-    <button class="btn btn-ghost btn-icon" id="settingsBtn" title="Paramètres" aria-label="Paramètres">⚙</button>
+<header class="app-bar">
+  <h1><img src="logo.svg" alt="" class="app-logo">Dividendes</h1>
+  <div class="app-bar-actions">
+    <button class="btn btn-ghost btn-icon" id="accountsBtn" title="Comptes" aria-label="Comptes">👛</button>
+    <button class="btn btn-ghost btn-icon" id="settingsBtn" title="Réglages" aria-label="Réglages">⚙</button>
   </div>
 </header>
 
-<div class="ticker-tape" id="tickerTape">
-  <div class="ticker-track" id="tickerTrack"></div>
-</div>
+<nav class="chips" id="accountSwitch" aria-label="Comptes"></nav>
 
-<div class="toolbar-accounts">
-  <div class="view-switch" id="accountSwitch"></div>
-</div>
+<main class="screens">
 
-<div class="toolbar">
-  <div class="view-switch" id="viewSwitch">
-    <button data-mode="year" class="active">Année</button>
-    <button data-mode="month">Mois</button>
-    <button data-mode="logos">Logos</button>
-  </div>
-  <div class="date-nav">
-    <button id="prevBtn" aria-label="Précédent">‹</button>
-    <span id="periodLabel" class="mono"></span>
-    <button id="nextBtn" aria-label="Suivant">›</button>
-    <button id="todayBtn" class="btn btn-ghost">Aujourd'hui</button>
-  </div>
-  <div class="filters">
-    <label>Date affichée
-      <select id="dateTypeSelect">
-        <option value="pay">Mise en paiement</option>
-        <option value="ex">Ex-dividende</option>
-      </select>
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="showEarningsCheckbox" checked/> Dates de résultats
-    </label>
-  </div>
-</div>
+  <!-- 1. À VENIR -->
+  <section class="screen active" id="screen-upcoming" aria-label="Prochains versements">
+    <div class="notif-banner" id="notifBanner" hidden></div>
+    <div id="upcomingHero"></div>
+    <div id="upcomingList"></div>
+  </section>
 
-<div class="logo-legend" id="logoLegend" style="display:none;">
-  <span><span class="dot" style="background:var(--gold);"></span>Contour or = dividende</span>
-  <span><span class="dot" style="background:var(--navy);"></span>Contour bleu nuit = résultats</span>
-  <span><span class="dot" style="background:var(--ink-soft); opacity:.55;"></span>Estompé = estimé</span>
-</div>
+  <!-- 2. CALENDRIER -->
+  <section class="screen" id="screen-calendar" aria-label="Calendrier">
+    <h2 class="screen-title">Calendrier</h2>
+    <div class="cal-controls">
+      <div class="view-switch" id="viewSwitch">
+        <button data-mode="month" class="active">Mois</button>
+        <button data-mode="year">Année</button>
+        <button data-mode="logos">Logos</button>
+      </div>
+      <div class="date-nav">
+        <button id="prevBtn" aria-label="Précédent">‹</button>
+        <span id="periodLabel" class="mono"></span>
+        <button id="nextBtn" aria-label="Suivant">›</button>
+        <button id="todayBtn" class="btn btn-ghost">Aujourd'hui</button>
+      </div>
+      <div class="filters">
+        <label>Date affichée
+          <select id="dateTypeSelect">
+            <option value="pay">Mise en paiement</option>
+            <option value="ex">Ex-dividende</option>
+          </select>
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="showEarningsCheckbox" checked/> Résultats
+        </label>
+      </div>
+    </div>
+    <div class="logo-legend" id="logoLegend" style="display:none;">
+      <span><span class="dot" style="background:var(--gold);"></span>Contour or = dividende</span>
+      <span><span class="dot" style="background:var(--navy);"></span>Contour violet = résultats</span>
+      <span><span class="dot" style="background:var(--ink-soft); opacity:.55;"></span>Estompé = estimé</span>
+    </div>
+    <section class="calendar-wrap" id="calendarWrap"></section>
+  </section>
 
-<main class="layout">
-  <section class="calendar-wrap" id="calendarWrap"></section>
-  <aside class="sidebar">
-    <h2>Portefeuille</h2>
+  <!-- 3. PORTEFEUILLE -->
+  <section class="screen" id="screen-portfolio" aria-label="Portefeuille">
+    <h2 class="screen-title">Portefeuille</h2>
+    <div class="portfolio-card sidebar-summary" id="summaryBox" style="margin-top:0;border-top:1px solid var(--line);padding-top:14px;"></div>
     <div class="holdings-list" id="holdingsList"></div>
-    <div class="sidebar-summary" id="summaryBox"></div>
-    <div class="sidebar-footer">
-      <button class="btn btn-ghost btn-sm" id="brokerImportBtn">📄 Importer un relevé (CSV/Excel)</button>
+    <div class="data-actions">
+      <h3>Importer et sauvegarder</h3>
+      <button class="btn btn-ghost" id="brokerImportBtn" type="button">📄 Importer un relevé (CSV / Excel)</button>
       <input type="file" id="brokerImportFile" accept=".csv,.xlsx,.xls" style="display:none" />
-      <button class="btn btn-ghost btn-sm" id="bulkFetchBtn">🔄 Auto-compléter les lignes</button>
-    </div>
-    <div class="sidebar-footer" style="margin-top:6px;">
-      <button class="btn btn-ghost btn-sm" id="exportBtn">Exporter (JSON)</button>
-      <button class="btn btn-ghost btn-sm" id="importBtn">Importer (JSON)</button>
+      <button class="btn btn-ghost" id="bulkFetchBtn" type="button">🔄 Compléter les lignes automatiquement</button>
+      <button class="btn btn-ghost" id="exportBtn" type="button">Exporter une sauvegarde (JSON)</button>
+      <button class="btn btn-ghost" id="importBtn" type="button">Restaurer une sauvegarde (JSON)</button>
       <input type="file" id="importFile" accept="application/json" style="display:none" />
+      <p class="fine-print">Les données restent dans ce navigateur. Exportez une sauvegarde pour les passer d'un appareil à l'autre.</p>
     </div>
-  </aside>
+  </section>
+
+  <!-- 4. TOTAUX -->
+  <section class="screen" id="screen-totals" aria-label="Totaux">
+    <h2 class="screen-title">Totaux</h2>
+    <section class="stats-section" id="statsSection"></section>
+  </section>
+
 </main>
 
-<section class="stats-section" id="statsSection"></section>
-
-<footer class="app-footer">
-  Données stockées uniquement dans votre navigateur. Récupération automatique optionnelle via Financial Modeling Prep.
-</footer>
+<nav class="tabbar" aria-label="Navigation">
+  <button data-tab="upcoming" class="active" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>À venir
+  </button>
+  <button data-tab="calendar" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Calendrier
+  </button>
+  <button class="tab-add" id="addStockBtn" type="button" aria-label="Ajouter une action">+</button>
+  <button data-tab="portfolio" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="7" width="17" height="12.5" rx="2.5"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3.5 12.5h17"/></svg>Portefeuille
+  </button>
+  <button data-tab="totals" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V5M19 20v-7"/></svg>Totaux
+  </button>
+</nav>
 
 <div id="modalRoot"></div>
 
+<script src="payouts.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

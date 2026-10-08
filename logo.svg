@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2DE2E6"/><stop offset="1" stop-color="#9D6BFF"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD98A"/><stop offset="1" stop-color="#F2A21B"/></linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.2" r="0.9"><stop offset="0" stop-color="#1B2A44"/><stop offset="1" stop-color="#0E1420"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <!-- calendrier -->
+  <rect x="96" y="132" width="290" height="268" rx="38" fill="#141C2E" stroke="url(#edge)" stroke-width="18"/>
+  <rect x="96" y="211" width="290" height="14" fill="url(#edge)"/>
+  <path d="M168 104V156M314 104V156" stroke="url(#edge)" stroke-width="20" stroke-linecap="round"/>
+  <g fill="#3A4A66">
+    <rect x="132" y="248" width="44" height="34" rx="9"/><rect x="198" y="248" width="44" height="34" rx="9"/><rect x="264" y="248" width="44" height="34" rx="9"/>
+    <rect x="132" y="304" width="44" height="34" rx="9"/><rect x="198" y="304" width="44" height="34" rx="9"/>
+  </g>
+  <!-- pièce : le versement du mois -->
+  <circle cx="378" cy="376" r="96" fill="#0E1420"/>
+  <circle cx="378" cy="376" r="82" fill="url(#gold)"/>
+  <circle cx="378" cy="376" r="62" fill="none" stroke="#B87708" stroke-width="6" opacity=".55"/>
+  <text x="378" y="404" text-anchor="middle" font-family="DejaVu Sans, Arial, Helvetica, sans-serif" font-weight="700" font-size="84" fill="#5A3A00">€</text>
+</svg>

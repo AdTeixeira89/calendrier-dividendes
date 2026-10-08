@@ -19,7 +19,8 @@ const INK_SOFT_HEX = '#8A99B3';
    --------------------------------------------------------------- */
 let state = loadState();
 let view = {
-  mode: 'year',           // 'year' | 'month'
+  tab: 'upcoming',        // 'upcoming' | 'calendar' | 'portfolio' | 'totals'
+  mode: (window.innerWidth < 700 ? 'month' : 'year'),   // 'year' | 'month' | 'logos'
   dateType: 'pay',        // 'pay' | 'ex'
   showEarnings: true,
   accountFilter: 'all',   // 'all' | account id
@@ -87,7 +88,8 @@ function accountName(id){
 function defaultState(){
   return {
     holdings: [],
-    settings: { apiKey: '' },
+    settings: { apiKey: '', notify: false },
+    sent: { days: {}, months: {} },
     accounts: [ { id:'degiro', name:'DEGIRO' }, { id:'pea', name:'PEA Trade Republic' }, { id:'nominatif', name:'Air Liquide Nominatif Pur' } ]
   };
 }
@@ -113,6 +115,8 @@ function loadState(){
     const parsed = raw ? JSON.parse(raw) : {};
     const merged = Object.assign(defaultState(), parsed);
     if(!merged.accounts || !merged.accounts.length) merged.accounts = defaultState().accounts;
+    merged.settings = Object.assign({ apiKey:'', notify:false }, merged.settings || {});
+    merged.sent = merged.sent || { days:{}, months:{} };
     merged.holdings.forEach(h=>{
       if(!h.account) h.account = merged.accounts[0].id;
       migrateHoldingToMonthModel(h);
@@ -122,6 +126,16 @@ function loadState(){
 }
 function saveState(){
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  snapshotForWorker();
+}
+/* Copie des données lisible par le service worker (vérification en arrière-plan). */
+function snapshotForWorker(){
+  try{
+    if(!('caches' in window)) return;
+    caches.open('dividendes-data').then(c=> c.put('state.json', new Response(JSON.stringify({
+      holdings: state.holdings, settings: { notify: !!state.settings.notify }, sent: state.sent
+    }))));
+  }catch(e){}
 }
 
 /* ---------------------------------------------------------------
@@ -140,12 +154,14 @@ function currencySymbol(c){
 }
 function fmtAmount(n, currency){
   if(n === null || n === undefined || isNaN(n)) return '—';
+  const txt = Number(n).toFixed(3).replace(/0+$/,'').replace(/\.$/,'').replace('.', ',');
   const sym = currencySymbol(currency);
-  return `${Number(n).toFixed(3).replace(/0+$/,'').replace(/\.$/,'')}${sym}`;
+  return txt + (sym.length > 1 ? ' ' : '\u202f') + sym;
 }
 function fmtAmount2(n, currency){
   if(n === null || n === undefined || isNaN(n)) return '—';
-  return `${Number(n).toFixed(2)}${currencySymbol(currency)}`;
+  const sym = currencySymbol(currency);
+  return Number(n).toFixed(2).replace('.', ',') + (sym ? (sym.length > 1 ? ' ' : '\u202f') + sym : '');
 }
 function fmtDateHuman(iso){
   const d = parseISO(iso);
@@ -167,9 +183,7 @@ function toast(msg){
   document.body.appendChild(t);
   setTimeout(()=> t.remove(), 2600);
 }
-function freqMonths(freq){
-  return { monthly:1, quarterly:3, semiannual:6, annual:12 }[freq] || 0;
-}
+function freqMonths(freq){ return Payouts.freqMonths(freq); }
 function freqLabel(freq){
   return { monthly:'Mensuelle', quarterly:'Trimestrielle', semiannual:'Semestrielle', annual:'Annuelle', irregular:'Irrégulière', none:'Aucune' }[freq] || '—';
 }
@@ -182,29 +196,19 @@ function freqLabel(freq){
    Août/Nov, chaque année). Le jour du mois est arbitraire (15) car
    sans importance pour l'affichage calendrier.
    --------------------------------------------------------------- */
-function monthsInCycle(anchorMonth, freq){
-  const step = freqMonths(freq); // 1, 3, 6, 12, ou 0 si irrégulier/aucun
-  if(!anchorMonth || step <= 0) return [];
-  const months = [];
-  for(let off = 0; off < 12; off += step){
-    months.push(((anchorMonth - 1 + off) % 12) + 1);
-  }
-  return months;
-}
+function monthsInCycle(anchorMonth, freq){ return Payouts.monthsInCycle(anchorMonth, freq); }
 
 function buildDividendEvents(holding, rangeStart, rangeEnd){
   const events = [];
-  const div = holding.dividend || {};
-  const months = monthsInCycle(div.anchorMonth, div.frequency);
-  if(!months.length || !div.lastAmount) return events;
   const yStart = rangeStart.getFullYear(), yEnd = rangeEnd.getFullYear();
   for(let y = yStart; y <= yEnd; y++){
-    months.forEach(m=>{
-      const d = new Date(y, m-1, 15);
-      if(d < rangeStart || d > rangeEnd) return;
-      const iso = toISO(d);
-      events.push({ exDate: iso, payDate: iso, amount: div.lastAmount, estimate: true, source: 'month-pattern' });
-    });
+    for(let m = 1; m <= 12; m++){
+      const p = Payouts.payoutInMonth(holding, y, m);
+      if(!p) continue;
+      const d = parseISO(p.date);
+      if(d < rangeStart || d > rangeEnd) continue;
+      events.push({ exDate: p.date, payDate: p.date, amount: p.amount, estimate: true, dayKnown: p.dayKnown, source: 'month-pattern' });
+    }
   }
   return events;
 }
@@ -246,7 +250,7 @@ function buildEventIndex(rangeStart, rangeEnd, holdingsList){
         type: 'dividend', holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name,
         logo: h.logo, currency: h.currency, quantity: h.quantity,
         amount: ev.amount, total: (ev.amount||0) * (h.quantity||0),
-        estimate: ev.estimate, exDate: ev.exDate, payDate: ev.payDate
+        estimate: ev.estimate, dayKnown: ev.dayKnown, exDate: ev.exDate, payDate: ev.payDate
       });
     });
     if(view.showEarnings){
@@ -397,6 +401,7 @@ async function fetchAutoData(tickerInput){
    --------------------------------------------------------------- */
 function renderTickerTape(){
   const track = document.getElementById('tickerTrack');
+  if(!track) return;
   const today = new Date();
   const horizon = addDays(today, 90);
   const index = buildEventIndex(today, horizon);
@@ -680,16 +685,268 @@ function renderHoldingsList(){
   });
 }
 
+/* ---------------------------------------------------------------
+   DATES DE VERSEMENT VIA L'API (Financial Modeling Prep)
+   Récupère les dates de paiement déclarées par les sociétés et le
+   jour habituel de versement. Les rappels s'appuient dessus : plus
+   besoin de saisir le jour à la main.
+   --------------------------------------------------------------- */
+const sleep = ms => new Promise(r=> setTimeout(r, ms));
+let dateSync = { running:false, last:null };
+async function syncPayDates(h, key){
+  const r = await fetch(`https://financialmodelingprep.com/stable/dividends?symbol=${encodeURIComponent(h.ticker)}&apikey=${key}`);
+  if(r.status === 429) throw Object.assign(new Error('quota'), { rate:true });
+  if(r.status === 401 || r.status === 403) throw Object.assign(new Error('clé refusée'), { auth:true });
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  const arr = Array.isArray(data) ? data : ((data && data.historical) || []);
+  const todayIso = todayISO();
+  const rows = arr.map(x=>({ exDate:x.date||null, payDate:x.paymentDate||null, amount:x.dividend||x.adjDividend||null }))
+    .filter(x=>x.amount && x.payDate).sort((a,b)=> a.payDate.localeCompare(b.payDate));
+  h.dividend = h.dividend || {};
+  h.dividend.confirmed = rows.filter(x=>x.payDate >= todayIso).slice(0,4);
+  const lastPaid = rows.filter(x=>x.payDate < todayIso).pop();
+  h.dividend.payDayApi = lastPaid ? Number(lastPaid.payDate.slice(8)) : null;
+  h.dividend.lastSync = Date.now();
+  return { confirmed: h.dividend.confirmed.length, payDayApi: h.dividend.payDayApi };
+}
+async function autoSyncDates(force){
+  const key = state.settings.apiKey;
+  if(!key || dateSync.running || !navigator.onLine) return null;
+  const DAY = 24*3600*1000;
+  const stale = state.holdings.filter(h=> force || !h.dividend || !h.dividend.lastSync || Date.now() - h.dividend.lastSync > DAY);
+  if(!stale.length) return { ok:0, fail:0, rate:false, auth:false, total:0 };
+  dateSync.running = true;
+  const res = { ok:0, fail:0, rate:false, auth:false, total:stale.length };
+  for(const h of (force ? stale : stale.slice(0,10))){
+    try{ await syncPayDates(h, key); res.ok++; }
+    catch(e){
+      res.fail++;
+      if(e.rate){ res.rate = true; break; }
+      if(e.auth){ res.auth = true; break; }
+      h.dividend = h.dividend || {}; h.dividend.lastSync = Date.now();   // pas de données : on réessaiera demain
+    }
+    await sleep(350);
+  }
+  dateSync.running = false; dateSync.last = res;
+  if(res.ok || res.fail){ saveState(); renderAll(); checkNotifications(); }
+  return res;
+}
+
+/* ---------------------------------------------------------------
+   ONGLET « À VENIR » — les prochains versements, mois par mois
+   --------------------------------------------------------------- */
+function totalsLabel(totals){
+  const cur = Object.keys(totals).filter(c=>totals[c]);
+  if(!cur.length) return '';
+  if(cur.length === 1) return fmtAmount2(totals[cur[0]], cur[0]);
+  const { sum, missing } = sumToEUR(totals);
+  if(!missing.length) return '≈ ' + fmtAmount2(sum, 'EUR');
+  return cur.map(c=>fmtAmount2(totals[c], c)).join(' + ');
+}
+function relativeDay(iso){
+  const n = daysBetween(todayISO(), iso);
+  if(n === 0) return "Aujourd'hui";
+  if(n === 1) return 'Demain';
+  return `Dans ${n} jours`;
+}
+function renderUpcoming(){
+  const hero = document.getElementById('upcomingHero');
+  const listEl = document.getElementById('upcomingList');
+  if(!hero || !listEl) return;
+  const holdings = getFilteredHoldings();
+  const now = new Date();
+  const todayIso = todayISO();
+  const monthNow = todayIso.slice(0,7);
+  const horizon = view.upcomingMonths || 6;
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + horizon, 0);
+  const items = Payouts.payoutsBetween(holdings, from, to).filter(p=>
+    p.date >= todayIso || (!p.dayKnown && p.date.slice(0,7) === monthNow)
+  );
+
+  if(!state.holdings.length){
+    hero.innerHTML = '';
+    listEl.innerHTML = `<div class="empty-state big"><span class="em-icon">🗂️</span>Aucune action pour l'instant.<br>Ajoutez votre première ligne avec le bouton +.</div>`;
+    return;
+  }
+  if(!items.length){
+    hero.innerHTML = '';
+    listEl.innerHTML = `<div class="empty-state big"><span class="em-icon">🔎</span>Aucun versement prévu.<br>Vérifiez que chaque action a un montant, une fréquence et un mois de versement.</div>`;
+    return;
+  }
+
+  // --- Prochain versement
+  const next = items[0];
+  const nextDate = parseISO(next.date);
+  const sameDay = items.filter(p=>p.date === next.date && p.dayKnown === next.dayKnown);
+  const nextTotals = {};
+  sameDay.forEach(p=>{ nextTotals[p.currency] = (nextTotals[p.currency]||0) + p.total; });
+  const nextWhen = next.dayKnown
+    ? `${relativeDay(next.date)} · ${JOURS_LONG[(nextDate.getDay()+6)%7]} ${nextDate.getDate()} ${MOIS_FR[nextDate.getMonth()].toLowerCase()}`
+    : (next.date.slice(0,7) === monthNow ? 'Ce mois-ci' : `Attendu en ${MOIS_FR[nextDate.getMonth()].toLowerCase()}`) + ' · jour non renseigné';
+  const nextWho = sameDay.length > 1
+    ? `${sameDay.length} versements (${sameDay.map(p=>escapeHtml(p.ticker)).slice(0,3).join(', ')}${sameDay.length>3?'…':''})`
+    : `${escapeHtml(next.ticker)} · ${escapeHtml(next.name)}`;
+  hero.innerHTML = `<div class="next-pay">
+    <div class="next-when">${nextWhen}</div>
+    <div class="next-amount">${totalsLabel(nextTotals)}</div>
+    <div class="next-who">${nextWho}</div>
+    
+  </div>`;
+
+  // --- Liste groupée par mois
+  const groups = {};
+  items.forEach(p=>{ (groups[p.date.slice(0,7)] = groups[p.date.slice(0,7)] || []).push(p); });
+  let html = '';
+  Object.keys(groups).sort().forEach(key=>{
+    const [y, m] = key.split('-').map(Number);
+    const rows = groups[key].slice().sort((a,b)=>{
+      if(a.dayKnown !== b.dayKnown) return a.dayKnown ? -1 : 1;
+      return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+    });
+    const totals = {};
+    rows.forEach(p=>{ totals[p.currency] = (totals[p.currency]||0) + p.total; });
+    html += `<section class="pay-month">
+      <header class="pay-month-head"><h3>${MOIS_FR[m-1]} ${y}</h3><span class="pay-month-total">${totalsLabel(totals)}</span></header>
+      ${rows.map(p=>{
+        const h = state.holdings.find(x=>x.id===p.holdingId) || {};
+        const d = parseISO(p.date);
+        const acct = (view.accountFilter==='all' && state.accounts.length>1) ? accountName(h.account) : '';
+        return `<button class="pay-row${p.date===todayIso&&p.dayKnown?' is-today':''}" data-edit="${p.holdingId}" type="button">
+          <div class="pay-day">${p.dayKnown ? `<b>${d.getDate()}</b><span>${JOURS_FR[(d.getDay()+6)%7].toLowerCase()}.</span>` : `<b>—</b><span>jour ?</span>`}</div>
+          ${renderAvatar(p.ticker, h.logo)}
+          <div class="pay-meta">
+            <div class="tk">${escapeHtml(p.ticker)}</div>
+            <div class="nm">${escapeHtml(p.name)}${acct?` · ${escapeHtml(acct)}`:''}</div>
+          </div>
+          <div class="pay-amt"><b>${fmtAmount2(p.total, p.currency)}</b><span>${p.quantity} × ${fmtAmount(p.amount, p.currency)}</span>${p.confirmed?'<span class="conf">✓ date confirmée</span>':(p.dayFrom==='api'?'<span class="conf soft">jour habituel</span>':'')}</div>
+        </button>`;
+      }).join('')}
+    </section>`;
+  });
+  if(horizon < 24) html += `<button class="btn btn-ghost more-btn" id="upcomingMoreBtn" type="button">Voir 6 mois de plus</button>`;
+  html += `<p class="fine-print">Montants estimés d'après le dernier dividende saisi. Touchez une ligne pour la modifier.</p>`;
+  listEl.innerHTML = html;
+  listEl.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> openStockModal(b.dataset.edit)));
+  const more = document.getElementById('upcomingMoreBtn');
+  if(more) more.onclick = ()=>{ view.upcomingMonths = horizon + 6; renderUpcoming(); };
+}
+const JOURS_LONG = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+
+/* ---------------------------------------------------------------
+   ONGLETS
+   --------------------------------------------------------------- */
+function renderTabs(){
+  document.querySelectorAll('.screen').forEach(sc=> sc.classList.toggle('active', sc.id === 'screen-' + view.tab));
+  document.querySelectorAll('.tabbar [data-tab]').forEach(b=>{
+    const on = b.dataset.tab === view.tab;
+    b.classList.toggle('active', on);
+    if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+  });
+}
+function setTab(t){ view.tab = t; renderAll(); window.scrollTo(0,0); }
+
+/* ---------------------------------------------------------------
+   RAPPELS DE VERSEMENT
+   - À l'ouverture de l'app : notification système si c'est le jour.
+   - En arrière-plan : au mieux (Android/Chrome, app installée).
+   - Garanti app fermée : export agenda (.ics) vers le téléphone.
+   --------------------------------------------------------------- */
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+function isStandalone(){ return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+function notifSupported(){ return ('Notification' in window) && ('serviceWorker' in navigator); }
+function notifStatusText(){
+  if(!notifSupported()){
+    return (isIOS() && !isStandalone())
+      ? "Sur iPhone : ouvrez d'abord l'app depuis l'écran d'accueil (Partager → Sur l'écran d'accueil), puis revenez ici."
+      : "Les notifications ne sont pas disponibles sur ce navigateur.";
+  }
+  if(Notification.permission === 'denied') return "Bloquées par le navigateur : réautorisez-les dans les réglages du site.";
+  if(Notification.permission === 'granted' && state.settings.notify) return "Activées. Une notification par mois, avec le montant attendu pour chaque action concernée.";
+  return "Désactivées.";
+}
+function mergeSent(other){
+  if(!other) return;
+  ['days','months'].forEach(k=>{ state.sent[k] = Object.assign({}, other[k] || {}, state.sent[k] || {}); });
+}
+async function showLocalNotification(plan){
+  const reg = await navigator.serviceWorker.ready;
+  await reg.showNotification(plan.title, { body: plan.body, tag: plan.tag, icon: 'icon-192.png', badge: 'icon-192.png' });
+}
+async function checkNotifications(){
+  if(!state.settings.notify || !notifSupported() || Notification.permission !== 'granted') return;
+  try{
+    const c = await caches.open('dividendes-data');
+    const r = await c.match('state.json');
+    if(r){ const snap = await r.json(); mergeSent(snap.sent); }
+  }catch(e){}
+  const plans = Payouts.notificationPlan(state, new Date());
+  for(const pl of plans){
+    try{ await showLocalNotification(pl); Payouts.markSent(state, pl); }catch(e){}
+  }
+  if(plans.length) saveState();
+}
+async function registerPeriodicSync(){
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    if(!('periodicSync' in reg)) return;
+    const st = await navigator.permissions.query({ name:'periodic-background-sync' });
+    if(st.state === 'granted') await reg.periodicSync.register('payday-check', { minInterval: 12*3600*1000 });
+  }catch(e){}
+}
+async function enableNotifications(){
+  if(!notifSupported()){ toast(notifStatusText()); return false; }
+  const perm = await Notification.requestPermission();
+  if(perm !== 'granted'){ toast('Notifications refusées par le navigateur.'); renderAll(); return false; }
+  state.settings.notify = true;
+  saveState();
+  registerPeriodicSync();
+  await checkNotifications();
+  renderAll();
+  toast('Rappels activés.');
+  return true;
+}
+function downloadICS(){
+  const { text, count } = Payouts.buildICS({ holdings: state.holdings }, new Date(), 12, 9);
+  if(!count){ toast('Aucun versement à exporter.'); return; }
+  const blob = new Blob([text], { type:'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'dividendes.ics';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  toast(`${count} rappel(s) prêts à importer dans votre agenda.`);
+}
+function renderNotifBanner(){
+  const el = document.getElementById('notifBanner');
+  if(!el) return;
+  const show = !state.settings.notify && state.holdings.length && (!notifSupported() || Notification.permission === 'default') && !view.notifDismissed;
+  el.hidden = !show;
+  if(!show){ el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="nb-text"><b>Un résumé chaque mois ?</b><span>${notifSupported() ? 'Recevez le montant attendu ce mois-ci.' : escapeHtml(notifStatusText())}</span></div>
+    <div class="nb-actions"><button class="btn btn-primary btn-sm" id="nbEnable" type="button">${notifSupported() ? 'Activer' : 'Détails'}</button><button class="btn btn-ghost btn-sm" id="nbClose" type="button" aria-label="Masquer">×</button></div>`;
+  document.getElementById('nbEnable').onclick = ()=> notifSupported() ? enableNotifications() : openSettingsModal();
+  document.getElementById('nbClose').onclick = ()=>{ view.notifDismissed = true; renderNotifBanner(); };
+}
+
+const MOIS_COURT = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
 function holdingRowHtml(h){
-  return `<div class="holding-row" data-id="${h.id}">
+  const div = h.dividend || {};
+  const months = monthsInCycle(div.anchorMonth, div.frequency);
+  const perYear = (div.lastAmount && months.length) ? div.lastAmount * (h.quantity||0) * months.length : null;
+  const sched = months.length
+    ? `${freqLabel(div.frequency)} · ${months.slice().sort((x,y)=>x-y).map(m=>MOIS_COURT[m-1]).join(' ')}${div.payDay?` · le ${div.payDay}`:''}`
+    : 'Calendrier de versement à compléter';
+  return `<button class="holding-row" data-id="${h.id}" data-edit="${h.id}" type="button">
     ${renderAvatar(h.displayTicker || h.ticker, h.logo)}
     <div class="holding-meta">
-      <div class="tk">${escapeHtml(h.displayTicker || h.ticker)}</div>
+      <div class="tk">${escapeHtml(h.displayTicker || h.ticker)} <span class="qty">×${h.quantity}</span></div>
       <div class="nm">${escapeHtml(h.name || 'Sans nom')}</div>
+      <div class="sched">${escapeHtml(sched)}</div>
     </div>
-    <div class="holding-qty">×${h.quantity}</div>
-    <button class="holding-edit" title="Modifier" data-edit="${h.id}">✎</button>
-  </div>`;
+    <div class="holding-year">${perYear!==null ? `<b>${fmtAmount2(perYear, h.currency)}</b><span>par an</span>` : ''}</div>
+  </button>`;
 }
 
 function renderSummary(){
@@ -1433,7 +1690,14 @@ function renderStockModal(){
           ${MOIS_FR.map((m,i)=>`<option value="${i+1}" ${Number(d.dividend.anchorMonth)===i+1?'selected':''}>${m}</option>`).join('')}
         </select>
       </div>
-      <span class="hint">Les autres mois sont calculés automatiquement à partir de la fréquence — ex : trimestrielle + Août → Fév/Mai/Août/Nov chaque année. Le jour exact n'est pas nécessaire.</span>
+      <div class="field">
+        <label>Jour de versement (facultatif — sinon via l'API)</label>
+        <select id="f-div-day">
+          <option value="">Je ne sais pas</option>
+          ${Array.from({length:31},(_,i)=>`<option value="${i+1}" ${Number(d.dividend.payDay)===i+1?'selected':''}>${i+1}</option>`).join('')}
+        </select>
+      </div>
+      <span class="hint">Les autres mois sont calculés automatiquement à partir de la fréquence — ex : trimestrielle + Août → Fév/Mai/Août/Nov chaque année. Le jour est récupéré automatiquement via l'API ; saisissez-le ici seulement pour le forcer.</span>
 
       <div class="section-title">Résultats trimestriels / semestriels / annuels</div>
       <div class="field-row">
@@ -1606,6 +1870,8 @@ function saveStockModal(){
   d.dividend.frequency = document.getElementById('f-div-freq').value;
   const divMonthVal = document.getElementById('f-div-month').value;
   d.dividend.anchorMonth = divMonthVal ? Number(divMonthVal) : null;
+  const divDayVal = document.getElementById('f-div-day').value;
+  d.dividend.payDay = divDayVal ? Number(divDayVal) : null;
 
   const earnMonthVal = document.getElementById('f-earn-month').value;
   d.earnings.anchorMonth = earnMonthVal ? Number(earnMonthVal) : null;
@@ -1648,6 +1914,17 @@ function openSettingsModal(){
         <button class="btn btn-ghost btn-sm" id="testApiKeyBtn" type="button">Tester la clé maintenant</button>
         <span class="auto-fetch-status" id="testApiKeyStatus"></span>
       </div>
+      <div class="section-title">Dates de versement (API)</div>
+      <p class="notif-status" id="syncStatus">${state.settings.apiKey ? 'Les dates de paiement sont mises à jour automatiquement une fois par jour.' : 'Ajoutez votre clé API ci-dessus pour récupérer automatiquement les dates de paiement.'}</p>
+      <div class="notif-actions"><button class="btn btn-ghost btn-sm" id="syncNowBtn" type="button">Actualiser les dates maintenant</button></div>
+      <div class="section-title">Rappels de versement</div>
+      <p class="notif-status" id="notifStatus">${escapeHtml(notifStatusText())}</p>
+      <div class="notif-actions">
+        <button class="btn btn-primary btn-sm" id="notifEnableBtn" type="button">Activer les rappels</button>
+        <button class="btn btn-ghost btn-sm" id="notifTestBtn" type="button">Envoyer un test</button>
+        <button class="btn btn-ghost btn-sm" id="icsBtn" type="button">Ajouter à l'agenda du téléphone (.ics)</button>
+      </div>
+      <p class="notif-status">Le résumé du mois arrive à la première ouverture de l'app chaque mois (et en arrière-plan sur Android si le navigateur l'autorise). Pour le recevoir même app fermée, importez le fichier .ics dans l'agenda du téléphone : un événement le 1er de chaque mois pendant 12 mois, alarme à 9 h.</p>
       <div class="modal-actions">
         <span></span>
         <div class="right">
@@ -1658,6 +1935,28 @@ function openSettingsModal(){
     </div>
   </div>`;
   document.getElementById('setClose').onclick = closeModal;
+  document.getElementById('syncNowBtn').onclick = async ()=>{
+    const st = document.getElementById('syncStatus');
+    const key = document.getElementById('f-apikey').value.replace(/\s/g,'');
+    if(key && key !== state.settings.apiKey){ state.settings.apiKey = key; saveState(); }
+    if(!state.settings.apiKey){ st.textContent = "Collez d'abord votre clé API."; return; }
+    st.textContent = 'Mise à jour en cours…';
+    const r = await autoSyncDates(true);
+    if(!r) st.textContent = 'Mise à jour impossible (hors ligne ou déjà en cours).';
+    else if(r.auth) st.textContent = 'Clé refusée par FMP (401/403).';
+    else if(r.rate) st.textContent = `Quota API atteint (429) après ${r.ok} ligne(s). Réessayez demain.`;
+    else st.textContent = `${r.ok} ligne(s) mise(s) à jour${r.fail?`, ${r.fail} sans données`:''}.`;
+  };
+  document.getElementById('notifEnableBtn').onclick = async ()=>{
+    await enableNotifications();
+    const st = document.getElementById('notifStatus'); if(st) st.textContent = notifStatusText();
+  };
+  document.getElementById('notifTestBtn').onclick = async ()=>{
+    if(!notifSupported() || Notification.permission !== 'granted'){ toast('Activez d\'abord les rappels.'); return; }
+    try{ await showLocalNotification({ title:'💰 Test — Calendrier Dividendes', body:'Les rappels fonctionnent sur cet appareil.', tag:'test' }); }
+    catch(e){ toast('Échec de la notification de test.'); }
+  };
+  document.getElementById('icsBtn').onclick = downloadICS;
   document.getElementById('setCancel').onclick = closeModal;
   document.getElementById('setOverlay').addEventListener('click', (e)=>{ if(e.target.id==='setOverlay') closeModal(); });
   document.getElementById('setSave').onclick = ()=>{
@@ -1733,9 +2032,11 @@ function importData(file){
    NAVIGATION / ÉVÉNEMENTS GLOBAUX
    --------------------------------------------------------------- */
 function renderAll(){
+  renderTabs();
   renderToolbar();
   renderAccountSwitch();
-  renderTickerTape();
+  renderNotifBanner();
+  renderUpcoming();
   renderCalendar();
   renderHoldingsList();
   renderSummary();
@@ -1744,6 +2045,8 @@ function renderAll(){
 
 function initEvents(){
   document.getElementById('addStockBtn').onclick = ()=> openStockModal(null);
+  document.querySelectorAll('.tabbar [data-tab]').forEach(b=>{ b.addEventListener('click', ()=> setTab(b.dataset.tab)); });
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkNotifications(); });
   document.getElementById('accountsBtn').onclick = openAccountsModal;
   document.getElementById('settingsBtn').onclick = openSettingsModal;
 
@@ -1782,4 +2085,9 @@ function initEvents(){
 
 initEvents();
 renderAll();
-ensureFxRates();
+ensureFxRates().then(()=> renderAll());
+if('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
+  navigator.serviceWorker.register('sw.js').then(()=>{ snapshotForWorker(); checkNotifications(); }).catch(()=>{});
+}
+setTimeout(()=> autoSyncDates(false), 1500);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') autoSyncDates(false); });
