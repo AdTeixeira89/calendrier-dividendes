@@ -27,6 +27,15 @@ describe('trendPeriod', () => {
     expect(points.map((p) => p.incomeCents)).toEqual([0, 0, 2000]) // les revenus restent par mois civil
   })
 
+  it('compte une dépense récurrente ou une mensualité de prêt dans le mois de sa date (le 5 octobre = octobre)', () => {
+    const loan = { ...exp(at(2026, 10, 5), 95000), kind: 'recurring', recurrenceId: 'pret' } as Expense
+    const oneOff = exp(at(2026, 10, 5), 700)
+    const points = buildPeriodPoints('3m', '2026-10', [loan, oneOff], [])
+    expect(points.map((p) => p.expenseCents)).toEqual([0, 700, 95000]) // courante → septembre ; prêt → octobre
+    const week = buildPeriodPoints('1m', '2026-10', [loan, oneOff], [])
+    expect(week.map((p) => p.expenseCents)).toEqual([95000, 0, 0, 0]) // la mensualité du 5 est rangée dans la 1re semaine d'octobre
+  })
+
   it('ne rajoute rien aux dépenses saisies (les mensualités de prêts sont de vraies dépenses, à leur date)', () => {
     const months = buildPeriodPoints('3m', '2026-10', [], [])
     expect(months).toHaveLength(3)

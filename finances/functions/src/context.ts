@@ -1,4 +1,4 @@
-import { budgetMonthBounds } from './shared/budgetMonth.js'
+import { expenseFetchBounds, expenseMonthKey } from './shared/budgetMonth.js'
 import type { Firestore } from 'firebase-admin/firestore'
 import { sumCents, savingsRatePercent, type Cents } from './money.js'
 
@@ -33,11 +33,11 @@ function formatCents(cents: Cents): string {
 export async function computeHouseholdFacts(db: Firestore, householdId: string, monthKey: string): Promise<HouseholdFacts> {
   const { start, end } = monthRange(monthKey)
   // Dépenses : mois budgétaire (du 6 au 5) ; revenus : mois civil.
-  const cycle = budgetMonthBounds(monthKey)
+  const window = expenseFetchBounds(monthKey, monthKey)
   const householdRef = db.collection('households').doc(householdId)
 
   const [allExpensesSnap, incomesSnap, debtsSnap, goalsSnap, subscriptionsSnap, categoriesSnap] = await Promise.all([
-    householdRef.collection('expenses').where('date', '>=', cycle.start).where('date', '<', cycle.end).get(),
+    householdRef.collection('expenses').where('date', '>=', window.start).where('date', '<', window.end).get(),
     householdRef.collection('incomes').where('date', '>=', start).where('date', '<', end).get(),
     householdRef.collection('debts').where('archived', '==', false).get(),
     householdRef.collection('savingsGoals').where('archived', '==', false).get(),
@@ -46,7 +46,7 @@ export async function computeHouseholdFacts(db: Firestore, householdId: string, 
   ])
 
   // Dépenses communes seulement : les dépenses personnelles ne se mélangent pas aux suivis du foyer.
-  const expensesSnap = { docs: allExpensesSnap.docs.filter((d) => d.data().scope !== 'personal') }
+  const expensesSnap = { docs: allExpensesSnap.docs.filter((d) => d.data().scope !== 'personal' && expenseMonthKey(d.data().date.toDate(), d.data()) === monthKey) }
 
   const categoryNames = new Map(categoriesSnap.docs.map((d) => [d.id, (d.data().name as string) ?? d.id]))
 

@@ -14,10 +14,15 @@ describe('spendingPace (mois budgétaire du 6 au 5)', () => {
   })
 
   it('compte une dépense du 3 octobre dans le mois de septembre (dernier jour = le 5)', () => {
-    const points = spendingPace('2026-09', [e(700, 2026, 10, 3), e(900, 2026, 10, 6)], '2026-08', [], new Date(2026, 9, 20))
+    const points = spendingPace('2026-09', [e(700, 2026, 10, 3)], '2026-08', [], new Date(2026, 9, 20))
     expect(points[27]!.currentCents).toBe(700) // 3 octobre = 28e jour
-    expect(points[29]!.currentCents).toBe(700) // le 6 octobre n'en fait pas partie
+    expect(points[29]!.currentCents).toBe(700)
     expect(points.slice(0, 30).every((p) => p.currentCents !== null)).toBe(true)
+  })
+
+  it('place au premier jour une dépense du mois datée avant le 6 (récurrente du 3 comptée dans son mois civil)', () => {
+    const points = spendingPace('2026-10', [e(950, 2026, 10, 3)], '2026-09', [], new Date(2026, 9, 20))
+    expect(points[0]!.currentCents).toBe(950)
   })
 
   it("n'invente aucune valeur pour un mois futur", () => {

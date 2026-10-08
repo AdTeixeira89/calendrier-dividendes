@@ -1,7 +1,7 @@
 import type { Cents } from '@/types'
 import type { Expense } from '@/types/expense'
 import type { Income } from '@/types/income'
-import { budgetMonthBounds, budgetMonthKey } from './budgetMonth'
+import { budgetMonthBounds, expenseBudgetMonth } from './budgetMonth'
 import { formatMonthKey, monthKey, monthRange, shiftMonth, type MonthKey } from './month'
 
 export type TrendPeriod = '1m' | '3m' | '6m' | '12m' | 'all'
@@ -45,8 +45,8 @@ const WEEK_COUNT = 4
 
 /**
  * Points du graphique : par semaine pour « 1 mois » (le mois budgétaire du 6 au 5), par mois sinon.
- * Les dépenses sont rangées par mois budgétaire (celles du 1er au 5 comptent pour le mois précédent) ;
- * les revenus restent par mois civil.
+ * Les dépenses courantes sont rangées par mois budgétaire (celles du 1er au 5 comptent pour le mois précédent) ;
+ * les récurrentes et mensualités de prêt dans le mois de leur date ; les revenus restent par mois civil.
  */
 export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses: Expense[], incomes: Income[]): PeriodPoint[] {
   if (period === '1m') {
@@ -57,6 +57,12 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
       const offset = Math.floor((date.getTime() - start.getTime()) / dayMs)
       return offset < 0 || offset >= span ? -1 : Math.min(WEEK_COUNT - 1, Math.floor(offset / 7))
     }
+    // Une dépense du mois (les récurrentes du 1er au 5 en font partie) tombe dans la première ou la dernière semaine si sa date est hors du 6 → 5.
+    const expenseWeekOf = (e: Expense) => {
+      if (expenseBudgetMonth(e) !== month) return -1
+      const offset = Math.floor((e.date.toDate().getTime() - start.getTime()) / dayMs)
+      return Math.min(WEEK_COUNT - 1, Math.floor(Math.min(span - 1, Math.max(0, offset)) / 7))
+    }
     const label = (week: number) => {
       const first = new Date(start.getFullYear(), start.getMonth(), start.getDate() + week * 7)
       if (week < WEEK_COUNT - 1) return `${first.getDate()}–${new Date(first.getFullYear(), first.getMonth(), first.getDate() + 6).getDate()}`
@@ -65,13 +71,13 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
     return Array.from({ length: WEEK_COUNT }, (_, week) => ({
       label: label(week),
       incomeCents: incomes.filter((i) => weekOf(i.date.toDate()) === week).reduce((t, i) => t + i.amountCents, 0),
-      expenseCents: expenses.filter((e) => weekOf(e.date.toDate()) === week).reduce((t, e) => t + e.amountCents, 0),
+      expenseCents: expenses.filter((e) => expenseWeekOf(e) === week).reduce((t, e) => t + e.amountCents, 0),
     }))
   }
 
   let first: MonthKey
   if (period === 'all') {
-    const dates = [...expenses.map((e) => budgetMonthKey(e.date.toDate())), ...incomes.map((i) => monthKey(i.date.toDate()))]
+    const dates = [...expenses.map((e) => expenseBudgetMonth(e)), ...incomes.map((i) => monthKey(i.date.toDate()))]
     const earliest = dates.length > 0 ? dates.reduce((a, b) => (a < b ? a : b)) : month
     const previous = shiftMonth(month, -1)
     first = earliest < previous ? earliest : previous
@@ -85,6 +91,6 @@ export function buildPeriodPoints(period: TrendPeriod, month: MonthKey, expenses
   return months.map((m) => ({
     label: shortMonth(m, withYear),
     incomeCents: incomes.filter((i) => monthKey(i.date.toDate()) === m).reduce((t, i) => t + i.amountCents, 0),
-    expenseCents: expenses.filter((e) => budgetMonthKey(e.date.toDate()) === m).reduce((t, e) => t + e.amountCents, 0),
+    expenseCents: expenses.filter((e) => expenseBudgetMonth(e) === m).reduce((t, e) => t + e.amountCents, 0),
   }))
 }

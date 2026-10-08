@@ -30,8 +30,9 @@ function cumulativeByDay(expenses: { amountCents: Cents; date: Date }[], month: 
   const { start } = budgetMonthBounds(month)
   const perDay = new Array<Cents>(days).fill(0)
   for (const e of expenses) {
-    const i = dayIndex(e.date, start)
-    if (i >= 0 && i < days) perDay[i]! += e.amountCents
+    // Les dépenses reçues sont celles du mois (les récurrentes du 1er au 5 en font partie) : hors du 6 → 5, on les place au premier ou dernier jour.
+    const i = Math.min(days - 1, Math.max(0, dayIndex(e.date, start)))
+    perDay[i]! += e.amountCents
   }
   let running = 0
   return perDay.map((cents) => (running += cents))

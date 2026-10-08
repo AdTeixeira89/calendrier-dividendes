@@ -1,7 +1,7 @@
 import { watchExpensesRange } from '@/services/expenseService'
 import { reportSyncError } from '@/services/repository'
 import type { Expense } from '@/types'
-import { budgetMonthTimestampRange } from '@/utils/budgetMonth'
+import { expenseBudgetMonth, expenseFetchTimestampRange } from '@/utils/budgetMonth'
 import { monthTimestampRange, type MonthKey } from '@/utils/month'
 import { useKeyedSnapshot } from './useKeyedSnapshot'
 
@@ -11,9 +11,15 @@ import { useKeyedSnapshot } from './useKeyedSnapshot'
  */
 export function useExpensesRange(householdId: string, from: MonthKey, to: MonthKey, mode: 'calendar' | 'budget' = 'calendar'): Expense[] | undefined {
   return useKeyedSnapshot<Expense[]>(`${householdId}:${from}:${to}:${mode}`, (onChange) => {
-    const rangeOf = mode === 'budget' ? budgetMonthTimestampRange : monthTimestampRange
-    const { start } = rangeOf(from)
-    const { end } = rangeOf(to)
+    if (mode === 'budget') {
+      const { start, end } = expenseFetchTimestampRange(from, to)
+      return watchExpensesRange(householdId, start, end, (list) => onChange(list.filter((e) => { const m = expenseBudgetMonth(e); return m >= from && m <= to })), (error) => {
+        reportSyncError(error)
+        onChange([])
+      })
+    }
+    const { start } = monthTimestampRange(from)
+    const { end } = monthTimestampRange(to)
     return watchExpensesRange(householdId, start, end, onChange, (error) => {
       reportSyncError(error)
       onChange([])

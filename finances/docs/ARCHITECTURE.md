@@ -306,4 +306,5 @@ finances/
 
 - Les **dépenses** sont comptées par mois budgétaire : du 6 d'un mois au 5 du suivant ; une dépense du 1er au 5 compte pour le mois précédent (`functions/src/shared/budgetMonth.ts`, partagé app/functions ; constante `BUDGET_MONTH_START_DAY`).
 - S'appliquent : listes et totaux, graphiques (accueil, analyse, rythme des dépenses), budget commun, alertes (app et fonction quotidienne), bilan mensuel (envoyé le 6), export. Les **revenus** restent par mois civil.
+- **Exception : les dépenses récurrentes** (type « Récurrente », abonnements, mensualités de prêt, reprises automatiques) comptent toujours dans le **mois civil de leur date de prélèvement** : le prélèvement du 5 octobre est une dépense d'octobre (`expenseMonthKey`, `isRecurringExpense`). Les lectures couvrent donc du 1er du mois au 6 suivant puis filtrent.
 - Inchangés : les dates des dépenses, la création des récurrentes / mensualités de prêt / reprises (par mois civil, à leur date), la détection de doublons à l'import.

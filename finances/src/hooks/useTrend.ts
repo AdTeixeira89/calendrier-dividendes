@@ -2,7 +2,7 @@ import { Timestamp } from 'firebase/firestore'
 import { watchExpensesRange } from '@/services/expenseService'
 import { watchIncomesRange } from '@/services/incomeService'
 import type { Expense, Income } from '@/types'
-import { budgetMonthBounds, budgetMonthKey } from '@/utils/budgetMonth'
+import { expenseBudgetMonth, expenseFetchTimestampRange } from '@/utils/budgetMonth'
 import { lastMonths, monthKey, monthRange, type MonthKey as MonthKeyType } from '@/utils/month'
 import { commonExpenses } from '@/utils/spaces'
 import { useKeyedSnapshot } from './useKeyedSnapshot'
@@ -17,9 +17,9 @@ export interface TrendPoint {
 export function useTrend(householdId: string, month: MonthKeyType, count = 6): TrendPoint[] | undefined {
   const months = lastMonths(month, count)
   // Dépenses : mois budgétaires (du 6 au 5) ; revenus : mois civils.
-  const expenseStart = Timestamp.fromDate(budgetMonthBounds(months[0]!).start)
+  const expenseStart = expenseFetchTimestampRange(months[0]!).start
   const incomeStart = Timestamp.fromDate(monthRange(months[0]!).start)
-  const end = Timestamp.fromDate(budgetMonthBounds(months[months.length - 1]!).end)
+  const end = expenseFetchTimestampRange(months[months.length - 1]!).end
   const key = `${householdId}:${months[0]}:${months[months.length - 1]}`
 
   const expenses = useKeyedSnapshot<Expense[]>(key, (onChange) => watchExpensesRange(householdId, expenseStart, end, (list) => onChange(commonExpenses(list)), () => onChange([])))
@@ -30,6 +30,6 @@ export function useTrend(householdId: string, month: MonthKeyType, count = 6): T
   return months.map((m) => ({
     month: m,
     incomeCents: incomes.filter((i) => monthKey(i.date.toDate()) === m).reduce((sum, i) => sum + i.amountCents, 0),
-    expenseCents: expenses.filter((e) => budgetMonthKey(e.date.toDate()) === m).reduce((sum, e) => sum + e.amountCents, 0),
+    expenseCents: expenses.filter((e) => expenseBudgetMonth(e) === m).reduce((sum, e) => sum + e.amountCents, 0),
   }))
 }

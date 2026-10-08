@@ -5,7 +5,7 @@ import { watchExpensesRange } from '@/services/expenseService'
 import type { HomeView } from '@/services/homePrefsService'
 import { watchIncomesRange } from '@/services/incomeService'
 import type { Expense, Income } from '@/types'
-import { budgetMonthBounds } from '@/utils/budgetMonth'
+import { expenseFetchTimestampRange } from '@/utils/budgetMonth'
 import { type MonthKey } from '@/utils/month'
 import { commonExpenses, inSpace } from '@/utils/spaces'
 import { buildPeriodPoints, periodFirstMonth, periodStart, type PeriodPoint, type TrendPeriod } from '@/utils/trendPeriod'
@@ -18,11 +18,11 @@ import { useKeyedSnapshot } from './useKeyedSnapshot'
  */
 export function usePeriodTrend(householdId: string, month: MonthKey, period: TrendPeriod, view: HomeView = 'common'): PeriodPoint[] | undefined {
   const user = useCurrentUser()
-  // Dépenses : mois budgétaires (du 6 au 5) ; revenus : mois civils. La fin couvre le dernier mois budgétaire entier.
+  // Dépenses : mois comptables (du 6 au 5 pour les courantes, mois civil pour les récurrentes) ; revenus : mois civils.
   const first = periodFirstMonth(period, month)
-  const expenseStart = Timestamp.fromDate(first ? budgetMonthBounds(first).start : periodStart(period, month))
+  const expenseStart = first ? expenseFetchTimestampRange(first, month).start : Timestamp.fromDate(periodStart(period, month))
   const incomeStart = Timestamp.fromDate(periodStart(period, month))
-  const end = Timestamp.fromDate(budgetMonthBounds(month).end)
+  const end = expenseFetchTimestampRange(month).end
   const key = `${householdId}:${month}:${period}`
 
   const expenses = useKeyedSnapshot<Expense[]>(key, (onChange) => watchExpensesRange(householdId, expenseStart, end, onChange, () => onChange([])))

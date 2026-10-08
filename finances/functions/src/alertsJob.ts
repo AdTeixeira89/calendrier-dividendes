@@ -1,7 +1,7 @@
 import { FieldValue, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore'
 import { evaluateAlerts, withDefaultSettings, type AlertInput, type AlertSettings, type FinancialAlert } from './shared/alerts.js'
 import { commonBudgetCents } from './shared/budget.js'
-import { BUDGET_MONTH_START_DAY, budgetMonthBounds, budgetMonthKey } from './shared/budgetMonth.js'
+import { BUDGET_MONTH_START_DAY, budgetMonthKey, expenseFetchBounds, expenseMonthKey } from './shared/budgetMonth.js'
 import type { PushPayload } from './shared/push.js'
 
 export interface StoredPushSubscription {
@@ -34,6 +34,9 @@ function monthBounds(month: string): { start: Date; end: Date } {
 /** Dépenses communes seulement : les dépenses personnelles ne se mélangent pas aux suivis du foyer. */
 const commonOnly = (docs: QueryDocumentSnapshot[]) => docs.filter((d) => d.data().scope !== 'personal')
 
+/** Dépenses du mois comptable : courantes du 6 au 5, récurrentes (prêts, abonnements…) dans le mois civil de leur date. */
+const inMonth = (docs: QueryDocumentSnapshot[], month: string) => docs.filter((d) => expenseMonthKey(d.data().date.toDate(), d.data()) === month)
+
 const cents = (docs: QueryDocumentSnapshot[]) => docs.reduce((sum, d) => sum + (d.data().amountCents as number), 0)
 
 /** Rassemble, pour un foyer, exactement les données que la carte « Alertes » de l'app utilise. */
@@ -46,13 +49,13 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
   const ref = db.collection('households').doc(householdId)
   const cur = monthBounds(month)
   const prev = monthBounds(previousMonth)
-  const curCycle = budgetMonthBounds(month)
-  const prevCycle = budgetMonthBounds(previousMonth)
+  const curWindow = expenseFetchBounds(month, month)
+  const prevWindow = expenseFetchBounds(previousMonth, previousMonth)
 
   const [expenses, incomes, prevExpenses, prevIncomes, budgetGlobal, budgetSplit, categories, subscriptions, settings] = await Promise.all([
-    ref.collection('expenses').where('date', '>=', curCycle.start).where('date', '<', curCycle.end).get(),
+    ref.collection('expenses').where('date', '>=', curWindow.start).where('date', '<', curWindow.end).get(),
     ref.collection('incomes').where('date', '>=', cur.start).where('date', '<', cur.end).get(),
-    ref.collection('expenses').where('date', '>=', prevCycle.start).where('date', '<', prevCycle.end).get(),
+    ref.collection('expenses').where('date', '>=', prevWindow.start).where('date', '<', prevWindow.end).get(),
     ref.collection('incomes').where('date', '>=', prev.start).where('date', '<', prev.end).get(),
     ref.collection('settings').doc('budgetGlobal').get(),
     ref.collection('settings').doc('budgetSplit').get(),
@@ -64,7 +67,7 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
   return {
     today,
     month,
-    expenses: commonOnly(expenses.docs).map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
+    expenses: commonOnly(inMonth(expenses.docs, month)).map((d) => ({ amountCents: d.data().amountCents as number, categoryId: d.data().categoryId as string })),
     incomeCents: cents(incomes.docs),
     budgetCents: commonBudgetCents(budgetGlobal.data()?.totalCents as number | null | undefined, budgetSplit.data()?.plans as Record<string, { commonCents?: number }> | undefined),
     categoryNames: Object.fromEntries(categories.docs.map((d) => [d.id, d.data().name as string])),
@@ -72,7 +75,7 @@ export async function loadAlertInput(db: Firestore, householdId: string, now: Da
       const data = d.data()
       return { id: d.id, name: data.name as string, amountCents: data.amountCents as number, period: data.period === 'yearly' ? ('yearly' as const) : ('monthly' as const), nextDate: data.nextDate?.toDate() ?? null, archived: Boolean(data.archived) }
     }),
-    previousMonth: { month: previousMonth, incomeCents: cents(prevIncomes.docs), expenseCents: cents(commonOnly(prevExpenses.docs)) },
+    previousMonth: { month: previousMonth, incomeCents: cents(prevIncomes.docs), expenseCents: cents(commonOnly(inMonth(prevExpenses.docs, previousMonth))) },
     settings: withDefaultSettings(settings.data() as Partial<AlertSettings> | undefined),
   }
 }
