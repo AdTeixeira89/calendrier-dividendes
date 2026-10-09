@@ -301,6 +301,33 @@ function pickBySuffix(list, isin){
   return rows[0].symbol;
 }
 
+/* Noms DEGIRO du type « VISA INC-CLASS A SHARES » : on essaie le nom complet,
+   puis sans les mots génériques (INC, CORP, CLASS A…), puis les 2 premiers mots. */
+function nameQueries(name){
+  const full = String(name||'').trim().slice(0,60);
+  const core = full.replace(/[-–]\s*CLASS\s+\w+.*$/i,'').replace(/\b(INC|CORP|CORPORATION|CO|COMPANY|LTD|PLC|SA|SE|AG|NV|N\.V\.|HOLDINGS?|GROUP|THE)\b\.?/gi,' ').replace(/\s+/g,' ').trim();
+  const two = core.split(' ').slice(0,2).join(' ');
+  const hyphen = two.includes(' ') ? two.replace(/ /g,'-') : '';
+  return [...new Set([full, core, two, hyphen].filter(q => q && q.length >= 3))];
+}
+
+/* Recherche par nom : on n'accepte que la cotation cohérente avec le pays de
+   l'ISIN (États-Unis → NASDAQ/NYSE/AMEX ; ailleurs → suffixe de la place).
+   Mieux vaut échouer qu'associer une mauvaise cotation (autre devise). */
+function pickFromNameSearch(list, isin){
+  const rows = (Array.isArray(list) ? list : []).filter(x => x && x.symbol);
+  const cc = isin.slice(0,2).toUpperCase();
+  if(cc === 'US'){
+    const hit = rows.find(x => ['NASDAQ','NYSE','AMEX'].includes(String(x.exchange||'').toUpperCase()));
+    return hit ? hit.symbol : null;
+  }
+  for(const suf of (ISIN_COUNTRY_SUFFIX[cc] || [])){
+    const hit = rows.find(x => suf ? x.symbol.toUpperCase().endsWith(suf) : !x.symbol.includes('.'));
+    if(hit) return hit.symbol;
+  }
+  return null;
+}
+
 /* Beaucoup d'exports de courtiers (DEGIRO, Trade Republic…) ne donnent que
    l'ISIN, pas le ticker boursier attendu par l'API. On tente plusieurs voies,
    de la plus fiable à la plus floue : recherche par ISIN, recherche texte de
@@ -323,9 +350,11 @@ async function resolveIsinToSymbol(isin, key, nameHint){
   const hit1 = pickBySuffix(bySymbol, isin);
   if(hit1) return hit1;
   if(nameHint && nameHint.trim()){
-    const byName = await get(`search-name?query=${encodeURIComponent(nameHint.trim().slice(0,60))}`);
-    const hit2 = pickBySuffix(byName, isin);
-    if(hit2) return hit2;
+    for(const q of nameQueries(nameHint)){
+      const byName = await get(`search-name?query=${encodeURIComponent(q)}`);
+      const hit = pickFromNameSearch(byName, isin);
+      if(hit) return hit;
+    }
   }
   return null;
 }
@@ -432,7 +461,10 @@ async function fetchFmpData(tickerInput, nameHint){
     if(diag.anyRateLimit) throw new Error('Quota API dépassé (429) — réessayez demain, ou réduisez le nombre de lignes.');
     if(diag.anyNetworkError) throw new Error("Échec réseau (CORS ou connexion bloquée) — l'API n'a pas pu être contactée depuis le navigateur.");
     if(diag.lastApiMessage) throw new Error(`Réponse API : ${diag.lastApiMessage}`);
-    if(isLikelyISIN(tickerInput.trim()) && !result.resolvedSymbol) throw new Error("Cet identifiant ressemble à un ISIN et n'a pas pu être résolu en ticker — renseignez le vrai symbole boursier (ex : AI.PA) à la place.");
+    if(isLikelyISIN(tickerInput.trim()) && !result.resolvedSymbol){
+      if(!tickerInput.trim().toUpperCase().startsWith('US')) throw new Error("ISIN hors États-Unis : le plan gratuit FMP ne permet pas de le convertir en ticker (relais Yahoo requis, ou saisissez le ticker à la main).");
+      throw new Error("ISIN non résolu en ticker — vérifiez que la colonne Nom (Produit) a bien été importée, ou saisissez le ticker à la main (ex : AAPL).");
+    }
     throw new Error('Aucune donnée exploitable pour ce ticker sur le plan API actuel.');
   }
   return result;
