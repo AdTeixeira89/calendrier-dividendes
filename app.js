@@ -275,22 +275,53 @@ function isLikelyISIN(s){
   return /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test((s||'').trim().toUpperCase());
 }
 
-/* Beaucoup d'exports de courtiers (Trade Republic notamment) ne donnent que
-   l'ISIN, pas le ticker boursier attendu par l'API. On tente de le résoudre
-   automatiquement avant d'interroger les autres endpoints. Best-effort : si
-   l'endpoint de recherche ISIN n'est pas couvert par le plan, on continue
-   quand même avec l'ISIN tel quel (qui échouera plus loin, proprement).*/
-async function resolveIsinToSymbol(isin, key){
-  try{
-    const r = await fetch(`https://financialmodelingprep.com/stable/search-isin?isin=${encodeURIComponent(isin)}&apikey=${key}`);
-    if(!r.ok) return null;
-    const data = await r.json();
-    if(Array.isArray(data) && data[0] && data[0].symbol) return data[0].symbol;
-  }catch(e){ /* ignoré, on retombe sur l'ISIN d'origine */ }
+/* Suffixe de place boursière FMP le plus probable selon le pays de l'ISIN
+   (2 premières lettres) — sert à départager les résultats d'une recherche. */
+const ISIN_COUNTRY_SUFFIX = { FR:['.PA'], NL:['.AS'], DE:['.DE','.F'], GB:['.L'], IT:['.MI'], ES:['.MC'], BE:['.BR'], PT:['.LS'], CH:['.SW'], SE:['.ST'], DK:['.CO'], FI:['.HE'], NO:['.OL'], IE:['.IR','.L'], AT:['.VI'], US:[''], CA:['.TO'] };
+
+function pickBySuffix(list, isin){
+  const rows = (Array.isArray(list) ? list : []).filter(x => x && x.symbol);
+  if(!rows.length) return null;
+  const wanted = ISIN_COUNTRY_SUFFIX[isin.slice(0,2).toUpperCase()];
+  if(wanted){
+    for(const suf of wanted){
+      const hit = rows.find(x => suf === '' ? !x.symbol.includes('.') : x.symbol.toUpperCase().endsWith(suf));
+      if(hit) return hit.symbol;
+    }
+  }
+  return rows[0].symbol;
+}
+
+/* Beaucoup d'exports de courtiers (DEGIRO, Trade Republic…) ne donnent que
+   l'ISIN, pas le ticker boursier attendu par l'API. On tente plusieurs voies,
+   de la plus fiable à la plus floue : recherche par ISIN, recherche texte de
+   l'ISIN, puis recherche par nom du produit (colonne « Produit » de DEGIRO).
+   Best-effort : si rien ne répond, on continue avec l'ISIN d'origine (la
+   suite échouera proprement avec un message explicite).*/
+async function resolveIsinToSymbol(isin, key, nameHint){
+  const base = 'https://financialmodelingprep.com/stable';
+  const get = async (path)=>{
+    try{
+      const r = await fetch(`${base}/${path}&apikey=${key}`);
+      if(!r.ok) return null;
+      return await r.json();
+    }catch(e){ return null; }
+  };
+  isin = isin.trim().toUpperCase();
+  const byIsin = await get(`search-isin?isin=${encodeURIComponent(isin)}`);
+  if(Array.isArray(byIsin) && byIsin[0] && byIsin[0].symbol) return pickBySuffix(byIsin, isin);
+  const bySymbol = await get(`search-symbol?query=${encodeURIComponent(isin)}`);
+  const hit1 = pickBySuffix(bySymbol, isin);
+  if(hit1) return hit1;
+  if(nameHint && nameHint.trim()){
+    const byName = await get(`search-name?query=${encodeURIComponent(nameHint.trim().slice(0,60))}`);
+    const hit2 = pickBySuffix(byName, isin);
+    if(hit2) return hit2;
+  }
   return null;
 }
 
-async function fetchAutoData(tickerInput){
+async function fetchAutoData(tickerInput, nameHint){
   const key = state.settings.apiKey;
   if(!key) throw new Error('Aucune clé API renseignée (voir Paramètres).');
   const base = 'https://financialmodelingprep.com/stable';
@@ -298,7 +329,7 @@ async function fetchAutoData(tickerInput){
 
   let ticker = tickerInput.trim();
   if(isLikelyISIN(ticker)){
-    const resolved = await resolveIsinToSymbol(ticker, key);
+    const resolved = await resolveIsinToSymbol(ticker, key, nameHint);
     if(resolved){ result.resolvedSymbol = resolved; ticker = resolved; }
   }
 
@@ -1445,7 +1476,7 @@ async function confirmImportMapping(){
     const c = candidates[i];
     confirmBtn.textContent = `Vérification ${i+1}/${candidates.length}…`;
     try{
-      const data = await fetchAutoData(c.rawTicker);
+      const data = await fetchAutoData(c.rawTicker, c.name);
       if(data.dividend && data.dividend.history && data.dividend.history.length){
         const symbol = data.resolvedSymbol || c.rawTicker;
         const last = data.dividend.history[data.dividend.history.length-1];
@@ -1495,10 +1526,10 @@ async function runBulkAutoFetch(){
   if(!targets.length){ toast('Toutes les lignes ont déjà des données de dividende.'); return; }
   toast(`Récupération en cours pour ${targets.length} ligne(s)…`);
 
-  let ok = 0, fail = 0, resolved = 0; const failedTickers = [];
+  let ok = 0, fail = 0, resolved = 0; const failedTickers = []; let firstError = '';
   for(const h of targets){
     try{
-      const data = await fetchAutoData(h.ticker);
+      const data = await fetchAutoData(h.ticker, h.name);
       if(data.resolvedSymbol){
         h.ticker = data.resolvedSymbol;
         h.displayTicker = data.resolvedSymbol.toUpperCase();
@@ -1521,6 +1552,7 @@ async function runBulkAutoFetch(){
     }catch(e){
       fail++;
       failedTickers.push(h.displayTicker || h.ticker);
+      if(!firstError) firstError = e && e.message ? e.message : '';
     }
     saveState();
     renderHoldingsList();
@@ -1528,7 +1560,7 @@ async function runBulkAutoFetch(){
   }
   saveState();
   renderAll();
-  toast(`${ok} ligne(s) mise(s) à jour${resolved ? ` (dont ${resolved} ISIN résolu(s) en ticker)` : ''}${fail ? `, ${fail} échec(s) : ${failedTickers.slice(0,5).join(', ')}${failedTickers.length>5?'…':''}` : ''}.`);
+  toast(`${ok} ligne(s) mise(s) à jour${resolved ? ` (dont ${resolved} ISIN résolu(s) en ticker)` : ''}${fail ? `, ${fail} échec(s) : ${failedTickers.slice(0,5).join(', ')}${failedTickers.length>5?'…':''}. ${firstError} Relancez l'auto-complétion pour réessayer ces lignes` : ''}.`);
 }
 
 /* ---------------------------------------------------------------
