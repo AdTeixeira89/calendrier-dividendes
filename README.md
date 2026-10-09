@@ -50,6 +50,13 @@ Le plan gratuit a un quota de requêtes journalier et certains endpoints peuvent
 
 Le plan gratuit FMP ne couvre que les actions américaines. Pour les titres européens, déployez le petit relais Cloudflare Workers du dossier [`relay/`](relay/LISEZMOI.md) (gratuit), puis collez son adresse dans ⚙ Paramètres. L'app interroge FMP d'abord, puis Yahoo Finance en secours (date ex-dividende et montant ; pas de date de mise en paiement ni de résultats).
 
+## Sécurité et sauvegarde
+
+- Aucune création de compte : les données restent sur le téléphone (localStorage + copie IndexedDB, stockage persistant demandé au navigateur).
+- **Code de verrouillage** (⚙ Paramètres → Sécurité et sauvegarde) : 4 à 8 chiffres. Une fois défini, tout l'état (lignes, clé API) est chiffré (AES-GCM, clé dérivée du code par PBKDF2). L'app se reverrouille après 1 minute en arrière-plan. Le code n'est pas récupérable : exportez une sauvegarde.
+- **Export / restauration** d'un fichier JSON (feuille de partage sur iPhone → Fichiers, AirDrop, Mail…).
+- Sur iPhone, l'app installée sur l'écran d'accueil a un stockage **séparé** de Safari : exportez depuis l'un, restaurez dans l'autre.
+
 ## Format des tickers
 
 - Actions américaines : symbole seul, ex. `AAPL`, `MSFT`.

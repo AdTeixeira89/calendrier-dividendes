@@ -17,7 +17,7 @@ const INK_SOFT_HEX = '#8A99B3';
 /* ---------------------------------------------------------------
    ÉTAT
    --------------------------------------------------------------- */
-let state = loadState();
+let state = defaultState();   // remplacé au démarrage par boot() (lecture + déverrouillage éventuel)
 let view = {
   tab: 'upcoming',        // 'upcoming' | 'calendar' | 'portfolio' | 'totals'
   mode: (window.innerWidth < 700 ? 'month' : 'year'),   // 'year' | 'month' | 'logos'
@@ -109,11 +109,9 @@ function migrateHoldingToMonthModel(h){
   }
   return h;
 }
-function loadState(){
+function hydrateState(parsed){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const merged = Object.assign(defaultState(), parsed);
+    const merged = Object.assign(defaultState(), parsed || {});
     if(!merged.accounts || !merged.accounts.length) merged.accounts = defaultState().accounts;
     merged.settings = Object.assign({ apiKey:'', relayUrl:'', notify:false }, merged.settings || {});
     merged.sent = merged.sent || { days:{}, months:{} };
@@ -125,13 +123,15 @@ function loadState(){
   }catch(e){ return defaultState(); }
 }
 function saveState(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  Vault.write(JSON.stringify(state));   // localStorage + IndexedDB, chiffré si un code est défini
   snapshotForWorker();
 }
 /* Copie des données lisible par le service worker (vérification en arrière-plan). */
 function snapshotForWorker(){
   try{
     if(!('caches' in window)) return;
+    // Avec un code, aucune copie en clair ne doit traîner dans le cache du service worker.
+    if(Vault.hasPin()){ caches.open('dividendes-data').then(c=> c.delete('state.json')); return; }
     caches.open('dividendes-data').then(c=> c.put('state.json', new Response(JSON.stringify({
       holdings: state.holdings, settings: { notify: !!state.settings.notify }, sent: state.sent
     }))));
@@ -830,6 +830,72 @@ function renderAvatar(ticker, logo){
     return `<div class="avatar"><img src="${escapeHtml(logo)}" alt="${escapeHtml(ticker)}" onerror="this.parentElement.innerHTML='${initials(ticker)}'; this.parentElement.style.background='${colorFor(ticker)}';"/></div>`;
   }
   return `<div class="avatar" style="background:${colorFor(ticker)}">${initials(ticker)}</div>`;
+}
+
+/* ---------------------------------------------------------------
+   MODAL — SÉCURITÉ ET SAUVEGARDE (code de verrouillage, export / restauration)
+   --------------------------------------------------------------- */
+function openSecurityModal(){
+  const pin = Vault.hasPin();
+  const persisted = Vault.isPersisted();
+  const root = document.getElementById('modalRoot');
+  const pinInput = (id, label)=> `<div class="field"><label for="${id}">${label}</label><input type="password" id="${id}" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" /></div>`;
+  root.innerHTML = `<div class="modal-overlay" id="secOverlay">
+    <div class="modal" style="max-width:460px;">
+      <button class="modal-close" id="secClose">×</button>
+      <h2>Sécurité et sauvegarde</h2>
+      <p class="modal-sub">Vos données restent sur ce téléphone, sans compte. ${pin ? '🔒 Un code est actif : les données stockées sont chiffrées.' : '🔓 Aucun code : l\'app s\'ouvre directement.'}</p>
+
+      <div class="section-title">${pin ? 'Changer le code' : 'Définir un code'}</div>
+      ${pin ? pinInput('sec-cur', 'Code actuel') : ''}
+      ${pinInput('sec-new', 'Nouveau code (4 à 8 chiffres, 6 recommandé)')}
+      ${pinInput('sec-new2', 'Confirmer le nouveau code')}
+      <p class="hint" style="color:var(--gold);">⚠ Le code ne peut pas être récupéré : sans lui, les données de ce téléphone sont perdues. Exportez une sauvegarde ci-dessous.</p>
+      <div class="notif-actions"><button class="btn btn-primary btn-sm" id="secSetPin" type="button">${pin ? 'Changer le code' : 'Activer le code'}</button></div>
+      <div class="auto-fetch-status" id="secStatus"></div>
+
+      ${pin ? `<div class="section-title">Retirer le code</div>
+      ${pinInput('sec-rm', 'Code actuel')}
+      <div class="notif-actions"><button class="btn btn-ghost btn-sm" id="secRmPin" type="button">Retirer le code</button></div>` : ''}
+
+      <div class="section-title">Sauvegarde</div>
+      <p class="notif-status">Stockage durable : ${persisted ? 'activé ✓' : 'non garanti (installez l\'app sur l\'écran d\'accueil et exportez régulièrement)'}.</p>
+      <div class="notif-actions">
+        <button class="btn btn-primary btn-sm" id="secExport" type="button">Exporter une sauvegarde</button>
+        <button class="btn btn-ghost btn-sm" id="secImport" type="button">Restaurer une sauvegarde</button>
+      </div>
+      <p class="hint">Le fichier exporté n'est pas chiffré (il contient vos lignes et votre clé API) : gardez-le en lieu sûr.</p>
+      <div class="modal-actions"><span></span><div class="right"><button class="btn btn-ghost" id="secDone">Fermer</button></div></div>
+    </div>
+  </div>`;
+  const $ = (id)=> document.getElementById(id);
+  const status = (msg, ok)=>{ const el = $('secStatus'); el.textContent = msg; el.className = 'auto-fetch-status ' + (ok ? 'ok' : 'err'); };
+  const valid = (v)=> /^\d{4,8}$/.test(v);
+  $('secClose').onclick = closeModal; $('secDone').onclick = closeModal;
+  $('secOverlay').addEventListener('click', (e)=>{ if(e.target.id === 'secOverlay') closeModal(); });
+  $('secExport').onclick = exportData;
+  $('secImport').onclick = ()=>{ closeModal(); document.getElementById('importFile').click(); };
+  $('secSetPin').onclick = async ()=>{
+    const n1 = $('sec-new').value.trim(), n2 = $('sec-new2').value.trim();
+    if(!valid(n1)){ status('Le code doit comporter 4 à 8 chiffres.', false); return; }
+    if(n1 !== n2){ status('Les deux codes ne correspondent pas.', false); return; }
+    if(pin){
+      try{ await Vault.verifyPin($('sec-cur').value.trim()); }
+      catch(e){ status('Code actuel incorrect.', false); return; }
+    }
+    await Vault.setPin(n1, JSON.stringify(state));
+    snapshotForWorker();
+    toast(pin ? 'Code modifié.' : 'Code activé. Pensez à exporter une sauvegarde.');
+    openSecurityModal();
+  };
+  if(pin) $('secRmPin').onclick = async ()=>{
+    try{ await Vault.verifyPin($('sec-rm').value.trim()); }
+    catch(e){ status('Code actuel incorrect.', false); return; }
+    await Vault.removePin(JSON.stringify(state));
+    snapshotForWorker();
+    toast('Code retiré.');
+    openSecurityModal();
+  };
 }
 
 function closeModal(){
@@ -2102,6 +2168,9 @@ function openSettingsModal(){
         <button class="btn btn-ghost btn-sm" id="testRelayBtn" type="button" style="margin-top:6px;">Tester le relais</button>
         <span class="auto-fetch-status" id="testRelayStatus"></span>
       </div>
+      <div class="section-title">Sécurité et sauvegarde</div>
+      <p class="notif-status">${Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'app.' : '🔓 Aucun code défini.'}</p>
+      <div class="notif-actions"><button class="btn btn-ghost btn-sm" id="securityBtn" type="button">Code de verrouillage et sauvegarde</button></div>
       <div class="section-title">Dates de versement (API)</div>
       <p class="notif-status" id="syncStatus">${state.settings.apiKey ? 'Les dates de paiement sont mises à jour automatiquement une fois par jour.' : 'Ajoutez votre clé API ci-dessus pour récupérer automatiquement les dates de paiement.'}</p>
       <div class="notif-actions"><button class="btn btn-ghost btn-sm" id="syncNowBtn" type="button">Actualiser les dates maintenant</button></div>
@@ -2123,6 +2192,7 @@ function openSettingsModal(){
     </div>
   </div>`;
   document.getElementById('setClose').onclick = closeModal;
+  document.getElementById('securityBtn').onclick = openSecurityModal;
   document.getElementById('syncNowBtn').onclick = async ()=>{
     const st = document.getElementById('syncStatus');
     const key = cleanApiKey(document.getElementById('f-apikey').value);
@@ -2206,13 +2276,21 @@ function openSettingsModal(){
 /* ---------------------------------------------------------------
    IMPORT / EXPORT
    --------------------------------------------------------------- */
-function exportData(){
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
-  const url = URL.createObjectURL(blob);
+async function exportData(){
+  const name = `calendrier-dividendes-${todayISO()}.json`;
+  const file = new File([JSON.stringify(state, null, 2)], name, { type:'application/json' });
+  // iPhone : la feuille de partage (Enregistrer dans Fichiers, AirDrop, Mail…) est le moyen fiable.
+  try{
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title:'Sauvegarde Calendrier Dividendes' });
+      return;
+    }
+  }catch(e){ if(e && e.name === 'AbortError') return; }
+  const url = URL.createObjectURL(file);
   const a = document.createElement('a');
-  a.href = url; a.download = `calendrier-dividendes-${todayISO()}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
 }
 function importData(file){
   const reader = new FileReader();
@@ -2220,7 +2298,7 @@ function importData(file){
     try{
       const parsed = JSON.parse(reader.result);
       if(!parsed.holdings) throw new Error('Format invalide');
-      state = Object.assign(defaultState(), parsed);
+      state = hydrateState(parsed);
       saveState();
       toast('Import réussi.');
       renderAll();
@@ -2286,6 +2364,20 @@ function initEvents(){
   document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
 }
 
+async function boot(){
+  Vault.requestPersistence();
+  let raw = null;
+  try{ raw = await Vault.readRaw(); }catch(e){ raw = null; }
+  // Données chiffrées : on attend le bon code (jamais de repli sur un état vide qui écraserait les données).
+  const text = raw && Vault.isEnvelope(raw) ? await Vault.promptUnlock(raw) : raw;
+  let parsed = {};
+  try{ parsed = text ? JSON.parse(text) : {}; }catch(e){ parsed = {}; }
+  state = hydrateState(parsed);
+  if(text && !Vault.hasPin()) Vault.write(JSON.stringify(state));   // alimente aussi la copie IndexedDB
+  Vault.enableAutoLock();
+  startApp();
+}
+function startApp(){
 initEvents();
 renderAll();
 ensureFxRates().then(()=> renderAll());
@@ -2294,3 +2386,5 @@ if('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
 }
 setTimeout(()=> autoSyncDates(false), 1500);
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') autoSyncDates(false); });
+}
+boot();

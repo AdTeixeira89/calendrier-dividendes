@@ -1,9 +1,9 @@
 /* Service worker — hors-ligne + rappels de versement */
 importScripts('payouts.js');
 
-const SHELL = 'dividendes-shell-v1';
+const SHELL = 'dividendes-shell-v2';
 const DATA = 'dividendes-data';
-const FILES = ['./', 'index.html', 'app.js', 'payouts.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
+const FILES = ['./', 'index.html', 'app.js', 'payouts.js', 'vault.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES).catch(() => {})).then(() => self.skipWaiting()));
