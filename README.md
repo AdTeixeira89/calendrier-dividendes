@@ -46,6 +46,10 @@ Pour la récupération automatique des dividendes et résultats :
 
 Le plan gratuit a un quota de requêtes journalier et certains endpoints peuvent être limités selon les évolutions de l'API — si la récupération échoue, complétez simplement les champs à la main (montant, dernière ex-date, dernière date de paiement, fréquence).
 
+## Actions européennes gratuites (relais Yahoo, optionnel)
+
+Le plan gratuit FMP ne couvre que les actions américaines. Pour les titres européens, déployez le petit relais Cloudflare Workers du dossier [`relay/`](relay/LISEZMOI.md) (gratuit), puis collez son adresse dans ⚙ Paramètres. L'app interroge FMP d'abord, puis Yahoo Finance en secours (date ex-dividende et montant ; pas de date de mise en paiement ni de résultats).
+
 ## Format des tickers
 
 - Actions américaines : symbole seul, ex. `AAPL`, `MSFT`.

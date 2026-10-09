@@ -88,7 +88,7 @@ function accountName(id){
 function defaultState(){
   return {
     holdings: [],
-    settings: { apiKey: '', notify: false },
+    settings: { apiKey: '', relayUrl: '', notify: false },
     sent: { days: {}, months: {} },
     accounts: [ { id:'degiro', name:'DEGIRO' }, { id:'pea', name:'PEA Trade Republic' }, { id:'nominatif', name:'Air Liquide Nominatif Pur' } ]
   };
@@ -115,7 +115,7 @@ function loadState(){
     const parsed = raw ? JSON.parse(raw) : {};
     const merged = Object.assign(defaultState(), parsed);
     if(!merged.accounts || !merged.accounts.length) merged.accounts = defaultState().accounts;
-    merged.settings = Object.assign({ apiKey:'', notify:false }, merged.settings || {});
+    merged.settings = Object.assign({ apiKey:'', relayUrl:'', notify:false }, merged.settings || {});
     merged.sent = merged.sent || { days:{}, months:{} };
     merged.holdings.forEach(h=>{
       if(!h.account) h.account = merged.accounts[0].id;
@@ -330,7 +330,7 @@ async function resolveIsinToSymbol(isin, key, nameHint){
   return null;
 }
 
-async function fetchAutoData(tickerInput, nameHint){
+async function fetchFmpData(tickerInput, nameHint){
   const key = state.settings.apiKey;
   if(!key) throw new Error('Aucune clé API renseignée (voir Paramètres).');
   const base = 'https://financialmodelingprep.com/stable';
@@ -436,6 +436,98 @@ async function fetchAutoData(tickerInput, nameHint){
     throw new Error('Aucune donnée exploitable pour ce ticker sur le plan API actuel.');
   }
   return result;
+}
+
+/* ---------------------------------------------------------------
+   API — Yahoo Finance via le relais Cloudflare (gratuit, actions européennes)
+   Fournit nom, devise, historique des dividendes (date ex-dividende + montant).
+   Pas de date de mise en paiement ni de calendrier de résultats : ces champs
+   restent saisissables à la main (l'app retombe sur la date ex-dividende).
+   --------------------------------------------------------------- */
+function cleanRelayUrl(raw){
+  const s = String(raw||'').trim().replace(/\/+$/,'');
+  return /^https:\/\/[^\s]+$/i.test(s) ? s : '';
+}
+
+function detectFrequency(isoDates){
+  if(isoDates.length < 2) return 'irregular';
+  const gaps = [];
+  for(let i=1;i<isoDates.length;i++) gaps.push(daysBetween(isoDates[i-1], isoDates[i]));
+  const avg = gaps.reduce((x,y)=>x+y,0)/gaps.length;
+  if(avg < 45) return 'monthly';
+  if(avg < 135) return 'quarterly';
+  if(avg < 270) return 'semiannual';
+  return 'annual';
+}
+
+async function fetchYahooData(tickerInput, nameHint){
+  const relay = cleanRelayUrl(state.settings.relayUrl);
+  if(!relay) throw new Error('Aucune adresse de relais Yahoo renseignée (voir Paramètres).');
+  const result = { name:null, logo:null, website:null, currency:null, dividend:null, earnings:null, resolvedSymbol:null };
+
+  async function call(path){
+    let r;
+    try{ r = await fetch(`${relay}${path}`); }
+    catch(e){ throw new Error("Relais Yahoo injoignable (adresse incorrecte ou hors-ligne)."); }
+    if(r.status === 403) throw new Error("Relais refusé (403) : l'adresse du site n'est pas dans ALLOWED_ORIGINS du relais.");
+    if(r.status === 429) throw new Error('Yahoo limite temporairement les requêtes (429) — réessayez dans quelques minutes.');
+    const data = await r.json().catch(()=>null);
+    if(!r.ok || !data) throw new Error(`Réponse Yahoo invalide (code ${r.status}).`);
+    return data;
+  }
+
+  let ticker = tickerInput.trim();
+  if(isLikelyISIN(ticker)){
+    const queries = [ticker.toUpperCase()];
+    if(nameHint && nameHint.trim()) queries.push(nameHint.trim().slice(0,60));
+    for(const q of queries){
+      const data = await call(`/search?q=${encodeURIComponent(q)}`).catch(()=>null);
+      const quotes = ((data && data.quotes) || []).filter(x => x && x.symbol && (!x.quoteType || ['EQUITY','ETF'].includes(x.quoteType)));
+      const sym = pickBySuffix(quotes, ticker);
+      if(sym){ result.resolvedSymbol = sym; ticker = sym; break; }
+    }
+    if(!result.resolvedSymbol) throw new Error("ISIN introuvable sur Yahoo — renseignez le vrai symbole boursier (ex : AI.PA).");
+  }
+
+  const data = await call(`/chart?symbol=${encodeURIComponent(ticker)}`);
+  const res = data.chart && data.chart.result && data.chart.result[0];
+  if(!res){
+    const desc = data.chart && data.chart.error && data.chart.error.description;
+    throw new Error(desc ? `Yahoo : ${desc}` : 'Symbole inconnu sur Yahoo.');
+  }
+  const meta = res.meta || {};
+  result.name = meta.longName || meta.shortName || null;
+  result.currency = meta.currency ? (meta.currency === 'GBp' ? 'GBP' : meta.currency) : null;
+
+  const divs = Object.values((res.events && res.events.dividends) || {})
+    .filter(d => d && d.amount && d.date)
+    .map(d => ({ exDate: new Date(d.date*1000).toISOString().slice(0,10), payDate:null, amount:d.amount, estimate:false }))
+    .sort((a,b)=> a.exDate.localeCompare(b.exDate))
+    .slice(-8);
+  if(divs.length){
+    result.dividend = { history: divs, frequency: detectFrequency(divs.map(d=>d.exDate)) };
+  }
+  if(!result.name && !result.dividend) throw new Error('Aucune donnée Yahoo exploitable pour ce ticker.');
+  return result;
+}
+
+/* Source de données : FMP d'abord (si clé), puis Yahoo via le relais (si adresse),
+   notamment pour les titres hors États-Unis que le plan gratuit FMP refuse. */
+function hasDataSource(){
+  return !!state.settings.apiKey || !!cleanRelayUrl(state.settings.relayUrl);
+}
+
+async function fetchAutoData(tickerInput, nameHint){
+  const hasFmp = !!state.settings.apiKey;
+  const hasRelay = !!cleanRelayUrl(state.settings.relayUrl);
+  if(!hasFmp && !hasRelay) throw new Error('Aucune clé API ni relais Yahoo renseigné (voir Paramètres).');
+  let fmpErr = null;
+  if(hasFmp){
+    try{ return await fetchFmpData(tickerInput, nameHint); }
+    catch(e){ fmpErr = e; if(!hasRelay) throw e; }
+  }
+  try{ return await fetchYahooData(tickerInput, nameHint); }
+  catch(e){ throw fmpErr ? new Error(`FMP : ${fmpErr.message} · Yahoo : ${e.message}`) : e; }
 }
 
 /* ---------------------------------------------------------------
@@ -1388,10 +1480,10 @@ function renderImportModal(headerRowIdx){
       </div>
       <div class="field" style="margin-top:2px;">
         <label style="display:flex; align-items:center; gap:8px; font-weight:500;">
-          <input type="checkbox" id="imp-only-dividend" style="width:16px;height:16px;accent-color:var(--forest);" ${state.settings.apiKey ? '' : 'disabled'} />
+          <input type="checkbox" id="imp-only-dividend" style="width:16px;height:16px;accent-color:var(--forest);" ${hasDataSource() ? '' : 'disabled'} />
           Ne garder que les entreprises versant un dividende
         </label>
-        <span class="hint">${state.settings.apiKey
+        <span class="hint">${hasDataSource()
           ? "Vérifie chaque ligne une par une via l'API avant de l'ajouter (plus lent : ~1 seconde par ligne), et remplit directement les données de dividende au passage."
           : "Nécessite une clé API dans ⚙ Paramètres pour pouvoir vérifier les lignes."}</span>
       </div>
@@ -1425,7 +1517,7 @@ async function confirmImportMapping(){
   const accountId = document.getElementById('imp-account').value;
   const onlyDividend = document.getElementById('imp-only-dividend').checked;
   if(tCol < 0){ toast('Sélectionnez au minimum la colonne Ticker.'); return; }
-  if(onlyDividend && !state.settings.apiKey){ toast('Ajoutez une clé API dans Paramètres pour filtrer par dividende.'); return; }
+  if(onlyDividend && !hasDataSource()){ toast('Ajoutez une clé API ou un relais Yahoo dans Paramètres pour filtrer par dividende.'); return; }
 
   const dataRows = rows.slice(headerRowIdx + 1);
   const candidates = [];
@@ -1528,7 +1620,7 @@ async function confirmImportMapping(){
    avec une petite pause pour respecter le quota de l'API.
    --------------------------------------------------------------- */
 async function runBulkAutoFetch(){
-  if(!state.settings.apiKey){
+  if(!hasDataSource()){
     toast('Ajoutez une clé API dans Paramètres pour la récupération automatique.');
     openSettingsModal();
     return;
@@ -1849,7 +1941,7 @@ async function runAutoFetch(){
   const statusEl = document.getElementById('autoFetchStatus');
   const ticker = document.getElementById('f-ticker').value.trim();
   if(!ticker){ statusEl.textContent = 'Renseignez d\'abord un ticker.'; statusEl.className='auto-fetch-status err'; return; }
-  if(!state.settings.apiKey){
+  if(!hasDataSource()){
     statusEl.innerHTML = 'Aucune clé API — ajoutez-en une dans Paramètres, ou complétez les champs à la main.';
     statusEl.className = 'auto-fetch-status err';
     return;
@@ -1957,6 +2049,13 @@ function openSettingsModal(){
         <button class="btn btn-ghost btn-sm" id="testApiKeyBtn" type="button">Tester la clé maintenant</button>
         <span class="auto-fetch-status" id="testApiKeyStatus"></span>
       </div>
+      <div class="field">
+        <label>Adresse du relais Yahoo (actions européennes, gratuit)</label>
+        <input type="text" id="f-relay" value="${escapeHtml(state.settings.relayUrl||'')}" placeholder="https://dividendes-relais.votre-nom.workers.dev" />
+        <span class="hint">Utilisé quand FMP ne couvre pas un titre. Mode d'emploi : dossier <code>relay</code> du dépôt GitHub.</span>
+        <button class="btn btn-ghost btn-sm" id="testRelayBtn" type="button" style="margin-top:6px;">Tester le relais</button>
+        <span class="auto-fetch-status" id="testRelayStatus"></span>
+      </div>
       <div class="section-title">Dates de versement (API)</div>
       <p class="notif-status" id="syncStatus">${state.settings.apiKey ? 'Les dates de paiement sont mises à jour automatiquement une fois par jour.' : 'Ajoutez votre clé API ci-dessus pour récupérer automatiquement les dates de paiement.'}</p>
       <div class="notif-actions"><button class="btn btn-ghost btn-sm" id="syncNowBtn" type="button">Actualiser les dates maintenant</button></div>
@@ -2006,9 +2105,24 @@ function openSettingsModal(){
     // On retire tous les espaces (y compris ceux collés par erreur au milieu),
     // les clés API ne contiennent jamais d'espace ni de saut de ligne.
     state.settings.apiKey = cleanApiKey(document.getElementById('f-apikey').value);
+    state.settings.relayUrl = cleanRelayUrl(document.getElementById('f-relay').value);
     saveState();
     closeModal();
     toast('Paramètres enregistrés.');
+  };
+  document.getElementById('testRelayBtn').onclick = async ()=>{
+    const statusEl = document.getElementById('testRelayStatus');
+    const url = cleanRelayUrl(document.getElementById('f-relay').value);
+    if(!url){ statusEl.textContent = "Collez une adresse commençant par https:// avant de tester."; statusEl.className = 'auto-fetch-status err'; return; }
+    state.settings.relayUrl = url; saveState();
+    statusEl.textContent = 'Test en cours…'; statusEl.className = 'auto-fetch-status';
+    try{
+      const d = await fetchYahooData('AI.PA');
+      statusEl.textContent = `✓ Relais OK — ${d.name || 'AI.PA'} : ${d.dividend ? d.dividend.history.length + ' dividende(s) trouvé(s)' : 'aucun dividende'}.`;
+      statusEl.className = 'auto-fetch-status ok';
+    }catch(e){
+      statusEl.textContent = '✗ ' + e.message; statusEl.className = 'auto-fetch-status err';
+    }
   };
   document.getElementById('testApiKeyBtn').onclick = async ()=>{
     const statusEl = document.getElementById('testApiKeyStatus');
