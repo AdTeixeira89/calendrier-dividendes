@@ -334,23 +334,29 @@ function pickFromNameSearch(list, isin){
    l'ISIN, puis recherche par nom du produit (colonne « Produit » de DEGIRO).
    Best-effort : si rien ne répond, on continue avec l'ISIN d'origine (la
    suite échouera proprement avec un message explicite).*/
+function rateLimitError(msg){ return Object.assign(new Error(msg || 'Quota API dépassé (429) — réessayez demain, ou réduisez le nombre de lignes.'), { rate:true }); }
+
+/* Le plan gratuit FMP refuse la recherche par ISIN (402) : une fois constaté,
+   on ne gaspille plus de requêtes (250/jour) à la retenter pour chaque ligne. */
+let isinSearchBlocked = false;
+
 async function resolveIsinToSymbol(isin, key, nameHint){
   const base = 'https://financialmodelingprep.com/stable';
   const get = async (path)=>{
-    try{
-      const r = await fetch(`${base}/${path}&apikey=${key}`);
-      if(!r.ok) return null;
-      return await r.json();
-    }catch(e){ return null; }
+    let r;
+    try{ r = await fetch(`${base}/${path}&apikey=${key}`); }catch(e){ return null; }
+    if(r.status === 429) throw rateLimitError();
+    if(r.status === 402){ isinSearchBlocked = true; return null; }
+    if(!r.ok) return null;
+    return await r.json().catch(()=>null);
   };
   isin = isin.trim().toUpperCase();
-  const byIsin = await get(`search-isin?isin=${encodeURIComponent(isin)}`);
-  if(Array.isArray(byIsin) && byIsin[0] && byIsin[0].symbol) return pickBySuffix(byIsin, isin);
-  const bySymbol = await get(`search-symbol?query=${encodeURIComponent(isin)}`);
-  const hit1 = pickBySuffix(bySymbol, isin);
-  if(hit1) return hit1;
+  if(!isinSearchBlocked){
+    const byIsin = await get(`search-isin?isin=${encodeURIComponent(isin)}`);
+    if(Array.isArray(byIsin) && byIsin[0] && byIsin[0].symbol) return pickBySuffix(byIsin, isin);
+  }
   if(nameHint && nameHint.trim()){
-    for(const q of nameQueries(nameHint)){
+    for(const q of nameQueries(nameHint).slice(0,3)){
       const byName = await get(`search-name?query=${encodeURIComponent(q)}`);
       const hit = pickFromNameSearch(byName, isin);
       if(hit) return hit;
@@ -366,6 +372,10 @@ async function fetchFmpData(tickerInput, nameHint){
   const result = { name:null, logo:null, website:null, currency:null, dividend:null, earnings:null, resolvedSymbol:null };
 
   let ticker = tickerInput.trim();
+  if(isLikelyISIN(ticker) && !ticker.toUpperCase().startsWith('US')){
+    // Hors États-Unis : le plan gratuit refuse de toute façon → on n'use pas le quota.
+    throw new Error("ISIN hors États-Unis : le plan gratuit FMP ne couvre pas ces titres (relais Yahoo requis, ou saisissez le ticker à la main).");
+  }
   if(isLikelyISIN(ticker)){
     const resolved = await resolveIsinToSymbol(ticker, key, nameHint);
     if(resolved){ result.resolvedSymbol = resolved; ticker = resolved; }
@@ -435,8 +445,9 @@ async function fetchFmpData(tickerInput, nameHint){
     }
   }
 
-  // Calendrier des résultats — nouvel endpoint stable "earnings" (par symbole)
-  {
+  // Calendrier des résultats — nouvel endpoint stable "earnings" (par symbole).
+  // Sauté si aucun dividende n'a été trouvé (économise le quota de 250 requêtes/jour).
+  if(result.dividend){
     const { data } = await safeFetch(`${base}/earnings?symbol=${encodeURIComponent(ticker)}&apikey=${key}`);
     const list = Array.isArray(data) ? data : [];
     if(list.length){
@@ -455,10 +466,11 @@ async function fetchFmpData(tickerInput, nameHint){
     }
   }
 
+  if(diag.anyRateLimit && !result.dividend) throw rateLimitError();
   if(!result.name && !result.dividend && !result.earnings){
     if(diag.anyAuthError) throw new Error("Clé API refusée (401/403) — vérifiez qu'elle est bien collée sans espace dans Paramètres.");
     if(diag.anyPlanLimit) throw new Error("Titre non couvert par le plan gratuit FMP (actions hors États-Unis = payant). Saisissez les dates à la main.");
-    if(diag.anyRateLimit) throw new Error('Quota API dépassé (429) — réessayez demain, ou réduisez le nombre de lignes.');
+    if(diag.anyRateLimit) throw rateLimitError();
     if(diag.anyNetworkError) throw new Error("Échec réseau (CORS ou connexion bloquée) — l'API n'a pas pu être contactée depuis le navigateur.");
     if(diag.lastApiMessage) throw new Error(`Réponse API : ${diag.lastApiMessage}`);
     if(isLikelyISIN(tickerInput.trim()) && !result.resolvedSymbol){
@@ -559,7 +571,7 @@ async function fetchAutoData(tickerInput, nameHint){
     catch(e){ fmpErr = e; if(!hasRelay) throw e; }
   }
   try{ return await fetchYahooData(tickerInput, nameHint); }
-  catch(e){ throw fmpErr ? new Error(`FMP : ${fmpErr.message} · Yahoo : ${e.message}`) : e; }
+  catch(e){ throw fmpErr ? Object.assign(new Error(`FMP : ${fmpErr.message} · Yahoo : ${e.message}`), { rate: !!fmpErr.rate && !!e.rate }) : e; }
 }
 
 /* ---------------------------------------------------------------
@@ -1661,7 +1673,7 @@ async function runBulkAutoFetch(){
   if(!targets.length){ toast('Toutes les lignes ont déjà des données de dividende.'); return; }
   toast(`Récupération en cours pour ${targets.length} ligne(s)…`);
 
-  let ok = 0, fail = 0, resolved = 0; const failedTickers = []; let firstError = '';
+  let ok = 0, fail = 0, resolved = 0; const failedTickers = []; let firstError = ''; let stoppedOnQuota = false;
   for(const h of targets){
     try{
       const data = await fetchAutoData(h.ticker, h.name);
@@ -1688,6 +1700,7 @@ async function runBulkAutoFetch(){
       fail++;
       failedTickers.push(h.displayTicker || h.ticker);
       if(!firstError) firstError = e && e.message ? e.message : '';
+      if(e && e.rate){ stoppedOnQuota = true; break; }
     }
     saveState();
     renderHoldingsList();
@@ -1695,6 +1708,7 @@ async function runBulkAutoFetch(){
   }
   saveState();
   renderAll();
+  if(stoppedOnQuota){ toast(`Quota FMP atteint (250 requêtes/jour) : ${ok} ligne(s) remplie(s), arrêt anticipé. Relancez demain, les lignes déjà remplies sont conservées.`); return; }
   toast(`${ok} ligne(s) mise(s) à jour${resolved ? ` (dont ${resolved} ISIN résolu(s) en ticker)` : ''}${fail ? `, ${fail} échec(s) : ${failedTickers.slice(0,5).join(', ')}${failedTickers.length>5?'…':''}. ${firstError} Relancez l'auto-complétion pour réessayer ces lignes` : ''}.`);
 }
 
