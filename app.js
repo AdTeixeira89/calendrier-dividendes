@@ -275,6 +275,15 @@ function isLikelyISIN(s){
   return /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test((s||'').trim().toUpperCase());
 }
 
+/* Les clés API ne contiennent jamais d'espace. Si l'utilisateur colle par erreur
+   une URL entière (« …/stable/dividends-calendar?apikey=XXXX »), on en extrait
+   uniquement la clé plutôt que de l'envoyer telle quelle (ce qui donne un 401). */
+function cleanApiKey(raw){
+  const s = String(raw||'').trim();
+  const m = s.match(/[?&]apikey=([^&\s#]+)/i);
+  return (m ? m[1] : s).replace(/\s/g,'');
+}
+
 /* Suffixe de place boursière FMP le plus probable selon le pays de l'ISIN
    (2 premières lettres) — sert à départager les résultats d'une recherche. */
 const ISIN_COUNTRY_SUFFIX = { FR:['.PA'], NL:['.AS'], DE:['.DE','.F'], GB:['.L'], IT:['.MI'], ES:['.MC'], BE:['.BR'], PT:['.LS'], CH:['.SW'], SE:['.ST'], DK:['.CO'], FI:['.HE'], NO:['.OL'], IE:['.IR','.L'], AT:['.VI'], US:[''], CA:['.TO'] };
@@ -335,13 +344,14 @@ async function fetchAutoData(tickerInput, nameHint){
 
   // Diagnostic : on garde trace de ce qui a concrètement répondu, pour donner
   // un message d'erreur final utile plutôt qu'un "ça n'a pas marché" vague.
-  const diag = { anyNetworkError:false, anyAuthError:false, anyRateLimit:false, lastApiMessage:null, anyOk:false };
+  const diag = { anyNetworkError:false, anyAuthError:false, anyRateLimit:false, anyPlanLimit:false, lastApiMessage:null, anyOk:false };
 
   async function safeFetch(url){
     try{
       const r = await fetch(url);
       if(r.status === 401 || r.status === 403) diag.anyAuthError = true;
       if(r.status === 429) diag.anyRateLimit = true;
+      if(r.status === 402) diag.anyPlanLimit = true;
       const data = await r.json().catch(()=>null);
       if(data && data['Error Message']) diag.lastApiMessage = data['Error Message'];
       if(r.ok && data) diag.anyOk = true;
@@ -418,6 +428,7 @@ async function fetchAutoData(tickerInput, nameHint){
 
   if(!result.name && !result.dividend && !result.earnings){
     if(diag.anyAuthError) throw new Error("Clé API refusée (401/403) — vérifiez qu'elle est bien collée sans espace dans Paramètres.");
+    if(diag.anyPlanLimit) throw new Error("Titre non couvert par le plan gratuit FMP (actions hors États-Unis = payant). Saisissez les dates à la main.");
     if(diag.anyRateLimit) throw new Error('Quota API dépassé (429) — réessayez demain, ou réduisez le nombre de lignes.');
     if(diag.anyNetworkError) throw new Error("Échec réseau (CORS ou connexion bloquée) — l'API n'a pas pu être contactée depuis le navigateur.");
     if(diag.lastApiMessage) throw new Error(`Réponse API : ${diag.lastApiMessage}`);
@@ -1969,7 +1980,7 @@ function openSettingsModal(){
   document.getElementById('setClose').onclick = closeModal;
   document.getElementById('syncNowBtn').onclick = async ()=>{
     const st = document.getElementById('syncStatus');
-    const key = document.getElementById('f-apikey').value.replace(/\s/g,'');
+    const key = cleanApiKey(document.getElementById('f-apikey').value);
     if(key && key !== state.settings.apiKey){ state.settings.apiKey = key; saveState(); }
     if(!state.settings.apiKey){ st.textContent = "Collez d'abord votre clé API."; return; }
     st.textContent = 'Mise à jour en cours…';
@@ -1994,14 +2005,14 @@ function openSettingsModal(){
   document.getElementById('setSave').onclick = ()=>{
     // On retire tous les espaces (y compris ceux collés par erreur au milieu),
     // les clés API ne contiennent jamais d'espace ni de saut de ligne.
-    state.settings.apiKey = document.getElementById('f-apikey').value.replace(/\s/g, '');
+    state.settings.apiKey = cleanApiKey(document.getElementById('f-apikey').value);
     saveState();
     closeModal();
     toast('Paramètres enregistrés.');
   };
   document.getElementById('testApiKeyBtn').onclick = async ()=>{
     const statusEl = document.getElementById('testApiKeyStatus');
-    const key = document.getElementById('f-apikey').value.replace(/\s/g, '');
+    const key = cleanApiKey(document.getElementById('f-apikey').value);
     if(!key){ statusEl.textContent = 'Collez une clé avant de tester.'; statusEl.className = 'auto-fetch-status err'; return; }
     statusEl.textContent = 'Test en cours…';
     statusEl.className = 'auto-fetch-status';
