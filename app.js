@@ -1524,7 +1524,7 @@ function renderImportModal(headerRowIdx){
       </div>
       <div class="field" style="margin-top:2px;">
         <label style="display:flex; align-items:center; gap:8px; font-weight:500;">
-          <input type="checkbox" id="imp-only-dividend" style="width:16px;height:16px;accent-color:var(--forest);" ${hasDataSource() ? '' : 'disabled'} />
+          <input type="checkbox" id="imp-only-dividend" style="accent-color:var(--forest);" ${hasDataSource() ? '' : 'disabled'} />
           Ne garder que les entreprises versant un dividende
         </label>
         <span class="hint">${hasDataSource()
