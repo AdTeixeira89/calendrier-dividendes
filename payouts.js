@@ -30,6 +30,7 @@
      jour = 15 par convention, dayKnown = false. */
   function payoutInMonth(h, y, m) {
     const div = h.dividend || {};
+    if (h.type === 'etf_acc' || div.none) return null;   // jamais de dividende inventé
     const ym = y + '-' + pad2(m);
     const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', quantity: h.quantity || 0, currency: h.currency };
     // 1) date confirmée par l'API (déclarée par la société) : prioritaire

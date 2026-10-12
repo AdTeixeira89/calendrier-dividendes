@@ -1,68 +1,86 @@
-# Calendrier Dividendes
+# Suivi des dividendes
 
-Application web (100% statique, sans serveur) pour suivre les dates de versement de dividendes et les dates de résultats trimestriels/semestriels/annuels de votre portefeuille d'actions, sous forme de calendrier annuel ou mensuel.
+Application web (installable sur téléphone) entièrement dédiée au **suivi des dividendes et des revenus** d'un portefeuille d'actions et d'ETF : prochains versements, prévisions, historique des dividendes reçus, statistiques. Hébergée sur GitHub Pages, sans serveur à maintenir.
 
-## Fonctionnalités
+## Pages
 
-- **Plusieurs comptes / portefeuilles** (ex : CTO et PEA Trade Republic) : chaque action est rattachée à un compte. Des onglets en haut de page permettent de consulter chaque compte séparément ou "Tous les comptes" à la fois (calendrier, graphiques et récapitulatif s'adaptent automatiquement, avec un sous-total par compte dans la vue combinée). Gestion des comptes (ajout, renommage, suppression) via le bouton 👛 en haut à droite.
-- Ajout d'actions (ticker + quantité), US et Europe, une par une **ou en une fois** via import CSV/Excel.
-- **Import d'un relevé de courtier** (Degiro ou autre) au format CSV ou Excel : vous choisissez quelle colonne contient le ticker et laquelle contient la quantité (aperçu des données avant import), puis toutes les lignes sont ajoutées d'un coup. Les PDF ne sont volontairement pas analysés automatiquement (formats trop variables d'un courtier à l'autre) — exportez plutôt en CSV depuis la page "Portefeuille" de Degiro.
-- **Auto-compléter les lignes** : après un import, un bouton lance la récupération automatique (nom, logo, dividendes, résultats) pour toutes les lignes qui n'ont pas encore de données, l'une après l'autre.
-- Récupération automatique optionnelle du nom, logo, historique de dividendes et calendrier de résultats via l'API gratuite [Financial Modeling Prep](https://site.financialmodelingprep.com/developer/docs). Si l'auto-récupération échoue ou si vous n'avez pas de clé, tout est saisissable à la main.
-- Projection automatique des échéances futures à partir de la dernière date connue + fréquence (mensuelle, trimestrielle, semestrielle, annuelle), clairement marquées "estimé".
-- Vue calendrier **Année** (12 mini-mois) ou **Mois** (détaillée).
-- Filtre **Ex-dividende / Mise en paiement** pour choisir quelle date afficher.
-- Filtre pour afficher/masquer les dates de résultats.
-- Bandeau défilant ("ticker tape") des prochaines échéances.
-- **Graphiques** : montant total de dividendes par mois pour l'année affichée, et évolution du total annuel sur plusieurs années (connu + projeté), par devise.
-- Logos des sociétés, panneau récapitulatif du portefeuille, export/import JSON pour sauvegarder vos données.
-- Toutes les données restent dans le navigateur (`localStorage`) — rien n'est envoyé à un serveur, à part les appels directs à l'API financière si vous l'utilisez.
+| Page | Contenu |
+|---|---|
+| **Accueil** | Bandeau défilant des prochains versements (logo, montant par titre, total selon vos quantités, date et type de date, statut), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. |
+| **Mon portefeuille** | Actifs, quantités, prix de revient, investi, dividende annuel estimé, prochain versement, rendement sur coût… Tableau avec **« Colonnes à afficher »**, tri, recherche, filtres (type, verse un dividende / sans dividende / données manquantes), **suppression multiple** (cases, « Tout sélectionner », compteur, « Annuler la sélection », confirmation, annulation possible). |
+| **Calendrier des dividendes** | Vues mois / année / logos, filtres actif et statut, versement attendu → « Enregistrer comme reçu ». |
+| **Historique** | Dividendes reçus (brut, retenue, frais, net, devise, source) et opérations (achats / ventes). Filtres année, mois, actif, statut. Import CSV (Trade Republic…), saisie manuelle, pré-remplissage « à vérifier ». |
+| **Statistiques** | Revenus mensuels, répartition, prévision des 12 mois, dividendes reçus par année, par compte / devise / zone / type, principaux contributeurs, ETF capitalisants. |
+| **Paramètres** | Compte et synchronisation, devise d'affichage, brut/net par défaut, portefeuilles, données de marché, sauvegarde, code de verrouillage de l'appareil, rappels. |
 
-## Déploiement sur GitHub Pages
+## Fiabilité des données
 
-1. Créez un nouveau dépôt GitHub (par ex. `calendrier-dividendes`).
-2. Ajoutez les fichiers `index.html` et `app.js` à la racine du dépôt.
-3. Poussez sur la branche `main` :
-   ```bash
-   git init
-   git add index.html app.js README.md
-   git commit -m "Calendrier dividendes"
-   git branch -M main
-   git remote add origin https://github.com/<votre-utilisateur>/calendrier-dividendes.git
-   git push -u origin main
-   ```
-4. Dans le dépôt GitHub : **Settings → Pages → Source**, choisissez la branche `main` et le dossier `/ (root)`.
-5. L'app sera disponible quelques minutes plus tard à l'adresse :
-   `https://<votre-utilisateur>.github.io/calendrier-dividendes/`
+Chaque versement a un statut explicite, jamais maquillé :
 
-## Clé API (optionnelle)
+- **Reçu** — enregistré (saisi, importé, ou « À vérifier » s'il a été généré d'après l'historique de marché).
+- **Confirmé** — annoncé par la société.
+- **Estimé** — prévision calculée (dernier dividende × fréquence) ; la date affichée est précisée : *détachement estimé* ou *paiement estimé*.
+- **Non enregistré** — date passée sans versement enregistré (à vérifier).
 
-Pour la récupération automatique des dividendes et résultats :
+Règles : un versement reçu **remplace** la prévision du même actif dans le même mois (pas de double compte) ; aucun dividende n'est inventé (ETF capitalisants et actifs sans dividende récent exclus des prévisions) ; la quantité utilisée pour un versement passé tient compte de vos opérations quand elles reconstituent exactement votre position ; les devises étrangères sont converties (taux BCE) et, si un taux manque, le montant est signalé et exclu des totaux plutôt que deviné ; le net n'est utilisé que s'il est connu (sinon le brut est repris et signalé).
 
-1. Créez un compte gratuit sur [financialmodelingprep.com](https://site.financialmodelingprep.com/developer/docs).
-2. Copiez votre clé API.
-3. Dans l'app, cliquez sur l'icône ⚙ **Paramètres** et collez la clé.
-4. Lors de l'ajout d'une action, cliquez sur **"Récupérer automatiquement"**.
+## Données de marché (Yahoo Finance via un relais gratuit)
 
-Le plan gratuit a un quota de requêtes journalier et certains endpoints peuvent être limités selon les évolutions de l'API — si la récupération échoue, complétez simplement les champs à la main (montant, dernière ex-date, dernière date de paiement, fréquence).
+L'ancienne API Financial Modeling Prep a été **supprimée**. Les historiques de dividendes (date de détachement + montant par titre), noms, devises et la conversion ISIN → ticker viennent de Yahoo Finance, interrogé par un petit relais Cloudflare Workers ([`relay/`](relay/LISEZMOI.md)) dont l'adresse est dans `config.js` / Paramètres.
 
-## Actions européennes gratuites (relais Yahoo, optionnel)
+Limites à connaître : Yahoo ne fournit **ni la date de mise en paiement ni la retenue fiscale** ; elles se saisissent à la main ou viennent de l'import de transactions. Les logos ne sont plus récupérés automatiquement (pastilles à initiales ; les logos déjà enregistrés sont conservés).
 
-Le plan gratuit FMP ne couvre que les actions américaines. Pour les titres européens, déployez le petit relais Cloudflare Workers du dossier [`relay/`](relay/LISEZMOI.md) (gratuit), puis collez son adresse dans ⚙ Paramètres. L'app interroge FMP d'abord, puis Yahoo Finance en secours (date ex-dividende et montant ; pas de date de mise en paiement ni de résultats).
+## Comptes utilisateurs et synchronisation (Firebase)
 
-## Sécurité et sauvegarde
+Connexion / création de compte par e-mail + mot de passe, déconnexion, récupération par e-mail, suppression du compte. Les données de chaque utilisateur sont stockées dans **Firestore** (`users/{uid}`), lisibles et modifiables **uniquement par leur propriétaire** (`firestore.rules`), et synchronisées entre appareils : écriture transactionnelle avec contrôle de version, détection des conflits (fusion sans perte), reprise après coupure, copie locale pour fonctionner hors-ligne. Les données locales existantes sont migrées vers le compte à la première connexion (fusion sans doublon). Deux comptes ne sont jamais mélangés sur un même appareil.
 
-- Aucune création de compte : les données restent sur le téléphone (localStorage + copie IndexedDB, stockage persistant demandé au navigateur).
-- **Code de verrouillage** (⚙ Paramètres → Sécurité et sauvegarde) : 4 à 8 chiffres. Une fois défini, tout l'état (lignes, clé API) est chiffré (AES-GCM, clé dérivée du code par PBKDF2). L'app se reverrouille après 1 minute en arrière-plan. Le code n'est pas récupérable : exportez une sauvegarde.
-- **Export / restauration** d'un fichier JSON (feuille de partage sur iPhone → Fichiers, AirDrop, Mail…).
-- Sur iPhone, l'app installée sur l'écran d'accueil a un stockage **séparé** de Safari : exportez depuis l'un, restaurez dans l'autre.
+### Mise en route (≈ 10 min, une seule fois)
 
-## Format des tickers
+1. <https://console.firebase.google.com> → **Ajouter un projet** (Google Analytics non nécessaire).
+2. **Build → Authentication → Commencer → Sign-in method → E-mail/Mot de passe → Activer.**
+3. **Build → Firestore Database → Créer une base de données** (mode production, région Europe).
+4. Onglet **Règles** : collez le contenu de [`firestore.rules`](firestore.rules) puis **Publier**.
+5. **Paramètres du projet → Vos applications → Web (`</>`)** → enregistrez l'application → copiez l'objet `firebaseConfig`.
+6. **Authentication → Paramètres → Domaines autorisés** : ajoutez `adteixeira89.github.io`.
+7. Collez `firebaseConfig` dans [`config.js`](config.js) (clé `firebase`). Ces identifiants sont publics par conception : la sécurité repose sur les règles de l'étape 4.
 
-- Actions américaines : symbole seul, ex. `AAPL`, `MSFT`.
-- Euronext Paris : ajoutez `.PA`, ex. `AI.PA` (Air Liquide).
-- Autres places européennes : `.AS` (Amsterdam), `.DE` (Allemagne), `.L` (Londres), `.MI` (Milan), etc.
+Tant que `config.js` n'est pas renseigné, l'application fonctionne en **mode local** (données sur l'appareil, comme avant).
 
-## Sauvegarde de vos données
+Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
-Les données sont stockées dans le navigateur. Pensez à utiliser **Exporter (JSON)** régulièrement pour garder une copie de secours, notamment avant de vider le cache du navigateur ou de changer d'appareil. **Importer** permet de recharger un fichier exporté précédemment.
+## Imports
+
+- **Relevé de portefeuille** (DEGIRO, Trade Republic, autre ; CSV ou Excel) : choix des colonnes ticker / ISIN, quantité, nom, prix de revient, devise. Les ISIN sont convertis en tickers et les dividendes récupérés automatiquement.
+- **Transactions** (CSV) : achats, ventes, dividendes. Format Trade Republic reconnu par ses en-têtes (`datetime, type, symbol, shares, price, amount, fee, tax…`) ; colonnes modifiables et aperçu avant import. Un dividende y est interprété comme *net reçu* (modifiable en *brut*), la colonne `tax` donne la retenue. Les doublons (identifiant de transaction ou actif + date + montant) sont ignorés. Quantité et prix de revient moyen pondéré sont calculés pour les actifs créés.
+
+> Le format exact des exports varie selon le courtier et sa version : vérifiez l'aperçu avant d'importer.
+
+## Organisation du code
+
+```
+index.html  styles.css  config.js          page, style, configuration publique
+engine.js   fonctions pures : statuts, prévisions, indicateurs (testé sous Node)
+market.js   données de marché (relais Yahoo), conversion ISIN, détection de fréquence
+cloud.js    Firebase Auth + Firestore (comptes, synchronisation transactionnelle)
+vault.js    stockage durable local (localStorage + IndexedDB) et code de verrouillage
+payouts.js  calcul mensuel, rappels, export agenda (partagé avec le service worker)
+ui.js       composants : formats, fenêtres, tableau configurable, graphiques SVG
+pages.js    Accueil, Portefeuille, Calendrier, Historique, Statistiques
+forms.js    actif, versement, suppressions, comptes, imports CSV
+settings.js Paramètres
+app.js      état, migration, synchronisation, navigation, démarrage
+sw.js       service worker (hors-ligne, rappels)
+relay/      relais Cloudflare vers Yahoo Finance
+tests/      tests unitaires (Node) et de bout en bout (Playwright)
+```
+
+## Tests
+
+```bash
+node tests/engine.test.js && node tests/market.test.js        # calculs et données de marché
+NODE_PATH=$(npm root -g) LIBDIR=<dossier papaparse+xlsx> node tests/e2e.js   # parcours complets (faux Firebase, faux relais)
+```
+
+## Sauvegarde
+
+Export / restauration d'un fichier JSON depuis Paramètres (feuille de partage sur iPhone). Sur iPhone, l'app installée sur l'écran d'accueil a un stockage **séparé** de Safari : avec un compte, il suffit de s'y connecter ; sans compte, exportez puis restaurez.

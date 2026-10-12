@@ -128,7 +128,7 @@
         '<p class="lock-sub">Entrez votre code pour ouvrir l\'application.</p>' +
         '<input id="lockPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" placeholder="Code" aria-label="Code">' +
         '<div class="lock-err" id="lockErr" role="alert"></div>' +
-        '<button class="btn btn-primary" type="submit" id="lockBtn">Déverrouiller</button>' +
+        '<button class="btn primary" type="submit" id="lockBtn">Déverrouiller</button>' +
         '<button class="lock-forgot" type="button" id="lockForgot">Code oublié ?</button>' +
         '</form>';
       document.body.appendChild(el);

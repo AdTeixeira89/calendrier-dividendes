@@ -1,0 +1,477 @@
+/* ==================================================================
+   forms.js — fenêtres de saisie : actif, versement, comptes, suppressions,
+   imports (positions CSV/Excel, transactions Trade Republic / autres),
+   pré-remplissage de l'historique.
+   ================================================================== */
+
+const fld = (label, input, hint, id) => '<div class="field"><label' + (id ? ' for="' + id + '"' : '') + '>' + label + '</label>' + input + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>';
+const opt = (v, t, sel) => '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(t) + '</option>';
+const numOrNull = (v) => { if (v === '' || v === null || v === undefined) return null; const n = parseNum(v); return isNaN(n) ? null : n; };
+
+/* Nombre « à la française ou anglaise » : 1 234,56 / 1,234.56 / 12.5 */
+function parseNum(raw) {
+  if (raw === undefined || raw === null) return NaN;
+  let s = String(raw).trim().replace(/\s/g, '').replace(/[€$£]/g, '');
+  if (!s) return NaN;
+  const c = s.includes(','), d = s.includes('.');
+  if (c && d) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (c) s = s.replace(',', '.');
+  return parseFloat(s);
+}
+function parseDateLoose(raw) {
+  const s = String(raw || '').trim(); if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/); if (m) return m[3] + '-' + pad2(m[2]) + '-' + pad2(m[1]);
+  m = s.match(/^(\d{4})\/(\d{2})\/(\d{2})/); if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  return null;
+}
+
+/* ===============================================================
+   ACTIF (ajout / modification)
+   =============================================================== */
+let hDraft = null;
+function openHoldingModal(id) {
+  const ex = id ? holdingById(id) : null;
+  hDraft = ex ? clone(ex) : { id: uid(), ticker: '', displayTicker: '', isin: '', name: '', type: 'stock', quantity: 1, avgCost: null, currency: baseCur(), logo: null, source: 'manual', addedAt: todayISO(),
+    account: view.account !== 'all' ? view.account : state.accounts[0].id, dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } };
+  const d = hDraft, dv = d.dividend || {};
+  const payer = !dv.none;
+  const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' un actif</h2><div class="sub">Action ou ETF. Seuls le ticker (ou ISIN) et la quantité sont indispensables.</div>' +
+    '<div style="position:relative">' + fld('Nom, ticker ou ISIN', '<input type="text" id="hTicker" value="' + esc(d.ticker) + '" placeholder="ex : Air Liquide, AAPL, AI.PA, FR0000120073" autocomplete="off">',
+      'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div>' +
+    '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
+    fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Dans la devise de l\'actif — sert au rendement sur coût', 'hCost') + '</div>' +
+    '<div class="row2">' + fld('Nom', '<input type="text" id="hName" value="' + esc(d.name) + '">', '', 'hName') + fld('Compte', '<select id="hAcc">' + state.accounts.map((a) => opt(a.id, a.name, a.id === d.account)).join('') + '</select>', '', 'hAcc') + '</div>' +
+    '<div class="row2">' + fld('Type', '<select id="hType">' + Object.keys(Engine.TYPES).map((k) => opt(k, Engine.TYPES[k], d.type === k)).join('') + '</select>', 'Un ETF capitalisant ne verse aucun dividende.', 'hType') +
+    fld('Devise', '<select id="hCur">' + (CURRENCIES.indexOf(d.currency) < 0 ? [d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === d.currency)).join('') + '</select>', '', 'hCur') + '</div>' +
+    '<div id="hDivBox"><div class="sec">Dividende</div>' +
+    '<div class="btn-row" style="margin-bottom:10px"><button class="btn sm" type="button" id="hFetch">' + icon('refresh') + 'Récupérer automatiquement</button><span class="hint" id="hFetchMsg"></span></div>' +
+    fld('Distribution', '<select id="hPays"><option value="1"' + (payer ? ' selected' : '') + '>Verse un dividende</option><option value="0"' + (!payer ? ' selected' : '') + '>Ne verse pas de dividende</option></select>', 'Aucun dividende n\'est jamais inventé : sans données, l\'actif reste « données manquantes ».', 'hPays') +
+    '<div id="hDivFields"><div class="row2">' + fld('Dividende par titre (dernier)', '<input type="number" id="hDiv" step="any" inputmode="decimal" value="' + esc(dv.lastAmount === null || dv.lastAmount === undefined ? '' : dv.lastAmount) + '">', '', 'hDiv') +
+    fld('Fréquence', '<select id="hFreq">' + ['monthly', 'quarterly', 'semiannual', 'annual'].map((f) => opt(f, FREQ_LABEL[f], dv.frequency === f)).join('') + '</select>', '', 'hFreq') + '</div>' +
+    '<div class="row2">' + fld('Mois d\'un versement', '<select id="hMonth"><option value="">—</option>' + MOIS.map((mm, i) => opt(i + 1, mm, Number(dv.anchorMonth) === i + 1)).join('') + '</select>', 'Les autres mois sont déduits de la fréquence.', 'hMonth') +
+    fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement.', 'hKind') + '</div>' +
+    '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
+    fld('Retenue à la source (%)', '<input type="number" id="hTax" min="0" max="100" step="any" inputmode="decimal" value="' + esc(dv.taxRate === null || dv.taxRate === undefined ? '' : dv.taxRate) + '" placeholder="facultatif">', 'Permet d\'estimer le net.', 'hTax') + '</div></div></div>' +
+    '<div class="modal-actions"><div>' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
+  const sync = () => {
+    const acc = $('#hType', m).value === 'etf_acc', none = $('#hPays', m).value === '0';
+    $('#hDivBox', m).classList.toggle('hide', false);
+    $('#hPays', m).disabled = acc; if (acc) $('#hPays', m).value = '0';
+    $('#hDivFields', m).classList.toggle('hide', acc || $('#hPays', m).value === '0');
+    $('#hFetch', m).disabled = !state.settings.relayUrl;
+    $('#hFetchMsg', m).textContent = state.settings.relayUrl ? '' : 'Relais de données non configuré (Paramètres).';
+  };
+  $('#hType', m).onchange = sync; $('#hPays', m).onchange = sync; sync();
+  $('#hFetch', m).onclick = () => fetchIntoHoldingForm(m);
+  wireTickerSearch(m);
+  if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
+  $('#hSave', m).onclick = () => saveHoldingForm(m, ex);
+}
+
+function wireTickerSearch(m) {
+  const input = $('#hTicker', m), list = $('#hSuggest', m); let t;
+  input.addEventListener('input', () => {
+    clearTimeout(t); const q = input.value.trim();
+    if (q.length < 2 || !state.settings.relayUrl || Market.isISIN(q)) { list.classList.add('hide'); return; }
+    t = setTimeout(async () => {
+      try {
+        const res = (await market.search(q)).filter((x) => !x.quoteType || ['EQUITY', 'ETF'].indexOf(x.quoteType) >= 0).slice(0, 7);
+        if (!res.length) { list.classList.add('hide'); return; }
+        list.innerHTML = res.map((r) => '<button type="button" class="nav-link" data-sym="' + esc(r.symbol) + '" data-nm="' + esc(r.longname || r.shortname || '') + '" data-ty="' + esc(r.quoteType || '') + '"><span><b>' + esc(r.symbol) + '</b> <span class="muted">' + esc(r.shortname || r.longname || '') + ' · ' + esc(r.exchDisp || r.exchange || '') + '</span></span></button>').join('');
+        list.classList.remove('hide');
+        $$('[data-sym]', list).forEach((b) => b.onclick = () => { input.value = b.dataset.sym; if (!$('#hName', m).value) $('#hName', m).value = b.dataset.nm; if (b.dataset.ty === 'ETF') $('#hType', m).value = 'etf_dist'; list.classList.add('hide'); $('#hType', m).dispatchEvent(new Event('change')); fetchIntoHoldingForm(m); });
+      } catch (e) { list.classList.add('hide'); }
+    }, 300);
+  });
+  input.addEventListener('blur', () => setTimeout(() => list.classList.add('hide'), 200));
+}
+async function fetchIntoHoldingForm(m) {
+  const msg = $('#hFetchMsg', m), t = $('#hTicker', m).value.trim();
+  if (!t) { msg.textContent = 'Renseignez d\'abord un ticker.'; return; }
+  msg.textContent = 'Récupération…';
+  try {
+    const a = await market.fetchAsset(t, $('#hName', m).value);
+    const tmp = { dividend: {}, type: $('#hType', m).value, ticker: t };
+    Market.applyToHolding(tmp, a, todayISO());
+    $('#hTicker', m).value = a.symbol;
+    if (a.name && !$('#hName', m).value) $('#hName', m).value = a.name;
+    if (a.currency) $('#hCur', m).value = a.currency;
+    if ($('#hType', m).value !== tmp.type && !hDraft.typeLocked) $('#hType', m).value = tmp.type;
+    const d = tmp.dividend;
+    $('#hPays', m).value = d.none ? '0' : '1';
+    if (!d.none) { $('#hDiv', m).value = d.lastAmount; $('#hFreq', m).value = d.frequency === 'irregular' ? 'quarterly' : d.frequency; $('#hMonth', m).value = d.anchorMonth; $('#hKind', m).value = 'ex'; }
+    hDraft.dividend.history = d.history; hDraft.dividend.updatedAt = d.updatedAt;
+    $('#hType', m).dispatchEvent(new Event('change'));
+    msg.textContent = d.none ? 'Aucun dividende récent trouvé : actif marqué « sans dividende ».' : '✓ Données récupérées (détachement estimé d\'après l\'historique) : vérifiez et complétez.';
+  } catch (e) { msg.textContent = '✗ ' + e.message; }
+}
+function saveHoldingForm(m, ex) {
+  const t = $('#hTicker', m).value.trim();
+  if (!t) { toast('Renseignez un ticker ou un ISIN.', { error: true }); return; }
+  const d = hDraft, q = numOrNull($('#hQty', m).value);
+  if (q === null || q < 0) { toast('Quantité invalide.', { error: true }); return; }
+  const prevType = ex ? ex.type : null;
+  d.ticker = t; d.displayTicker = t.toUpperCase(); d.quantity = q; d.avgCost = numOrNull($('#hCost', m).value);
+  d.name = $('#hName', m).value.trim(); d.account = $('#hAcc', m).value; d.currency = $('#hCur', m).value;
+  d.type = $('#hType', m).value; if (prevType !== null && prevType !== d.type) d.typeLocked = true; if (prevType === null && d.type !== 'stock') d.typeLocked = d.typeLocked || false;
+  if (Market.isISIN(t)) d.isin = t.toUpperCase();
+  const dv = d.dividend = d.dividend || {};
+  const none = d.type === 'etf_acc' || $('#hPays', m).value === '0';
+  dv.none = none;
+  if (none) { dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; }
+  else {
+    dv.lastAmount = numOrNull($('#hDiv', m).value); dv.frequency = $('#hFreq', m).value;
+    const mo = $('#hMonth', m).value; dv.anchorMonth = mo ? Number(mo) : null; dv.dateKind = $('#hKind', m).value;
+    const day = $('#hDay', m).value; dv.payDay = day ? Number(day) : null; dv.taxRate = numOrNull($('#hTax', m).value);
+  }
+  if (none) dv.taxRate = numOrNull($('#hTax', m).value);
+  const i = state.holdings.findIndex((h) => h.id === d.id);
+  if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
+  saveState(); closeModal(); toast('Actif enregistré.'); renderPage();
+}
+
+/* ===============================================================
+   SUPPRESSIONS (position ≠ historique ≠ compte utilisateur)
+   =============================================================== */
+async function confirmDeleteHoldings(ids) {
+  const hs = ids.map(holdingById).filter(Boolean); if (!hs.length) return;
+  const idset = new Set(ids);
+  const nPay = state.payments.filter((p) => idset.has(p.holdingId)).length, nTx = state.transactions.filter((t) => idset.has(t.holdingId)).length;
+  const c = await confirmDialog({
+    title: 'Supprimer ' + hs.length + ' position' + (hs.length > 1 ? 's' : '') + ' ?',
+    body: '<b>' + hs.slice(0, 6).map((h) => esc(h.name || h.displayTicker || h.ticker)).join(', ') + (hs.length > 6 ? '…' : '') + '</b><br><br>' +
+      'Seules les <b>positions</b> du portefeuille sont supprimées. ' + (nPay + nTx ? 'Les <b>' + nPay + '</b> versement(s) et <b>' + nTx + '</b> opération(s) associés restent dans l\'Historique, sauf si vous cochez ci-dessous.' : 'Aucun versement ni opération n\'est associé.') + '<br>Votre compte utilisateur n\'est pas concerné.',
+    checkbox: nPay + nTx ? { label: 'Supprimer aussi leur historique (versements et opérations)', checked: false } : null,
+    confirmLabel: 'Supprimer ' + hs.length + ' position' + (hs.length > 1 ? 's' : ''), danger: true
+  });
+  if (!c.ok) return;
+  const snap = { holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions) };
+  state.holdings = state.holdings.filter((h) => !idset.has(h.id));
+  if (c.checked) { state.payments = state.payments.filter((p) => !idset.has(p.holdingId)); state.transactions = state.transactions.filter((t) => !idset.has(t.holdingId)); }
+  if (view.tables.portfolio) hs.forEach((h) => view.tables.portfolio.sel.delete(h.id));
+  saveState(); renderPage();
+  toast(hs.length + ' position' + (hs.length > 1 ? 's supprimées' : ' supprimée') + '.', { action: { label: 'Annuler', fn: () => { state.holdings = snap.holdings; state.payments = snap.payments; state.transactions = snap.transactions; saveState(); renderPage(); toast('Suppression annulée.'); } } });
+}
+async function confirmDeletePayments(ids) {
+  const c = await confirmDialog({ title: 'Supprimer ' + ids.length + ' versement' + (ids.length > 1 ? 's' : '') + ' ?', body: 'Ces versements disparaîtront de l\'historique et des totaux « reçus ». Vos positions ne sont pas modifiées.', confirmLabel: 'Supprimer', danger: true });
+  if (!c.ok) return;
+  const snap = clone(state.payments), set = new Set(ids);
+  state.payments = state.payments.filter((p) => !set.has(p.id)); if (view.tables.history) view.tables.history.sel.clear();
+  saveState(); renderPage();
+  toast(ids.length + ' versement(s) supprimé(s).', { action: { label: 'Annuler', fn: () => { state.payments = snap; saveState(); renderPage(); } } });
+}
+async function confirmDeleteTransactions(ids) {
+  const c = await confirmDialog({ title: 'Supprimer ' + ids.length + ' opération' + (ids.length > 1 ? 's' : '') + ' ?', body: 'Les quantités et prix de revient de vos positions ne sont <b>pas</b> recalculés automatiquement.', confirmLabel: 'Supprimer', danger: true });
+  if (!c.ok) return;
+  const snap = clone(state.transactions), set = new Set(ids);
+  state.transactions = state.transactions.filter((t) => !set.has(t.id)); if (view.tables.transactions) view.tables.transactions.sel.clear();
+  saveState(); renderPage();
+  toast(ids.length + ' opération(s) supprimée(s).', { action: { label: 'Annuler', fn: () => { state.transactions = snap; saveState(); renderPage(); } } });
+}
+
+/* ===============================================================
+   VERSEMENT (saisie / modification)
+   =============================================================== */
+function openPaymentModal(id, preset) {
+  const ex = id ? state.payments.find((p) => p.id === id) : null;
+  const p = ex ? clone(ex) : Object.assign({ id: uid(), holdingId: (view.account !== 'all' ? (visibleHoldings()[0] || {}).id : (state.holdings[0] || {}).id) || '', exDate: '', payDate: todayISO(), qty: null, perShare: null, gross: null, tax: null, fees: null, net: null, currency: 'EUR', source: 'manual', verified: true }, preset || {});
+  if (!state.holdings.length && !ex) { toast("Ajoutez d'abord un actif.", { error: true }); return; }
+  const hs = state.holdings.slice().sort((a, b) => (a.name || a.ticker).localeCompare(b.name || b.ticker));
+  const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' un versement</h2><div class="sub">Dividende effectivement reçu. Le net est calculé : brut − retenue − frais.</div>' +
+    fld('Actif', '<select id="pH">' + hs.map((h) => opt(h.id, (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker) + ')', h.id === p.holdingId)).join('') + (ex && !holdingById(p.holdingId) ? opt(p.holdingId, (p.name || p.ticker) + ' (position supprimée)', true) : '') + '</select>', '', 'pH') +
+    '<div class="row2">' + fld('Date de paiement', '<input type="date" id="pPay" value="' + esc(p.payDate || '') + '">', '', 'pPay') + fld('Date de détachement (facultatif)', '<input type="date" id="pEx" value="' + esc(p.exDate || '') + '">', '', 'pEx') + '</div>' +
+    '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="pQty" step="any" inputmode="decimal" value="' + esc(p.qty === null ? '' : p.qty) + '">', 'Par défaut : quantité à la date', 'pQty') + fld('Montant par titre', '<input type="number" id="pPer" step="any" inputmode="decimal" value="' + esc(p.perShare === null || p.perShare === undefined ? '' : p.perShare) + '">', '', 'pPer') + '</div>' +
+    '<div class="row2">' + fld('Montant brut', '<input type="number" id="pGross" step="any" inputmode="decimal" value="' + esc(p.gross === null ? '' : p.gross) + '">', '', 'pGross') + fld('Retenue à la source / impôt', '<input type="number" id="pTax" step="any" inputmode="decimal" value="' + esc(p.tax === null || p.tax === undefined ? '' : Math.abs(p.tax)) + '">', '', 'pTax') + '</div>' +
+    '<div class="row2">' + fld('Frais', '<input type="number" id="pFees" step="any" inputmode="decimal" value="' + esc(p.fees === null || p.fees === undefined ? '' : p.fees) + '">', '', 'pFees') + fld('Net reçu', '<input type="number" id="pNet" step="any" inputmode="decimal" value="' + esc(p.net === null || p.net === undefined ? '' : p.net) + '">', 'Laissez vide si inconnu', 'pNet') + '</div>' +
+    fld('Devise', '<select id="pCur">' + (CURRENCIES.indexOf(p.currency) < 0 ? [p.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === p.currency)).join('') + '</select>', '', 'pCur') +
+    '<div class="modal-actions"><div>' + (ex ? '<button class="btn danger" type="button" id="pDel">' + icon('trash') + 'Supprimer</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="pSave">Enregistrer</button></div></div>');
+  const g = (i) => numOrNull($('#' + i, m).value);
+  let netTouched = !!(ex && ex.net != null);
+  const recalc = () => {
+    const q = g('pQty'), per = g('pPer');
+    if (g('pGross') === null && q && per) $('#pGross', m).value = Math.round(q * per * 100) / 100;
+    if (!netTouched) { const gr = g('pGross'), tx = g('pTax'), fe = g('pFees'); $('#pNet', m).value = gr !== null && (tx !== null || fe !== null) ? Math.round((gr - (tx || 0) - (fe || 0)) * 100) / 100 : ''; }
+  };
+  ['pQty', 'pPer', 'pGross', 'pTax', 'pFees'].forEach((i) => $('#' + i, m).addEventListener('input', recalc));
+  $('#pNet', m).addEventListener('input', () => { netTouched = $('#pNet', m).value !== ''; });
+  const fillFromHolding = () => {
+    const h = holdingById($('#pH', m).value); if (!h) return;
+    $('#pCur', m).value = h.currency;
+    if (!$('#pQty', m).value) $('#pQty', m).value = Engine.quantityAt(state, h, $('#pPay', m).value || $('#pEx', m).value || todayISO());
+    if (!$('#pPer', m).value && h.dividend && h.dividend.lastAmount && !ex) $('#pPer', m).value = h.dividend.lastAmount;
+    if (h.dividend && h.dividend.taxRate != null && !$('#pTax', m).value && !ex) { /* proposé seulement après saisie du brut */ }
+    recalc();
+  };
+  $('#pH', m).onchange = () => { $('#pQty', m).value = ''; fillFromHolding(); };
+  if (!ex && !p.qty) fillFromHolding();
+  if (ex) $('#pDel', m).onclick = () => { closeModal(); confirmDeletePayments([ex.id]); };
+  $('#pSave', m).onclick = () => {
+    const h = holdingById($('#pH', m).value), gross = g('pGross');
+    const payDate = $('#pPay', m).value || null, exDate = $('#pEx', m).value || null;
+    if (!payDate && !exDate) { toast('Indiquez au moins une date.', { error: true }); return; }
+    if (gross === null || gross < 0) { toast('Indiquez le montant brut.', { error: true }); return; }
+    const tax = g('pTax'), fees = g('pFees'); let net = g('pNet');
+    if (net === null && (tax !== null || fees !== null)) net = Math.round((gross - (tax || 0) - (fees || 0)) * 100) / 100;
+    const np = Object.assign({}, p, { holdingId: $('#pH', m).value, ticker: h ? (h.displayTicker || h.ticker) : p.ticker, name: h ? h.name : p.name, payDate, exDate, qty: g('pQty') || 0, perShare: g('pPer'),
+      gross, tax: tax === null ? null : Math.abs(tax), fees, net, currency: $('#pCur', m).value, verified: true, source: ex ? ex.source : 'manual' });
+    const dup = state.payments.find((x) => x.id !== np.id && Engine.paymentKey(x) === Engine.paymentKey(np));
+    if (dup) { toast('Ce versement existe déjà (même actif, même date, même montant).', { error: true }); return; }
+    const i = state.payments.findIndex((x) => x.id === np.id);
+    if (i >= 0) state.payments[i] = np; else state.payments.push(np);
+    saveState(); closeModal(); toast('Versement enregistré.'); renderPage();
+  };
+}
+
+/* Pré-remplissage d'après les dates de détachement passées (« à vérifier ») */
+async function runPrefill() {
+  const since = (new Date().getFullYear() - 1) + '-01-01';
+  const gen = Engine.prefillPayments(state, state.holdings, uid, since);
+  if (!gen.length) { toast(state.holdings.some((h) => (h.dividend || {}).history && h.dividend.history.length) ? 'Rien de nouveau à ajouter.' : "Aucun historique de marché : actualisez d'abord les données (Portefeuille → Actualiser).", { ms: 5000 }); return; }
+  const c = await confirmDialog({ title: 'Pré-remplir l\'historique ?', body: '<b>' + gen.length + '</b> versement(s) seront créés d\'après les dates de détachement passées depuis le 1er janvier ' + (new Date().getFullYear() - 1) + ', en supposant votre quantité actuelle.<br><br>Ils sont marqués <b>« À vérifier »</b> (montant brut théorique, sans retenue ni frais réels). Vous pourrez les corriger ou les supprimer.', confirmLabel: 'Créer ' + gen.length + ' versement(s)' });
+  if (!c.ok) return;
+  state.payments.push.apply(state.payments, gen); saveState(); renderPage(); toast(gen.length + ' versement(s) créés, à vérifier.');
+}
+
+/* ===============================================================
+   PORTEFEUILLES / COMPTES
+   =============================================================== */
+function openAccountsModal() {
+  const rows = state.accounts.map((a) => '<div class="list-row" data-id="' + esc(a.id) + '"><input type="text" value="' + esc(a.name) + '" data-rename="' + esc(a.id) + '" aria-label="Nom"><span class="muted" style="white-space:nowrap">' + state.holdings.filter((h) => h.account === a.id).length + ' actif(s)</span><button class="btn sm icon ghost" type="button" data-del="' + esc(a.id) + '" aria-label="Supprimer" ' + (state.accounts.length <= 1 ? 'disabled' : '') + '>' + icon('trash') + '</button></div>').join('');
+  const m = openModal('<h2>Portefeuilles / comptes-titres</h2><div class="sub">Séparez par exemple votre CTO et votre PEA. Chaque actif est rattaché à un portefeuille.</div>' + rows +
+    '<div class="list-row"><input type="text" id="newAcc" placeholder="Nom du nouveau portefeuille"><button class="btn primary sm" type="button" id="addAcc">Ajouter</button></div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Fermer</button></div>');
+  $$('[data-rename]', m).forEach((i) => i.onchange = () => { const a = state.accounts.find((x) => x.id === i.dataset.rename); if (a && i.value.trim()) { a.name = i.value.trim(); saveState(); renderPage(); } });
+  $$('[data-del]', m).forEach((b) => b.onclick = async () => {
+    const id = b.dataset.del, n = state.holdings.filter((h) => h.account === id).length, fb = state.accounts.find((a) => a.id !== id);
+    const c = await confirmDialog({ title: 'Supprimer ce portefeuille ?', body: n ? n + ' actif(s) seront déplacés vers « ' + esc(fb.name) + ' » (aucun actif n\'est supprimé).' : 'Ce portefeuille est vide.', confirmLabel: 'Supprimer', danger: true });
+    if (!c.ok) { openAccountsModal(); return; }
+    state.holdings.forEach((h) => { if (h.account === id) h.account = fb.id; });
+    state.accounts = state.accounts.filter((a) => a.id !== id); if (view.account === id) view.account = 'all';
+    saveState(); renderPage(); openAccountsModal();
+  });
+  $('#addAcc', m).onclick = () => { const v = $('#newAcc', m).value.trim(); if (!v) return; state.accounts.push({ id: uid(), name: v }); saveState(); renderPage(); openAccountsModal(); };
+}
+
+/* ===============================================================
+   LECTURE DE FICHIERS (CSV / Excel)
+   =============================================================== */
+function readFileRows(file) {
+  return new Promise((resolve, reject) => {
+    const name = file.name.toLowerCase(), r = new FileReader();
+    if (name.endsWith('.csv') || name.endsWith('.txt')) {
+      r.onload = () => {
+        if (typeof Papa === 'undefined') return reject(new Error('Bibliothèque CSV indisponible (hors-ligne ?).'));
+        let text = r.result; if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        resolve(Papa.parse(text, { header: false, skipEmptyLines: true }).data);
+      };
+      r.readAsText(file, 'UTF-8');
+    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      r.onload = () => {
+        if (typeof XLSX === 'undefined') return reject(new Error('Bibliothèque Excel indisponible (hors-ligne ?).'));
+        const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+        resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }));
+      };
+      r.readAsArrayBuffer(file);
+    } else reject(new Error('Format non pris en charge : utilisez un fichier .csv ou .xlsx.'));
+    r.onerror = () => reject(new Error('Lecture du fichier impossible.'));
+  });
+}
+function pickFile(accept) {
+  return new Promise((resolve) => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.style.display = 'none';
+    i.onchange = () => { resolve(i.files[0] || null); i.remove(); };
+    document.body.appendChild(i); i.click();
+  });
+}
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+function guessHeaderRow(rows, kws) {
+  for (let i = 0; i < Math.min(10, rows.length); i++) { const c = (rows[i] || []).map(norm); if (kws.every((k) => c.some((x) => k.some((w) => x.includes(w))))) return i; }
+  return 0;
+}
+function colSelect(id, headerRow, sel, allowNone) {
+  let o = allowNone === false ? '' : '<option value="-1">— Ignorer —</option>';
+  headerRow.forEach((h, i) => { o += '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + esc(h || ('Colonne ' + (i + 1))) + '</option>'; });
+  return '<select id="' + id + '">' + o + '</select>';
+}
+function guessCol(headerRow, kws, exclude) { const hs = headerRow.map(norm); for (let i = 0; i < hs.length; i++) { if (exclude && exclude.some((x) => hs[i] === x)) continue; if (kws.some((k) => hs[i] === k)) return i; } for (let i = 0; i < hs.length; i++) { if (kws.some((k) => hs[i].includes(k))) return i; } return -1; }
+function previewTable(rows, headerIdx, n) {
+  return '<div class="tbl-wrap" style="max-height:200px"><table class="tbl"><tbody>' + rows.slice(0, n || 8).map((r, i) => '<tr style="' + (i === headerIdx ? 'font-weight:700;background:var(--accent-soft)' : '') + '"><td class="muted">' + (i + 1) + '</td>' + r.map((c) => '<td>' + esc(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>';
+}
+
+/* ===============================================================
+   IMPORT DES POSITIONS (relevé de portefeuille : DEGIRO, Trade Republic…)
+   =============================================================== */
+async function openImportPositions() {
+  const file = await pickFile('.csv,.xlsx,.xls,.txt'); if (!file) return;
+  let rows; try { rows = (await readFileRows(file)).filter((r) => r && r.some((c) => String(c).trim() !== '')); } catch (e) { toast(e.message, { error: true }); return; }
+  if (!rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
+  renderPositionsMapping(rows, guessHeaderRow(rows, [['symbole', 'symbol', 'ticker', 'isin', 'code'], ['quantite', 'quantity', 'nombre', 'qty', 'position', 'en portefeuille']]));
+}
+function renderPositionsMapping(rows, hIdx) {
+  const head = rows[hIdx] || [], n = Math.max.apply(null, rows.map((r) => r.length));
+  while (head.length < n) head.push('');
+  const T = guessCol(head, ['symbole/isin', 'symbole', 'symbol', 'ticker', 'isin', 'code']), Q = guessCol(head, ['quantite', 'quantity', 'nombre', 'qte', 'qty', 'position', 'en portefeuille']), N = guessCol(head, ['produit', 'nom', 'name', 'societe', 'company', 'libelle']);
+  const C = guessCol(head, ['prix de revient', 'pru', 'cout moyen', 'average cost', 'prix moyen', 'average price']), U = guessCol(head, ['devise locale', 'devise', 'currency']);
+  const m = openModal('<h2>Importer un relevé de portefeuille</h2><div class="sub">Choisissez les colonnes. La ligne surlignée dans l\'aperçu est l\'en-tête.</div>' +
+    fld('Ligne d\'en-tête', '<select id="mH">' + rows.slice(0, 10).map((r, i) => opt(i, 'Ligne ' + (i + 1) + ' — ' + r.slice(0, 3).join(' / '), i === hIdx)).join('') + '</select>', '', 'mH') +
+    '<div class="row2">' + fld('Ticker ou ISIN', colSelect('mT', head, T, false), '', 'mT') + fld('Quantité', colSelect('mQ', head, Q, false), '', 'mQ') + '</div>' +
+    '<div class="row2">' + fld('Nom (facultatif)', colSelect('mN', head, N), '', 'mN') + fld('Prix de revient unitaire (facultatif)', colSelect('mC', head, C), 'Ne choisissez pas « Clôture » : ce n\'est pas votre prix d\'achat.', 'mC') + '</div>' +
+    '<div class="row2">' + fld('Devise (facultatif)', colSelect('mU', head, U), '', 'mU') + fld('Portefeuille de destination', '<select id="mA">' + state.accounts.map((a) => opt(a.id, a.name, (view.account !== 'all' ? view.account : state.accounts[0].id) === a.id)).join('') + '</select>', '', 'mA') + '</div>' +
+    '<div class="sec">Aperçu</div>' + previewTable(rows, hIdx) + '<span class="hint">Les actifs déjà présents dans le portefeuille (même ticker / ISIN) sont ignorés. Après l\'import, les données de dividende sont récupérées automatiquement.</span>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="mGo">Importer</button></div></div>', { wide: true });
+  $('#mH', m).onchange = (e) => renderPositionsMapping(rows, Number(e.target.value));
+  $('#mGo', m).onclick = async () => {
+    const col = (id) => Number($('#' + id, m).value), t = col('mT'), q = col('mQ'), nm = col('mN'), cc = col('mC'), cu = col('mU'), acc = $('#mA', m).value;
+    if (t < 0 || q < 0) { toast('Sélectionnez au minimum les colonnes ticker et quantité.', { error: true }); return; }
+    const have = new Set(state.holdings.filter((h) => h.account === acc).flatMap((h) => [String(h.ticker).toUpperCase(), String(h.isin || '').toUpperCase()]).filter(Boolean));
+    const added = []; let skipDup = 0, skipBad = 0;
+    rows.slice(hIdx + 1).forEach((r) => {
+      const tk = String(r[t] || '').trim(); const qty = parseNum(r[q]);
+      if (!tk || !qty || qty <= 0 || isNaN(qty)) { skipBad++; return; }
+      if (have.has(tk.toUpperCase())) { skipDup++; return; }
+      have.add(tk.toUpperCase());
+      const cur = cu >= 0 ? String(r[cu] || '').trim().toUpperCase() : '';
+      const h = { id: uid(), ticker: tk, displayTicker: tk.toUpperCase(), isin: Market.isISIN(tk) ? tk.toUpperCase() : '', name: nm >= 0 ? String(r[nm] || '').trim() : '', type: 'stock', quantity: qty,
+        avgCost: cc >= 0 && !isNaN(parseNum(r[cc])) ? parseNum(r[cc]) : null, currency: /^[A-Z]{3}$/.test(cur) ? cur : baseCur(), account: acc, logo: null, source: 'import', addedAt: todayISO(), dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } };
+      added.push(h);
+    });
+    if (!added.length) { closeModal(); toast('0 actif importé' + (skipDup ? ' · ' + skipDup + ' déjà présent(s)' : '') + (skipBad ? ' · ' + skipBad + ' ligne(s) invalide(s) (colonnes mal choisies ?)' : '') + '.', { error: true, ms: 6000 }); return; }
+    state.holdings.push.apply(state.holdings, added); saveState(); closeModal(); renderPage();
+    toast(added.length + ' actif(s) importé(s)' + (skipDup ? ', ' + skipDup + ' déjà présent(s)' : '') + (skipBad ? ', ' + skipBad + ' ligne(s) ignorée(s)' : '') + '.');
+    if (state.settings.relayUrl) await refreshMarket(added);
+  };
+}
+
+/* ===============================================================
+   IMPORT DES TRANSACTIONS (Trade Republic, DEGIRO, générique)
+   Colonnes reconnues automatiquement par leur nom d'en-tête ; l'utilisateur
+   vérifie le résultat dans l'aperçu avant l'import.
+   =============================================================== */
+function classifyTx(typeStr, catStr) {
+  const t = norm(typeStr) + ' ' + norm(catStr);
+  if (/dividend|dividende|coupon|distribution|ausschuttung/.test(t)) return 'dividend';
+  if (/\b(sell|vente|verkauf|cession)\b/.test(t)) return 'sell';
+  if (/\b(buy|achat|kauf|purchase|acquisition|saveback|savings plan|plan d.epargne|sparplan|round up|stock perk)\b/.test(t)) return 'buy';
+  return 'other';
+}
+async function openImportTransactions() {
+  const file = await pickFile('.csv,.xlsx,.xls,.txt'); if (!file) return;
+  let rows; try { rows = (await readFileRows(file)).filter((r) => r && r.some((c) => String(c).trim() !== '')); } catch (e) { toast(e.message, { error: true }); return; }
+  if (!rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
+  renderTxMapping(rows, guessHeaderRow(rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {});
+}
+function txFromRows(rows, hIdx, cols, opts) {
+  const out = { buys: [], sells: [], dividends: [], skipped: 0, bad: 0 };
+  const g = (r, k) => cols[k] >= 0 ? r[cols[k]] : '';
+  rows.slice(hIdx + 1).forEach((r) => {
+    const kind = classifyTx(g(r, 'type'), g(r, 'cat'));
+    if (kind === 'other') { out.skipped++; return; }
+    const date = parseDateLoose(g(r, 'date')); const sym = String(g(r, 'sym') || '').trim();
+    const name = String(g(r, 'name') || '').trim(); const cur = String(g(r, 'cur') || '').trim().toUpperCase();
+    const amount = Math.abs(parseNum(g(r, 'amount'))), shares = Math.abs(parseNum(g(r, 'shares'))), price = Math.abs(parseNum(g(r, 'price')));
+    const fee = Math.abs(parseNum(g(r, 'fee'))) || 0, tax = cols.tax >= 0 && String(g(r, 'tax')).trim() !== '' ? Math.abs(parseNum(g(r, 'tax'))) : null;
+    const ext = String(g(r, 'id') || '').trim();
+    if (!date || (!sym && !name)) { out.bad++; return; }
+    const base = { date, sym, name, currency: /^[A-Z]{3}$/.test(cur) ? cur : null, ext };
+    if (kind === 'dividend') {
+      if (isNaN(amount) || !amount) { out.bad++; return; }
+      let gross, net, taxv = tax && !isNaN(tax) ? tax : null;
+      if (opts.divMode === 'gross') { gross = amount; net = taxv !== null ? Math.round((gross - taxv) * 100) / 100 : null; }
+      else { net = amount; gross = Math.round((net + (taxv || 0)) * 100) / 100; }
+      out.dividends.push(Object.assign(base, { gross, net, tax: taxv, shares: isNaN(shares) ? null : shares }));
+    } else {
+      let qty = isNaN(shares) ? NaN : shares, pr = isNaN(price) ? NaN : price;
+      if ((isNaN(qty) || !qty) && !isNaN(amount) && pr) qty = amount / pr;
+      if ((isNaN(pr) || !pr) && qty && !isNaN(amount)) pr = amount / qty;
+      if (!qty || isNaN(qty) || isNaN(pr)) { out.bad++; return; }
+      (kind === 'buy' ? out.buys : out.sells).push(Object.assign(base, { qty, price: pr, fees: fee }));
+    }
+  });
+  return out;
+}
+function renderTxMapping(rows, hIdx, prev) {
+  const head = rows[hIdx] || [], n = Math.max.apply(null, rows.map((r) => r.length)); while (head.length < n) head.push('');
+  const G = (k, kws) => prev[k] !== undefined ? prev[k] : guessCol(head, kws);
+  const sel = { date: G('date', ['datetime', 'date', 'time']), type: G('type', ['type', 'operation', 'transaction', 'description']), cat: G('cat', ['category', 'categorie']), sym: G('sym', ['symbol', 'symbole', 'isin', 'ticker']), name: G('name', ['name', 'nom', 'produit', 'libelle']),
+    shares: G('shares', ['shares', 'quantite', 'quantity', 'nombre', 'qty']), price: G('price', ['price', 'prix', 'cours']), amount: G('amount', ['amount', 'montant', 'total', 'valeur']), fee: G('fee', ['fee', 'frais', 'commission']), tax: G('tax', ['tax', 'impot', 'retenue', 'taxe']),
+    cur: G('cur', ['currency', 'devise']), id: G('id', ['transaction id', 'transaction_id', 'id']) };
+  const isTR = head.map(norm).includes('transaction_id') || head.map(norm).includes('asset_class');
+  const divMode = prev.divMode || 'net';
+  const m = openModal('<h2>Importer des transactions</h2><div class="sub">' + (isTR ? 'Format <b>Trade Republic</b> reconnu. ' : '') + 'Vérifiez les colonnes, puis contrôlez le résultat avant d\'importer.</div>' +
+    fld('Ligne d\'en-tête', '<select id="xH">' + rows.slice(0, 10).map((r, i) => opt(i, 'Ligne ' + (i + 1) + ' — ' + r.slice(0, 3).join(' / '), i === hIdx)).join('') + '</select>', '', 'xH') +
+    '<div class="row2">' + fld('Date', colSelect('xdate', head, sel.date, false), '', 'xdate') + fld('Type d\'opération', colSelect('xtype', head, sel.type, false), 'Achat, vente, dividende…', 'xtype') + '</div>' +
+    '<div class="row2">' + fld('Catégorie (facultatif)', colSelect('xcat', head, sel.cat), '', 'xcat') + fld('ISIN / symbole', colSelect('xsym', head, sel.sym), '', 'xsym') + '</div>' +
+    '<div class="row2">' + fld('Nom de l\'actif', colSelect('xname', head, sel.name), '', 'xname') + fld('Quantité', colSelect('xshares', head, sel.shares), '', 'xshares') + '</div>' +
+    '<div class="row2">' + fld('Prix unitaire', colSelect('xprice', head, sel.price), '', 'xprice') + fld('Montant', colSelect('xamount', head, sel.amount), '', 'xamount') + '</div>' +
+    '<div class="row2">' + fld('Frais', colSelect('xfee', head, sel.fee), '', 'xfee') + fld('Retenue / impôt', colSelect('xtax', head, sel.tax), '', 'xtax') + '</div>' +
+    '<div class="row2">' + fld('Devise', colSelect('xcur', head, sel.cur), '', 'xcur') + fld('Identifiant de transaction (anti-doublon)', colSelect('xid', head, sel.id), '', 'xid') + '</div>' +
+    fld('Le montant d\'un dividende est…', '<select id="xmode">' + opt('net', 'le net reçu (après retenue) — cas Trade Republic', divMode === 'net') + opt('gross', 'le brut (avant retenue)', divMode === 'gross') + '</select>', 'Détermine le calcul du brut et du net enregistrés.', 'xmode') +
+    fld('Portefeuille pour les nouveaux actifs', '<select id="xacc">' + state.accounts.map((a) => opt(a.id, a.name, (view.account !== 'all' ? view.account : state.accounts[0].id) === a.id)).join('') + '</select>', '', 'xacc') +
+    '<div id="xSummary" class="notice info" style="margin-top:6px"></div><div id="xPrev"></div>' +
+    '<label class="chk"><input type="checkbox" id="xNew" checked><span>Créer les actifs qui ne sont pas encore dans le portefeuille (quantité et prix de revient calculés)</span></label>' +
+    '<label class="chk"><input type="checkbox" id="xUpd"><span>Mettre aussi à jour la quantité et le prix de revient des actifs existants (seulement si le fichier couvre tout l\'historique)</span></label>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="xGo">Importer</button></div></div>', { wide: true });
+  const cols = () => { const c = {}; ['date', 'type', 'cat', 'sym', 'name', 'shares', 'price', 'amount', 'fee', 'tax', 'cur', 'id'].forEach((k) => { c[k] = Number($('#x' + k, m).value); }); return c; };
+  const refresh = () => {
+    const parsed = txFromRows(rows, hIdx, cols(), { divMode: $('#xmode', m).value });
+    $('#xSummary', m).innerHTML = '<span><b>' + parsed.buys.length + '</b> achat(s) · <b>' + parsed.sells.length + '</b> vente(s) · <b>' + parsed.dividends.length + '</b> dividende(s) détecté(s)' + (parsed.skipped ? ' · ' + parsed.skipped + ' autre(s) opération(s) ignorée(s) (dépôts, intérêts, cartes…)' : '') + (parsed.bad ? ' · ' + parsed.bad + ' ligne(s) illisible(s)' : '') + '</span>';
+    const sample = parsed.dividends.slice(0, 4).map((d) => '<tr><td>' + esc(d.date) + '</td><td>' + esc(d.name || d.sym) + '</td><td class="r">' + fmtMoney(d.gross, d.currency || 'EUR') + '</td><td class="r">' + (d.tax === null ? '—' : fmtMoney(d.tax, d.currency || 'EUR')) + '</td><td class="r">' + (d.net === null ? '—' : fmtMoney(d.net, d.currency || 'EUR')) + '</td></tr>').join('');
+    $('#xPrev', m).innerHTML = sample ? '<div class="sec">Dividendes — aperçu (brut / retenue / net)</div><div class="tbl-wrap"><table class="tbl"><tbody>' + sample + '</tbody></table></div>' : '';
+    return parsed;
+  };
+  $$('select', m).forEach((s) => s.addEventListener('change', (e) => { if (e.target.id === 'xH') renderTxMapping(rows, Number(e.target.value), {}); else refresh(); }));
+  refresh();
+  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
+}
+function commitTransactions(p, o) {
+  if (!p.buys.length && !p.sells.length && !p.dividends.length) { toast('Aucune opération exploitable : vérifiez les colonnes choisies.', { error: true }); return; }
+  const findHolding = (r) => {
+    const s = r.sym.toUpperCase(), nmn = norm(r.name);
+    return state.holdings.find((h) => (s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn && h.account === o.acc));
+  };
+  const created = [], touched = new Set(); let dupTx = 0, dupPay = 0, noHolding = 0;
+  const all = p.buys.map((x) => Object.assign(x, { kind: 'buy' })).concat(p.sells.map((x) => Object.assign(x, { kind: 'sell' })), p.dividends.map((x) => Object.assign(x, { kind: 'dividend' })));
+  const resolve = (r) => {
+    let h = findHolding(r) || created.find((c) => (r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name)));
+    if (!h && o.createNew) {
+      const sym = r.sym || r.name;
+      h = { id: uid(), ticker: sym, displayTicker: sym.toUpperCase(), isin: Market.isISIN(sym) ? sym.toUpperCase() : '', name: r.name || '', type: 'stock', quantity: 0, avgCost: null, currency: r.currency || baseCur(), account: o.acc, logo: null, source: 'import-tx', addedAt: r.date,
+        dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } };
+      created.push(h);
+    }
+    return h;
+  };
+  const txKeys = new Set(state.transactions.map((t) => t.extId || [t.type, t.date, t.holdingId, t.qty, t.price].join('|')));
+  const payKeys = new Set(state.payments.map((x) => x.extId || Engine.paymentKey(x)));
+  const newTx = [], newPay = [];
+  all.forEach((r) => {
+    const h = resolve(r); if (!h) { noHolding++; return; }
+    touched.add(h);
+    if (r.kind === 'dividend') {
+      const pay = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || r.name, exDate: null, payDate: r.date, qty: r.shares || Engine.quantityAt(state, h, r.date) || h.quantity, perShare: r.shares ? Math.round(r.gross / r.shares * 10000) / 10000 : null,
+        gross: r.gross, tax: r.tax, fees: null, net: r.net, currency: r.currency || h.currency, source: 'csv', verified: true, extId: r.ext || undefined };
+      const key = r.ext || Engine.paymentKey(pay);
+      if (payKeys.has(key) || payKeys.has(Engine.paymentKey(pay))) { dupPay++; return; }
+      payKeys.add(key); newPay.push(pay);
+    } else {
+      const tx = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || r.name, date: r.date, type: r.kind, qty: r.qty, price: r.price, fees: r.fees || 0, currency: r.currency || h.currency, source: 'csv', extId: r.ext || undefined };
+      const key = r.ext || [tx.type, tx.date, tx.holdingId, tx.qty, tx.price].join('|');
+      if (txKeys.has(key)) { dupTx++; return; }
+      txKeys.add(key); newTx.push(tx);
+    }
+  });
+  created.forEach((h) => state.holdings.push(h));
+  state.transactions.push.apply(state.transactions, newTx); state.payments.push.apply(state.payments, newPay);
+  // quantité et prix de revient : actifs créés (toujours) ; existants (si demandé)
+  touched.forEach((h) => {
+    if (!(created.indexOf(h) >= 0 || o.updateExisting)) return;
+    const pos = Engine.positionFromTransactions(state.transactions.filter((t) => t.holdingId === h.id));
+    h.quantity = pos.quantity; h.avgCost = pos.avgCost;
+  });
+  saveState(); closeModal(); renderPage();
+  const msg = [newTx.length + ' opération(s)', newPay.length + ' dividende(s)'];
+  if (created.length) msg.push(created.length + ' actif(s) créé(s)');
+  const ign = dupTx + dupPay; if (ign) msg.push(ign + ' doublon(s) ignoré(s)'); if (noHolding) msg.push(noHolding + ' sans actif correspondant');
+  toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
+  if (created.length && state.settings.relayUrl) refreshMarket(created);
+}
