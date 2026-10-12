@@ -1590,12 +1590,12 @@ function renderImportModal(headerRowIdx){
       </div>
       <div class="field" style="margin-top:2px;">
         <label style="display:flex; align-items:center; gap:8px; font-weight:500;">
-          <input type="checkbox" id="imp-only-dividend" style="accent-color:var(--forest);" ${hasDataSource() ? '' : 'disabled'} />
+          <input type="checkbox" id="imp-only-dividend" style="accent-color:var(--forest);" />
           Ne garder que les entreprises versant un dividende
         </label>
         <span class="hint">${hasDataSource()
           ? "Vérifie chaque ligne une par une via l'API avant de l'ajouter (plus lent : ~1 seconde par ligne), et remplit directement les données de dividende au passage."
-          : "Nécessite une clé API dans ⚙ Paramètres pour pouvoir vérifier les lignes."}</span>
+          : "⚠ Aucune clé API ni relais Yahoo enregistré sur cet appareil : ajoutez-en un dans ⚙ Paramètres avant de lancer l'import avec cette option."}</span>
       </div>
       <div class="section-title">Aperçu (les 9 premières lignes du fichier, numérotées)</div>
       ${previewHtml}
@@ -1627,7 +1627,7 @@ async function confirmImportMapping(){
   const accountId = document.getElementById('imp-account').value;
   const onlyDividend = document.getElementById('imp-only-dividend').checked;
   if(tCol < 0){ toast('Sélectionnez au minimum la colonne Ticker.'); return; }
-  if(onlyDividend && !hasDataSource()){ toast('Ajoutez une clé API ou un relais Yahoo dans Paramètres pour filtrer par dividende.'); return; }
+  if(onlyDividend && !hasDataSource()){ toast('Option impossible sans clé API ni relais Yahoo : ajoutez-en un dans ⚙ Paramètres (ou décochez l\'option).'); return; }
 
   const dataRows = rows.slice(headerRowIdx + 1);
   const candidates = [];
