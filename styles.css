@@ -353,3 +353,13 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .swatch i{display:block;width:100%;height:42px;border-radius:8px;border:1px solid var(--border)}
 .swatch.on{border-color:var(--accent);color:var(--text);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
 @media (prefers-reduced-transparency: reduce){ .card,.tbl-wrap,.sidebar,.tabbar{backdrop-filter:none !important} }
+
+/* logos plus lumineux : plaque claire, pas d'estompage (les estimations se repèrent au contour pointillé) */
+.avatar img{box-sizing:border-box;padding:2px;background:#fff;filter:brightness(1.08) saturate(1.1)}
+.avatar.xs img{padding:1px;border-radius:3px}
+.avatar.xs{box-shadow:0 0 0 1px rgb(255 255 255 / .55),0 1px 3px rgb(0 0 0 / .25)}
+.chip.forecast .avatar,.mini-grid .d.forecast .avatar,.logo-items .avatar.forecast,.logo-items .forecast .avatar{opacity:1}
+.chip.forecast{border-style:dashed}
+.logo-items .forecast .avatar,.mini-grid .d.forecast .avatar{outline:1.5px dashed var(--border-strong);outline-offset:1px}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .avatar{box-shadow:0 0 0 1px rgb(255 255 255 / .22)} }
+:root[data-theme="dark"] .avatar{box-shadow:0 0 0 1px rgb(255 255 255 / .22)}
