@@ -18,7 +18,7 @@
   let fb = null, auth = null, db = null, ready = null, currentUser = null;
   const listeners = [];
 
-  function config() { return root.APP_CONFIG && root.APP_CONFIG.firebase && root.APP_CONFIG.firebase.apiKey ? root.APP_CONFIG.firebase : null; }
+  function config() { return root.APP_CONFIG && root.APP_CONFIG.accountsEnabled === true && root.APP_CONFIG.firebase && root.APP_CONFIG.firebase.apiKey ? root.APP_CONFIG.firebase : null; }
   function configured() { return !!config(); }
 
   function loadScript(src) {

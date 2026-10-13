@@ -15,8 +15,7 @@ function renderSettings(host) {
   } else if (cfgd) {
     account = '<div class="notice info">Vous utilisez l\'application sans compte : vos données restent sur cet appareil uniquement.</div><div class="btn-row" style="margin-top:12px"><button class="btn primary" type="button" id="sIn">Se connecter / créer un compte</button></div><div class="hint" style="margin-top:8px">À la connexion, vos données actuelles peuvent être envoyées dans votre compte sans rien perdre.</div>';
   } else {
-    account = '<div class="notice">La synchronisation par compte n\'est pas encore activée sur cette installation (configuration Firebase manquante). Vos données restent sur cet appareil. Voir le README (section « Comptes utilisateurs et synchronisation »).</div>';
-  }
+    account = '';  }
   const dataSrc = '<div class="field"><label for="sRelay">Adresse du relais de données (Yahoo Finance)</label><input type="text" id="sRelay" value="' + esc(s.relayUrl) + '" placeholder="https://…workers.dev"><span class="hint">Fournit nom, devise et historique des dividendes (date de détachement et montant par titre). Ne fournit ni date de paiement, ni retenue fiscale : saisissez-les à la main ou importez vos transactions.</span></div>' +
     '<div class="btn-row"><button class="btn" type="button" id="sTest">Tester le relais</button><button class="btn" type="button" id="sRefresh">' + icon('refresh') + 'Actualiser tous les actifs</button></div><div class="hint" id="sRelayMsg" style="margin-top:8px">' + esc(marketLine()) + '</div>' +
     '<label class="chk" style="margin-top:8px"><input type="checkbox" id="sAuto" ' + (s.autoRefresh ? 'checked' : '') + '><span>Actualiser automatiquement (au plus une fois par jour, à l\'ouverture)</span></label>';
@@ -34,9 +33,9 @@ function renderSettings(host) {
   const security = '<p class="muted" style="margin:0 0 10px">' + (Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'application sur cet appareil (données locales chiffrées).' : '🔓 Aucun code de verrouillage sur cet appareil.') + '</p><button class="btn" type="button" id="sPin">Code de verrouillage…</button>';
   const notif = '<p class="muted" style="margin:0 0 10px" id="nStatus">' + esc(notifStatusText()) + '</p><div class="btn-row"><button class="btn" type="button" id="nEnable">Activer les rappels</button><button class="btn" type="button" id="nIcs">Ajouter à l\'agenda (.ics)</button></div>';
   host.innerHTML = pageHead('Paramètres', 'Compte, préférences d\'affichage et gestion des données') +
-    sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
-    sec('Sauvegarde et import', 'Vos données restent récupérables à tout moment.', backup) + sec('Sécurité de cet appareil', 'Facultatif : verrouille l\'ouverture de l\'app avec un code.', security) + sec('Rappels de versement', '', notif) +
-    '<p class="hint" style="text-align:center;margin-top:18px">Suivi des dividendes · version 2 · ' + (Cloud.configured() ? 'synchronisation activée' : 'mode local') + '</p>';
+    (account ? sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) : '') + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
+    sec('Sécurité de cet appareil', 'Verrouille l\'ouverture de l\'app avec un code et chiffre vos données sur cet appareil.', security) + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Rappels de versement', '', notif) +
+    '<p class="hint" style="text-align:center;margin-top:18px">Suivi des dividendes · version 2 · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
   wireDo(host);
   const on = (id, fn) => { const e = $('#' + id, host); if (e) e.onclick = fn; };
   on('sIn', () => showAuth('in'));

@@ -76,7 +76,7 @@ async function device(o) {
   await page.route(/cdn\.jsdelivr\.net/, (r) => { const f = r.request().url().includes('papaparse') ? 'papaparse.min.js' : 'xlsx.full.min.js'; const fp = path.join(process.env.LIBDIR || '', f); fs.existsSync(fp) ? r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(fp) }) : r.abort(); });
   await page.route(/^https?:\/\/(?!localhost)(?!.*workers\.dev)(?!.*frankfurter)(?!.*cdn\.jsdelivr)/, (r) => r.abort());
   if (o.firebase) {
-    await page.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.APP_CONFIG={relayUrl:'https://dividende-relais.adam-teixeira89.workers.dev',firebase:{apiKey:'k',authDomain:'a',projectId:'p',appId:'x'}};" }));
+    await page.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.APP_CONFIG={accountsEnabled:true,relayUrl:'https://dividende-relais.adam-teixeira89.workers.dev',firebase:{apiKey:'k',authDomain:'a',projectId:'p',appId:'x'}};" }));
     await page.addInitScript(MOCK);
   }
   if (o.seed) await page.addInitScript((s) => { if (!localStorage.getItem('dividendCalendarApp_v1')) localStorage.setItem('dividendCalendarApp_v1', JSON.stringify(s)); }, o.seed);
@@ -340,6 +340,53 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('infobulles : valeur au survol (souris) et au toucher (téléphone) sur les graphiques ; masquées quand les chiffres sont cachés', async () => {
+    const seed = SEED(3); const y = new Date().getFullYear();
+    seed.payments = [{ id: 'p1', holdingId: 'h0', ticker: 'T0', name: 'Société 0', payDate: y + '-03-10', qty: 10, perShare: 1.5, gross: 15, net: 12, currency: 'EUR', source: 'manual', verified: true }];
+    const d = await device({ guest: true, seed }); await d.open(); await d.waitForSelector('.chart .hit');
+    const idx = 2;   // mars
+    await d.locator('.chart .hit').nth(idx).hover(); await d.waitForTimeout(150);
+    ok(await d.locator('.tip').isVisible(), 'infobulle visible au survol'); const txt = await d.locator('.tip').innerText();
+    ok(/Mars|Mar/.test(txt) && /15,00\s?€/.test(txt), 'montant du mois affiché : ' + txt.replace(/\n/g, ' | '));
+    await d.mouse.move(5, 5); await d.waitForTimeout(150); ok(!(await d.locator('.tip').isVisible()), 'infobulle masquée quand la souris part');
+    await d.evaluate(() => { const el = document.querySelector('.donut-wrap path'); const r = el.getBoundingClientRect(); el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', clientX: r.x + r.width / 2, clientY: r.y + 5 })); }); await d.waitForTimeout(150); ok(/%/.test(await d.locator('.tip').innerText()), 'répartition : part et montant au survol');
+    const m = await device({ guest: true, seed, mobile: true, viewport: { width: 390, height: 844 } }); await m.open(); await m.waitForSelector('.chart .hit');
+    const box = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.locator('.chart .hit').nth(idx).scrollIntoViewIfNeeded();
+    const b2 = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.touchscreen.tap(b2.x + b2.width / 2, b2.y + b2.height / 2); await m.waitForTimeout(200);
+    ok(await m.locator('.tip').isVisible(), 'infobulle visible au toucher'); ok(/15,00\s?€/.test(await m.locator('.tip').innerText()), 'montant au toucher');
+    void box;
+    // chiffres masqués : infobulles neutres
+    await m.evaluate(() => { state.settings.hideNumbers = true; saveState(); renderPage(); }); await m.waitForTimeout(250);
+    const b3 = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.touchscreen.tap(b3.x + b3.width / 2, b3.y + b3.height / 2); await m.waitForTimeout(200);
+    ok(/masqués/.test(await m.locator('.tip').innerText()) && !/15,00/.test(await m.locator('.tip').innerText()), 'infobulle sans chiffre quand masqué');
+  });
+
+  await test('œil de l\'accueil : masque / affiche les chiffres, mémorisé', async () => {
+    const p = await device({ guest: true, seed: SEED(4) }); await p.open();
+    ok(!(await p.locator('.home-body.hide-nums').count()), 'chiffres visibles par défaut'); eq(await p.getAttribute('#eyeBtn', 'aria-pressed'), 'false');
+    await p.click('#eyeBtn'); await p.waitForTimeout(200);
+    ok(await p.locator('.home-body.hide-nums').count(), 'chiffres masqués'); eq(await p.getAttribute('#eyeBtn', 'aria-pressed'), 'true');
+    const blur = await p.evaluate(() => [getComputedStyle(document.querySelector('.kpi .val')).filter, getComputedStyle(document.querySelector('.tk-amt')).filter]); ok(blur.every((f) => f.includes('blur')), 'flou appliqué aux montants : ' + blur);
+    eq((await storeOf(p)).settings.hideNumbers, true, 'préférence enregistrée');
+    await p.reload(); await p.waitForTimeout(700); ok(await p.locator('.home-body.hide-nums').count(), 'toujours masqué après rechargement');
+    await p.click('#eyeBtn'); await p.waitForTimeout(150); ok(!(await p.locator('.home-body.hide-nums').count()), 're-affichage');
+    await p.evaluate(() => go('portfolio')); await p.waitForTimeout(150); ok(!/blur/.test(await p.evaluate(() => getComputedStyle(document.querySelector('.tbl td')).filter)), 'le masquage ne concerne que l\'accueil');
+  });
+
+  await test('bandeau des prochains versements : compact, défilement automatique en boucle, manuel possible, détail au toucher', async () => {
+    const seed = SEED(14); seed.settings.tickerAuto = true;
+    const p = await device({ guest: true, seed, viewport: { width: 700, height: 800 } }); await p.open(500);
+    const h = await p.evaluate(() => document.querySelector('.tk-chip').getBoundingClientRect().height); ok(h <= 40, 'pastille compacte : ' + h + ' px');
+    const sec = await p.evaluate(() => document.querySelector('.ticker').getBoundingClientRect().height); ok(sec <= 90, 'bandeau peu encombrant : ' + sec + ' px');
+    ok(await p.evaluate(() => document.querySelector('#tickerTrack').dataset.loop === '1' && document.querySelectorAll('#tickerTrack [aria-hidden=true]').length > 0), 'contenu dupliqué pour la boucle (doublons masqués aux lecteurs d\'écran)');
+    const x1 = await p.evaluate(() => document.querySelector('#tickerTrack').scrollLeft); await p.waitForTimeout(1600); const x2 = await p.evaluate(() => document.querySelector('#tickerTrack').scrollLeft);
+    ok(x2 > x1 + 10, 'défile tout seul : ' + x1 + ' → ' + x2);
+    await p.hover('#tickerTrack .tk-chip'); const y1 = await p.evaluate(() => document.querySelector('#tickerTrack').scrollLeft); await p.waitForTimeout(700); const y2 = await p.evaluate(() => document.querySelector('#tickerTrack').scrollLeft); ok(Math.abs(y2 - y1) < 3, 'pause au survol');
+    await p.evaluate(() => { document.querySelector('#tickerTrack').scrollLeft = 5; }); await p.waitForTimeout(100);
+    await p.evaluate(() => { document.querySelector('#tickerTrack').scrollLeft = 0; }); await p.waitForTimeout(150); ok(await p.evaluate(() => document.querySelector('#tickerTrack').scrollLeft) > 100, 'défilement manuel vers la gauche : la boucle reboucle');
+    await p.click('#tickerTrack .tk-chip'); await p.waitForSelector('.modal'); ok((await p.locator('.modal').innerText()).includes('versement'), 'détail du jour');
+  });
+
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open();
     await p.evaluate(() => Vault.setPin('123456', JSON.stringify(state))); const raw = await p.evaluate(() => localStorage.getItem('dividendCalendarApp_v1'));
@@ -485,10 +532,10 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!fsOps.get('users/' + uid).exists && !users.has('erin@test.fr'), 'document et compte supprimés'); ok(await p.locator('#authRoot.on').count(), 'retour à la connexion');
   });
 
-  await test('sans configuration cloud : mode local utilisable, message clair dans les réglages', async () => {
+  await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
     const p = await device({}); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');
-    await p.waitForSelector('#page'); await p.evaluate(() => go('settings')); ok((await p.locator('#page').innerText()).includes('configuration Firebase manquante'), 'explication affichée');
+    await p.waitForSelector('#page'); await p.evaluate(() => go('settings')); const txt = await p.locator('#page').innerText(); ok(!txt.includes('Compte utilisateur') && !txt.includes('Firebase') && txt.includes('Code de verrouillage') && txt.includes('Restaurer une sauvegarde'), 'comptes masqués ; PIN, export et import disponibles'); ok(!(await p.locator('.sync-chip').count()), 'aucun indicateur de synchronisation');
     eq(p.errors, [], 'aucune erreur JS');
   });
 

@@ -62,6 +62,7 @@ const ICONS = {
   download: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>', upload: '<path d="M12 16V5m0 0-4 4m4-4 4 4M5 20h14"/>',
   refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>', columns: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15M15 4.5v15"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>', check: '<path d="M5 12.5 10 17.5 19 7"/>', user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', eyeoff: '<path d="M3 3l18 18M10.6 5.2A9.9 9.9 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4M6.3 6.3A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>', filter: '<path d="M4 6h16M7 12h10M10 18h4"/>'
 };
 function icon(n) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
@@ -300,6 +301,29 @@ document.addEventListener('click', (e) => {
   if (a) { const i = Tbl.inst[a.dataset.colsAll]; if (i) { Tbl.setColumns(i.cfg.id, i.cfg.columns.map((c) => c.key)); if (typeof renderPage === 'function') renderPage(); } }
 });
 
+/* ---------- infobulles : survol (souris) ou toucher (téléphone) ----------
+   Tout élément portant data-tip affiche son texte ; data-tip-hover = souris uniquement. */
+const Tip = { el: null, timer: null };
+function tipEl() {
+  if (!Tip.el) { Tip.el = document.createElement('div'); Tip.el.className = 'tip'; Tip.el.setAttribute('role', 'tooltip'); document.body.appendChild(Tip.el); }
+  return Tip.el;
+}
+function tipShow(t, x, y) {
+  const el = tipEl(); el.textContent = t.getAttribute('data-tip'); el.style.display = 'block';
+  const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth;
+  el.style.left = Math.max(8, Math.min(vw - w - 8, x - w / 2)) + 'px';
+  el.style.top = (y - h - 14 < 8 ? y + 18 : y - h - 14) + 'px';
+}
+function tipHide() { clearTimeout(Tip.timer); if (Tip.el) Tip.el.style.display = 'none'; }
+document.addEventListener('pointerover', (e) => { if (e.pointerType === 'touch') return; const t = e.target.closest && e.target.closest('[data-tip]'); if (t) { Tip.touch = false; tipShow(t, e.clientX, e.clientY); } else tipHide(); });
+document.addEventListener('pointermove', (e) => { if (e.pointerType === 'touch') return; const t = e.target.closest && e.target.closest('[data-tip]'); if (t) { Tip.touch = false; tipShow(t, e.clientX, e.clientY); } else if (Tip.el && Tip.el.style.display === 'block') tipHide(); });
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  const t = e.target.closest && e.target.closest('[data-tip]:not([data-tip-hover])');
+  if (t) { Tip.touch = true; tipShow(t, e.clientX, e.clientY); clearTimeout(Tip.timer); Tip.timer = setTimeout(tipHide, 4500); } else tipHide();
+});
+document.addEventListener('scroll', () => { if (Tip.touch) tipHide(); }, true);
+
 /* ---------- graphiques SVG ---------- */
 function niceMax(v) {
   if (v <= 0) return 1;
@@ -314,7 +338,7 @@ function axisFmt(v, cur) {
 /* Barres empilées. layers : [{ name, color, values[], dashed? }] */
 function stackedBars(o) {
   const W = 640, H = 230, L = 44, R = 8, T = 10, B = 26;
-  const n = o.labels.length;
+  const n = o.labels.length, mask = !!o.mask;
   const totals = o.labels.map((_, i) => o.layers.reduce((s, l) => s + (l.values[i] || 0), 0));
   const max = niceMax(Math.max.apply(null, totals.concat([0.01])));
   const bw = (W - L - R) / n, bar = Math.min(34, bw * 0.62);
@@ -329,26 +353,29 @@ function stackedBars(o) {
       const v = l.values[i] || 0; if (v <= 0) return;
       const h = (H - T - B) * v / max, y = T + (H - T - B) - (H - T - B) * (acc + v) / max; acc += v;
       svg += '<rect x="' + (cx - bar / 2) + '" y="' + y + '" width="' + bar + '" height="' + Math.max(h, 1) + '" rx="3" fill="' + (l.dashed ? 'none' : l.color) + '" ' +
-        (l.dashed ? 'stroke="' + l.color + '" stroke-dasharray="4 3" stroke-width="1.5"' : (l.faded ? 'fill-opacity=".45"' : '')) + '><title>' + esc(lab + ' — ' + l.name + ' : ' + fmtMoney(v, o.cur)) + '</title></rect>';
+        (l.dashed ? 'stroke="' + l.color + '" stroke-dasharray="4 3" stroke-width="1.5"' : (l.faded ? 'fill-opacity=".45"' : '')) + '/>';
     });
     svg += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(lab) + '</text>';
+    // zone de survol / de toucher sur toute la hauteur de la colonne
+    const lines = [lab].concat(mask ? ['Montants masqués'] : o.layers.filter((l) => (l.values[i] || 0) > 0).map((l) => l.name + ' : ' + fmtMoney(l.values[i], o.cur)).concat(o.layers.filter((l) => (l.values[i] || 0) > 0).length > 1 ? ['Total : ' + fmtMoney(totals[i], o.cur)] : (totals[i] > 0 ? [] : ['Aucun versement'])));
+    svg += '<rect class="hit" x="' + (L + bw * i) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B + 18) + '" fill="transparent" data-tip="' + esc(lines.join('\n')) + '"/>';
   });
   svg += '</svg>';
   const legend = '<div class="legend">' + o.layers.filter((l) => l.values.some((v) => v > 0)).map((l) => '<span><i style="background:' + (l.dashed ? 'transparent;border:1.5px dashed ' + l.color : l.color) + (l.faded ? ';opacity:.45' : '') + '"></i>' + esc(l.name) + '</span>').join('') + '</div>';
   return svg + legend;
 }
 
-function donut(items, cur) {
+function donut(items, cur, mask) {
   const total = items.reduce((s, x) => s + x.value, 0);
   if (!total) return '';
   const R = 62, r = 40, C = 80; let a0 = -Math.PI / 2, svg = '<svg class="chart" viewBox="0 0 160 160" style="width:160px;flex:none" role="img" aria-label="Répartition">';
   items.forEach((x, i) => {
     const frac = x.value / total, a1 = a0 + frac * Math.PI * 2, large = frac > 0.5 ? 1 : 0;
     const col = 'var(--chart-' + (i + 1 > 9 ? 9 : i + 1) + ')';
-    if (frac >= 0.9999) svg += '<circle cx="' + C + '" cy="' + C + '" r="' + ((R + r) / 2) + '" fill="none" stroke="' + col + '" stroke-width="' + (R - r) + '"/>';
+    if (frac >= 0.9999) svg += '<circle cx="' + C + '" cy="' + C + '" r="' + ((R + r) / 2) + '" fill="none" stroke="' + col + '" stroke-width="' + (R - r) + '" data-tip="' + esc(mask ? x.ticker + '\nMontants masqués' : x.ticker + '\n' + fmtMoney(x.value, cur) + ' (100 %)') + '"/>';
     else {
       const p = (a, rad) => (C + rad * Math.cos(a)).toFixed(2) + ' ' + (C + rad * Math.sin(a)).toFixed(2);
-      svg += '<path d="M' + p(a0, R) + ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + p(a1, R) + ' L' + p(a1, r) + ' A' + r + ' ' + r + ' 0 ' + large + ' 0 ' + p(a0, r) + ' Z" fill="' + col + '"><title>' + esc(x.ticker + ' — ' + fmtMoney(x.value, cur) + ' (' + fmtPct(frac, 1) + ')') + '</title></path>';
+      svg += '<path d="M' + p(a0, R) + ' A' + R + ' ' + R + ' 0 ' + large + ' 1 ' + p(a1, R) + ' L' + p(a1, r) + ' A' + r + ' ' + r + ' 0 ' + large + ' 0 ' + p(a0, r) + ' Z" fill="' + col + '" data-tip="' + esc(mask ? x.ticker + '\nMontants masqués' : x.ticker + '\n' + fmtMoney(x.value, cur) + ' (' + fmtPct(frac, 1) + ')') + '"></path>';
     }
     a0 = a1;
   });

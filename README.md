@@ -6,7 +6,7 @@ Application web (installable sur téléphone) entièrement dédiée au **suivi d
 
 | Page | Contenu |
 |---|---|
-| **Accueil** | Bandeau défilant des prochains versements (logo, montant par titre, total selon vos quantités, date et type de date, statut), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. Section **Valeur du portefeuille** : valeur de marché, plus / moins-value latente et rendement sur cours. |
+| **Accueil** | Bandeau compact des prochains versements en défilement continu (pastille : logo, ticker, total estimé, date ; détail au survol ou au toucher), œil pour **masquer les chiffres**, infobulles de valeurs sur les graphiques (survol ou toucher), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. Section **Valeur du portefeuille** : valeur de marché, plus / moins-value latente et rendement sur cours. |
 | **Mon portefeuille** | Actifs, quantités, prix de revient (PRU, dans la devise de votre choix), investi, cours, valeur, +/- value, dividende annuel estimé, prochain versement, rendement sur coût et sur cours… Tableau avec **« Colonnes à afficher »**, tri, recherche, filtres (type, verse un dividende / sans dividende / données manquantes), **suppression multiple** (cases, « Tout sélectionner », compteur, « Annuler la sélection », confirmation, annulation possible). |
 | **Calendrier des dividendes** | Vues mois / année / logos, filtres actif et statut, versement attendu → « Enregistrer comme reçu ». |
 | **Historique** | Dividendes reçus (brut, retenue, frais, net, devise, source) et opérations (achats / ventes). Filtres année, mois, actif, statut. Import CSV (Trade Republic…), saisie manuelle, pré-remplissage « à vérifier ». |
@@ -36,7 +36,9 @@ Limites à connaître : Yahoo ne fournit **ni la date de mise en paiement ni la 
 
 **Logos** : sans API ni clé, l'app essaie dans l'ordre le logo déjà enregistré, le service public Parqet (par ISIN puis par symbole), les images publiques FMP, puis les initiales. Rien n'est stocké (URL calculées à l'affichage). Désactivable dans Paramètres : seuls le ticker ou l'ISIN sont alors jamais transmis à ces services.
 
-## Comptes utilisateurs et synchronisation (Firebase)
+## Comptes utilisateurs et synchronisation (Firebase) — désactivés pour le moment
+
+> Le code est conservé mais **désactivé** (`accountsEnabled: false` dans `config.js`) : l'app fonctionne avec les données sur l'appareil, protégées par le **code PIN** (Paramètres → Sécurité), avec export / import d'un fichier de sauvegarde. Pour réactiver les comptes : passer `accountsEnabled` à `true` et renseigner `firebase` (voir ci-dessous).
 
 Connexion / création de compte par e-mail + mot de passe, déconnexion, récupération par e-mail, suppression du compte. Les données de chaque utilisateur sont stockées dans **Firestore** (`users/{uid}`), lisibles et modifiables **uniquement par leur propriétaire** (`firestore.rules`), et synchronisées entre appareils : écriture transactionnelle avec contrôle de version, détection des conflits (fusion sans perte), reprise après coupure, copie locale pour fonctionner hors-ligne. Les données locales existantes sont migrées vers le compte à la première connexion (fusion sans doublon). Deux comptes ne sont jamais mélangés sur un même appareil.
 
@@ -50,7 +52,7 @@ Connexion / création de compte par e-mail + mot de passe, déconnexion, récup�
 6. **Authentication → Paramètres → Domaines autorisés** : ajoutez `adteixeira89.github.io`.
 7. Collez `firebaseConfig` dans [`config.js`](config.js) (clé `firebase`). Ces identifiants sont publics par conception : la sécurité repose sur les règles de l'étape 4.
 
-Tant que `config.js` n'est pas renseigné, l'application fonctionne en **mode local** (données sur l'appareil, comme avant).
+Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctionne en **mode local** (données sur l'appareil).
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 

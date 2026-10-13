@@ -432,6 +432,7 @@ function buildShell() {
   $$('#syncChipSide,#syncChipTop').forEach((c) => c.addEventListener('click', () => go('settings')));
 }
 function renderSyncChip() {
+  if (!Cloud.configured()) { const a0 = $('#syncChipSide'), b0 = $('#syncChipTop'); if (a0) a0.innerHTML = ''; if (b0) b0.innerHTML = ''; return; }   // comptes désactivés : pas d'indicateur de synchronisation
   const s = view.sync, user = Cloud.user();
   const cls = { ok: 'ok', syncing: 'busy', err: 'err', offline: 'off', local: '' }[s.state] || '';
   const label = !user ? (Cloud.configured() ? 'Hors compte' : 'Local') : ({ ok: 'Synchronisé', syncing: 'Synchronisation…', err: 'Erreur de synchro', offline: 'Hors-ligne' }[s.state] || 'Compte');

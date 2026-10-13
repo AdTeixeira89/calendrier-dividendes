@@ -45,36 +45,40 @@ function marketLine() {
    ACCUEIL
    =============================================================== */
 let tickerRaf = null;
+/* Défilement continu en boucle (le contenu est dupliqué) ; la main reprend à tout moment : toucher, molette,
+   survol ou clavier mettent l'animation en pause quelques secondes. Respecte « réduire les animations ». */
 function startTickerScroll(track) {
   cancelAnimationFrame(tickerRaf);
-  if (!track || !state.settings.tickerAuto || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
-  let dir = 1, pausedUntil = 0, hold = 0;
-  const pause = () => { pausedUntil = Date.now() + 5000; };
+  if (!track || !track.children.length) return;
+  const kids = Array.from(track.children);
+  if (track.scrollWidth > track.clientWidth + 10) {
+    kids.forEach((k) => { const c = k.cloneNode(true); c.setAttribute('aria-hidden', 'true'); c.tabIndex = -1; track.appendChild(c); });
+    track.dataset.loop = '1';
+  }
+  if (track.dataset.loop !== '1') return;
+  const loopW = track.children[kids.length].offsetLeft - track.children[0].offsetLeft;
+  track.addEventListener('scroll', () => { if (track.scrollLeft < 1) track.scrollLeft += loopW; else if (track.scrollLeft >= loopW + 1) track.scrollLeft -= loopW; }, { passive: true });
+  if (!state.settings.tickerAuto || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  let pausedUntil = 0, pos = track.scrollLeft;
+  const pause = () => { pausedUntil = Date.now() + 4000; };
   ['pointerdown', 'touchstart', 'wheel', 'mouseenter', 'focusin'].forEach((e) => track.addEventListener(e, pause, { passive: true }));
   const step = () => {
     if (!track.isConnected) return;
-    const max = track.scrollWidth - track.clientWidth;
-    if (max > 4 && Date.now() > pausedUntil) {
-      if (hold > 0) hold--;
-      else {
-        track.scrollLeft += 0.45 * dir;
-        if (track.scrollLeft >= max - 1) { dir = -1; hold = 120; } else if (track.scrollLeft <= 0) { dir = 1; hold = 120; }
-      }
-    }
+    if (Date.now() < pausedUntil) pos = track.scrollLeft;
+    else { pos += 0.55; if (pos >= loopW) pos -= loopW; track.scrollLeft = pos; }
     tickerRaf = requestAnimationFrame(step);
   };
   tickerRaf = requestAnimationFrame(step);
 }
 
-function tickerHtml(next) {
+/* Pastilles d'une ligne : logo, ticker, total estimé, date (≈ = estimé). Détail au survol (souris) ou au toucher. */
+function tickerHtml(next, mask) {
   const mode = incomeMode();
   if (!next.length) return '<div class="card card-pad muted">Aucun versement attendu dans les 4 prochains mois. Vérifiez que vos actifs ont des données de dividende.</div>';
-  return '<div class="ticker-track" id="tickerTrack" role="list" tabindex="0" aria-label="Prochains versements, défilement horizontal">' + next.slice(0, 30).map((e) => {
+  return '<div class="ticker-track" id="tickerTrack" role="list" aria-label="Prochains versements, défilement horizontal">' + next.slice(0, 30).map((e, i) => {
     const a = Engine.amount(e, mode);
-    return '<article class="card tk-card" role="listitem">' +
-      '<div class="tk-top">' + avatar(e.ticker, e.logo, '', e.isin) + '<div style="min-width:0"><div class="nm">' + esc(e.name || e.ticker) + '</div><div class="tkr">' + esc(e.ticker) + '</div></div></div>' +
-      '<div class="tk-mid"><div><div class="tk-total">' + fmtMoney(a.v, e.currency) + '</div><div class="tk-per">' + fmtMoney(e.perShare, e.currency, { d: 3 }) + ' × ' + fmtNum(e.qty) + ' titre(s)' + (a.fallback ? ' · brut' : '') + '</div></div></div>' +
-      '<div class="tk-date"><span><b>' + esc(fmtDate(e.date, { day: 'numeric', month: 'short' })) + '</b> · ' + esc(kindLabel(e.dateKind, e.status)) + '</span>' + statusBadge(e.status, e.verified === false) + '</div></article>';
+    const tip = [e.name || e.ticker, mask ? 'Montants masqués' : fmtNum(e.qty) + ' titre(s) × ' + fmtMoney(e.perShare, e.currency, { d: 3 }) + ' = ' + fmtMoney(a.v, e.currency) + (a.fallback ? ' (brut)' : ''), fmtDate(e.date) + ' · ' + kindLabel(e.dateKind, e.status), STATUS_LABEL[e.status]].join('\n');
+    return '<button type="button" role="listitem" class="tk-chip ' + e.status + '" data-i="' + i + '" data-tip="' + esc(tip) + '" data-tip-hover>' + avatar(e.ticker, e.logo, 'xs', e.isin) + '<b>' + esc(e.ticker) + '</b><span class="tk-amt">' + fmtMoney(a.v, e.currency) + (e.status === 'forecast' ? ' ≈' : '') + '</span><span class="tk-d">' + esc(fmtDate(e.date, { day: 'numeric', month: 'short' })) + '</span></button>';
   }).join('') + '</div>';
 }
 
@@ -89,6 +93,7 @@ function renderHome(host) {
   const mReceived = mEvs.filter((e) => e.status === 'received').length;
   const yoc = Engine.yieldOnCost(state, convert, ids);
   const yo = Engine.yoy(state, today, mode, convert, ids);
+  const mask = !!state.settings.hideNumbers;
   const hs = visibleHoldings();
   const payers = hs.filter((h) => Engine.isPayer(h)).length;
   const missing = hs.filter((h) => Engine.dividendStatus(h) === 'missing');
@@ -119,16 +124,19 @@ function renderHome(host) {
   const dist = Engine.distribution(state, mode, convert, ids, 7);
   const warn = missing.length ? '<div class="notice"><span><b>' + missing.length + ' actif(s) sans données de dividende</b> (' + missing.slice(0, 4).map((h) => esc(h.displayTicker || h.ticker)).join(', ') + (missing.length > 4 ? '…' : '') + '). Ils ne sont pas comptés dans les prévisions.</span><button class="btn sm" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>' : '';
 
-  host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), modeSeg()) +
-    '<section class="ticker"><div class="ticker-head"><h2>Prochains versements</h2><span class="muted" style="font-size:12px">Dates et montants estimés, sauf mention « Confirmé »</span></div>' + tickerHtml(next) + '</section>' +
+  host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>' + modeSeg()) +
+    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><section class="ticker"><div class="ticker-head"><h2>Prochains versements</h2><span class="muted">≈ estimé · survolez ou touchez un versement pour le détail</span></div>' + tickerHtml(next, mask) + '</section>' +
     '<div class="grid kpis section-gap">' + kpis + '</div><h2 class="section-h">Valeur du portefeuille</h2><div class="grid kpis">' + kpisV + '</div>' + missingNote(allMissing.concat(pv.missing)) + (warn ? '<div class="section-gap">' + warn + '</div>' : '') +
     '<div class="grid two section-gap">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + view.home.year + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
-    '<section class="card card-pad"><h3>Répartition du revenu annuel estimé</h3>' + (dist.total ? donut(dist.items, baseCur()) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>';
+    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', mask, layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
+    '<section class="card card-pad"><h3>Répartition du revenu annuel estimé</h3>' + (dist.total ? donut(dist.items, baseCur(), mask) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div></div>';
   wireMode(host); wireDo(host);
   $$('[data-yr]', host).forEach((b) => b.onclick = () => { view.home.year += Number(b.dataset.yr); renderHome(host); });
-  startTickerScroll($('#tickerTrack', host));
+  $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
+  const tr = $('#tickerTrack', host);
+  if (tr) tr.addEventListener('click', (e) => { const c = e.target.closest('.tk-chip'); if (!c) return; const ev = next[Number(c.dataset.i)]; if (ev) openDay(ev.date, next.filter((x) => x.date === ev.date)); });
+  startTickerScroll(tr);
 }
 
 /* ===============================================================
@@ -255,7 +263,7 @@ function renderCalendar(host) {
     for (let i = 0; i < off; i++) cells += '<div class="mday pad"></div>';
     for (let d = 1; d <= dim; d++) {
       const iso = y + '-' + pad2(mo + 1) + '-' + pad2(d), es = byDay[iso] || [];
-      cells += '<button type="button" class="mday ' + (iso === t ? 'today' : '') + '" data-d="' + iso + '"><span class="dn">' + d + '</span><span class="chips">' + es.slice(0, 3).map((e) => '<span class="chip ' + e.status + '" title="' + esc((e.name || e.ticker) + ' — ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo, 'xs', e.isin) + '<span class="ct">' + esc(e.ticker) + '</span></span>').join('') + (es.length > 3 ? '<span class="muted" style="font-size:11px">+' + (es.length - 3) + '</span>' : '') + '</span></button>';
+      cells += '<button type="button" class="mday ' + (iso === t ? 'today' : '') + '" data-d="' + iso + '"><span class="dn">' + d + '</span><span class="chips">' + es.slice(0, 3).map((e) => '<span class="chip ' + e.status + '" data-tip-hover data-tip="' + esc((e.name || e.ticker) + '\n' + fmtMoney(Engine.amount(e, incomeMode()).v, e.currency) + ' · ' + STATUS_LABEL[e.status] + '\n' + kindLabel(e.dateKind, e.status)) + '">' + avatar(e.ticker, e.logo, 'xs', e.isin) + '<span class="ct">' + esc(e.ticker) + '</span></span>').join('') + (es.length > 3 ? '<span class="muted" style="font-size:11px">+' + (es.length - 3) + '</span>' : '') + '</span></button>';
     }
     const sum = Engine.sumEvents(evs, incomeMode(), convert);
     body = '<div class="month-grid">' + cells + '</div>' +
@@ -284,7 +292,7 @@ function renderCalendar(host) {
   } else {
     const evs = calEvents(new Date(y, 0, 1), new Date(y, 11, 31)), byM = Array.from({ length: 12 }, () => []);
     evs.forEach((e) => byM[Number(e.date.slice(5, 7)) - 1].push(e));
-    body = '<div class="logo-grid">' + MOIS.map((nm, m) => '<div class="card logo-month"><h4>' + nm + '</h4>' + (byM[m].length ? '<div class="logo-items">' + byM[m].map((e, i) => '<span class="' + (e.status === 'forecast' ? 'forecast' : '') + '" data-d="' + e.date + '" title="' + esc(e.ticker + ' — ' + fmtDate(e.date) + ' — ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo, '', e.isin) + '</span>').join('') + '</div>' : '<div class="muted">Aucun versement</div>') + '</div>').join('') + '</div>';
+    body = '<div class="logo-grid">' + MOIS.map((nm, m) => '<div class="card logo-month"><h4>' + nm + '</h4>' + (byM[m].length ? '<div class="logo-items">' + byM[m].map((e, i) => '<span class="' + (e.status === 'forecast' ? 'forecast' : '') + '" data-d="' + e.date + '" data-tip-hover data-tip="' + esc((e.name || e.ticker) + '\n' + fmtMoney(Engine.amount(e, incomeMode()).v, e.currency) + '\n' + fmtDate(e.date) + ' · ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo, '', e.isin) + '</span>').join('') + '</div>' : '<div class="muted">Aucun versement</div>') + '</div>').join('') + '</div>';
     host.innerHTML = head + body;
     const byDay = {}; evs.forEach((e) => { (byDay[e.date] = byDay[e.date] || []).push(e); });
     $$('.logo-items [data-d]', host).forEach((b) => b.onclick = () => openDay(b.dataset.d, byDay[b.dataset.d] || []));
