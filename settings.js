@@ -22,6 +22,7 @@ function renderSettings(host) {
     '<label class="chk" style="margin-top:8px"><input type="checkbox" id="sAuto" ' + (s.autoRefresh ? 'checked' : '') + '><span>Actualiser automatiquement (au plus une fois par jour, à l\'ouverture)</span></label>';
   const display = '<div class="row2"><div class="field"><label for="sBase">Devise d\'affichage des totaux</label><select id="sBase">' + CURRENCIES.map((c) => opt(c, c, c === baseCur())).join('') + '</select><span class="hint">Taux de change BCE ' + (fx.date ? '(du ' + esc(fmtDate(fx.date)) + ')' : '(indisponibles pour le moment)') + '.</span></div>' +
     '<div class="field"><label for="sMode">Revenus affichés par défaut</label><select id="sMode">' + opt('gross', 'Bruts (avant retenue)', incomeMode() === 'gross') + opt('net', 'Nets (après retenue, si connue)', incomeMode() === 'net') + '</select></div></div>' +
+    '<label class="chk"><input type="checkbox" id="sLogos" ' + (s.autoLogos !== false ? 'checked' : '') + '><span>Afficher les logos des sociétés (services publics Parqet et FMP Images : seuls le ticker ou l\'ISIN sont transmis, jamais vos quantités)</span></label>' +
     '<label class="chk"><input type="checkbox" id="sTicker" ' + (s.tickerAuto ? 'checked' : '') + '><span>Défilement automatique du bandeau des prochains versements</span></label>' +
     '<div class="btn-row" style="margin-top:10px"><button class="btn" type="button" id="sAcc">Gérer les portefeuilles</button><button class="btn" type="button" id="sCols">Réinitialiser les colonnes des tableaux</button></div>';
   const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Restaurer une sauvegarde</button>' +
@@ -47,6 +48,7 @@ function renderSettings(host) {
   $('#sAuto', host).onchange = (e) => { state.settings.autoRefresh = e.target.checked; saveState(); };
   $('#sBase', host).onchange = (e) => { state.settings.baseCurrency = e.target.value; saveState(); renderPage(); };
   $('#sMode', host).onchange = (e) => { state.settings.incomeMode = e.target.value; saveState(); toast('Préférence enregistrée.'); };
+  $('#sLogos', host).onchange = (e) => { state.settings.autoLogos = e.target.checked; saveState(); renderPage(); };
   $('#sTicker', host).onchange = (e) => { state.settings.tickerAuto = e.target.checked; saveState(); };
   on('sAcc', openAccountsModal);
   on('sCols', () => { state.settings.columns = {}; saveState(); toast('Colonnes réinitialisées.'); });

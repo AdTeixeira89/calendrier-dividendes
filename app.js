@@ -15,7 +15,7 @@ function defaultState() {
     meta: { uid: null, remoteBase: 0, dirty: false, lastMarketUpdate: null },
     holdings: [], payments: [], transactions: [],
     accounts: [{ id: 'main', name: 'Mon portefeuille' }],
-    settings: { relayUrl: '', baseCurrency: 'EUR', incomeMode: 'gross', tickerAuto: true, autoRefresh: true, notify: false, columns: {} },
+    settings: { relayUrl: '', baseCurrency: 'EUR', incomeMode: 'gross', autoLogos: true, tickerAuto: true, autoRefresh: true, notify: false, columns: {} },
     sent: { days: {}, months: {} }
   };
 }

@@ -70,10 +70,31 @@ function icon(n) { return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICON
 const AV_COLORS = ['#177a50', '#3b8fc4', '#7a64c8', '#c9792b', '#a24c7a', '#2f9d9d', '#6b7f3a', '#8a5a44'];
 function initials(t) { return (t || '?').replace(/\..*/, '').slice(0, 2).toUpperCase(); }
 function colorFor(t) { let h = 0; for (const c of (t || '')) h = (h * 31 + c.charCodeAt(0)) % AV_COLORS.length; return AV_COLORS[Math.abs(h)]; }
-function avatar(ticker, logo, cls) {
-  const bg = colorFor(ticker);
-  if (logo) return '<span class="avatar ' + (cls || '') + '" style="background:' + bg + '">' + esc(initials(ticker)) + '<img src="' + esc(logo) + '" alt="" loading="lazy" onerror="this.remove()"></span>';
-  return '<span class="avatar ' + (cls || '') + '" style="background:' + bg + '">' + esc(initials(ticker)) + '</span>';
+/* Logos : sans API ni clé. Ordre d'essai : logo déjà enregistré, puis service public
+   Parqet (par ISIN, puis par symbole), puis images publiques FMP ; en dernier recours,
+   les initiales. Désactivable dans Paramètres (les identifiants de titre sont alors
+   jamais envoyés à ces services). Rien n'est enregistré : les URL sont calculées à l'affichage. */
+function logoCandidates(ticker, logo, isin) {
+  const out = [];
+  if (logo) out.push(logo);
+  if (typeof state !== 'undefined' && state.settings && state.settings.autoLogos === false) return out;
+  const t = String(ticker || '').trim();
+  if (isin && Market.isISIN(isin)) out.push('https://assets.parqet.com/logos/isin/' + encodeURIComponent(String(isin).toUpperCase()) + '?format=png');
+  if (t && !Market.isISIN(t)) {
+    out.push('https://assets.parqet.com/logos/symbol/' + encodeURIComponent(t) + '?format=png');
+    out.push('https://images.financialmodelingprep.com/symbol/' + encodeURIComponent(t.toUpperCase()) + '.png');
+  } else if (t) out.push('https://assets.parqet.com/logos/isin/' + encodeURIComponent(t.toUpperCase()) + '?format=png');
+  return out;
+}
+window.logoNext = function (img) {
+  let l = []; try { l = JSON.parse(img.dataset.alt || '[]'); } catch (e) { /* ignoré */ }
+  const n = l.shift();
+  if (n) { img.dataset.alt = JSON.stringify(l); img.src = n; } else img.remove();   // il reste les initiales
+};
+function avatar(ticker, logo, cls, isin) {
+  const bg = colorFor(ticker), c = logoCandidates(ticker, logo, isin);
+  const img = c.length ? '<img src="' + esc(c[0]) + '" data-alt="' + esc(JSON.stringify(c.slice(1))) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="logoNext(this)">' : '';
+  return '<span class="avatar ' + (cls || '') + '" style="background:' + bg + '">' + esc(initials(ticker)) + img + '</span>';
 }
 
 /* ---------- statuts ---------- */

@@ -109,7 +109,7 @@
       const h = byId[p.holdingId];
       events.push(makeEvent({
         id: p.id, holdingId: p.holdingId, ticker: p.ticker || (h && (h.displayTicker || h.ticker)) || '?', name: p.name || (h && h.name) || '',
-        logo: h ? h.logo : null, currency: p.currency || (h && h.currency) || 'EUR', account: h ? h.account : null
+        logo: h ? h.logo : null, isin: h ? h.isin : null, currency: p.currency || (h && h.currency) || 'EUR', account: h ? h.account : null
       }, {
         date, dateKind: p.payDate ? 'pay' : 'ex', status: 'received', perShare: num(p.perShare), qty: num(p.qty),
         gross: num(p.gross), tax: p.tax == null ? null : Math.abs(num(p.tax)), net: p.net == null ? null : num(p.net),
@@ -119,7 +119,7 @@
 
     holdings.forEach((h) => {
       if (!keep(h.id) || !isPayer(h) && !((h.dividend || {}).confirmed || []).length) return;
-      const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', logo: h.logo, currency: h.currency || 'EUR', account: h.account };
+      const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', logo: h.logo, isin: h.isin, currency: h.currency || 'EUR', account: h.account };
       const rate = taxRate(h);
       for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
         for (let m = 1; m <= 12; m++) {

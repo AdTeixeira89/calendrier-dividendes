@@ -292,6 +292,23 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); eq(await p.evaluate(() => state.holdings.length), 3, 'restauration');
   });
 
+  await test('logos : essai Parqet (ISIN puis symbole) → images FMP → initiales ; logo enregistré prioritaire ; désactivable', async () => {
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide' }), H(1, { ticker: 'ZZZ', displayTicker: 'ZZZ', name: 'Inconnu' }), H(2, { ticker: 'KO', displayTicker: 'KO', name: 'Coca', logo: 'https://logos.test/ko.png' })];
+    const p = await device({ guest: true, seed }); const seen = [];
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+    await p.route(/assets\.parqet\.com/, (r) => { seen.push(r.request().url()); r.fulfill({ status: 404, body: '' }); });
+    await p.route(/images\.financialmodelingprep\.com/, (r) => { seen.push(r.request().url()); r.request().url().includes('AI.PA') ? r.fulfill({ status: 200, contentType: 'image/png', body: PNG }) : r.fulfill({ status: 404, body: '' }); });
+    await p.route(/logos\.test/, (r) => { seen.push(r.request().url()); r.fulfill({ status: 200, contentType: 'image/png', body: PNG }); });
+    await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(1200);
+    const rows = await p.evaluate(() => Array.from(document.querySelectorAll('tbody tr')).map((tr) => [tr.querySelector('.tkr').textContent, tr.querySelector('.avatar img') ? tr.querySelector('.avatar img').getAttribute('src') : null]));
+    const by = Object.fromEntries(rows);
+    ok(by['AI.PA'] && by['AI.PA'].includes('financialmodelingprep'), 'AI.PA : retombe sur les images FMP — ' + by['AI.PA']); eq(by['ZZZ'], null, 'logo introuvable : initiales (aucune image cassée)'); eq(by['KO'], 'https://logos.test/ko.png', 'logo enregistré prioritaire');
+    ok(seen.findIndex((u) => u.includes('/isin/FR0000120073')) >= 0 && seen.findIndex((u) => u.includes('/isin/FR0000120073')) < seen.findIndex((u) => u.includes('/symbol/AI.PA')), 'Parqet interrogé par ISIN en premier');
+    ok(!seen.some((u) => u.includes('/symbol/KO') || u.includes('/KO.png')), 'aucune requête inutile quand un logo existe');
+    await p.evaluate(() => { state.settings.autoLogos = false; saveState(); renderPage(); }); await p.waitForTimeout(300);
+    const after = await p.evaluate(() => Array.from(document.querySelectorAll('tbody tr .avatar img')).map((i) => i.getAttribute('src'))); eq(after, ['https://logos.test/ko.png'], 'désactivé : seuls les logos déjà enregistrés');
+  });
+
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open();
     await p.evaluate(() => Vault.setPin('123456', JSON.stringify(state))); const raw = await p.evaluate(() => localStorage.getItem('dividendCalendarApp_v1'));

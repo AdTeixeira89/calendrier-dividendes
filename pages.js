@@ -72,7 +72,7 @@ function tickerHtml(next) {
   return '<div class="ticker-track" id="tickerTrack" role="list" tabindex="0" aria-label="Prochains versements, défilement horizontal">' + next.slice(0, 30).map((e) => {
     const a = Engine.amount(e, mode);
     return '<article class="card tk-card" role="listitem">' +
-      '<div class="tk-top">' + avatar(e.ticker, e.logo) + '<div style="min-width:0"><div class="nm">' + esc(e.name || e.ticker) + '</div><div class="tkr">' + esc(e.ticker) + '</div></div></div>' +
+      '<div class="tk-top">' + avatar(e.ticker, e.logo, '', e.isin) + '<div style="min-width:0"><div class="nm">' + esc(e.name || e.ticker) + '</div><div class="tkr">' + esc(e.ticker) + '</div></div></div>' +
       '<div class="tk-mid"><div><div class="tk-total">' + fmtMoney(a.v, e.currency) + '</div><div class="tk-per">' + fmtMoney(e.perShare, e.currency, { d: 3 }) + ' × ' + fmtNum(e.qty) + ' titre(s)' + (a.fallback ? ' · brut' : '') + '</div></div></div>' +
       '<div class="tk-date"><span><b>' + esc(fmtDate(e.date, { day: 'numeric', month: 'short' })) + '</b> · ' + esc(kindLabel(e.dateKind, e.status)) + '</span>' + statusBadge(e.status, e.verified === false) + '</div></article>';
   }).join('') + '</div>';
@@ -136,7 +136,7 @@ function portfolioColumns(nextMap) {
   const cur = (h, v, d) => v === null || v === undefined ? '—' : fmtMoney(v, h.currency, d === undefined ? {} : { d });
   return [
     { key: 'asset', label: 'Actif', essential: true, sort: (h) => (h.name || h.displayTicker || h.ticker || '').toLowerCase(),
-      html: (h) => '<button class="asset" type="button" data-open="' + esc(h.id) + '">' + avatar(h.displayTicker || h.ticker, h.logo) + '<span><span class="nm">' + esc(h.name || h.displayTicker || h.ticker) + '</span><span class="tkr">' + esc(h.displayTicker || h.ticker) + '</span></span></button>' },
+      html: (h) => '<button class="asset" type="button" data-open="' + esc(h.id) + '">' + avatar(h.displayTicker || h.ticker, h.logo, '', h.isin) + '<span><span class="nm">' + esc(h.name || h.displayTicker || h.ticker) + '</span><span class="tkr">' + esc(h.displayTicker || h.ticker) + '</span></span></button>' },
     { key: 'account', label: 'Compte', sort: (h) => accountName(h.account), html: (h) => esc(accountName(h.account)) },
     { key: 'type', label: 'Type', sort: (h) => h.type, html: (h) => esc(Engine.TYPES[h.type] || 'Action') },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (h) => h.quantity, html: (h) => fmtNum(h.quantity) },
@@ -206,7 +206,7 @@ function calEvents(from, to) {
 }
 function eventRowHtml(e) {
   const a = Engine.amount(e, incomeMode());
-  return '<div class="list-row">' + avatar(e.ticker, e.logo) + '<div class="grow"><div><b>' + esc(e.name || e.ticker) + '</b> <span class="muted">' + esc(e.ticker) + '</span></div>' +
+  return '<div class="list-row">' + avatar(e.ticker, e.logo, '', e.isin) + '<div class="grow"><div><b>' + esc(e.name || e.ticker) + '</b> <span class="muted">' + esc(e.ticker) + '</span></div>' +
     '<div class="muted" style="font-size:12.5px">' + esc(fmtDate(e.date)) + ' · ' + esc(kindLabel(e.dateKind, e.status)) + ' · ' + fmtNum(e.qty) + ' × ' + fmtMoney(e.perShare, e.currency, { d: 3 }) + '</div></div>' +
     '<div style="text-align:right"><div class="amt pos">' + fmtMoney(a.v, e.currency) + '</div>' + statusBadge(e.status, e.verified === false) + '</div></div>';
 }
@@ -262,7 +262,7 @@ function renderCalendar(host) {
   } else {
     const evs = calEvents(new Date(y, 0, 1), new Date(y, 11, 31)), byM = Array.from({ length: 12 }, () => []);
     evs.forEach((e) => byM[Number(e.date.slice(5, 7)) - 1].push(e));
-    body = '<div class="logo-grid">' + MOIS.map((nm, m) => '<div class="card logo-month"><h4>' + nm + '</h4>' + (byM[m].length ? '<div class="logo-items">' + byM[m].map((e, i) => '<span class="' + (e.status === 'forecast' ? 'forecast' : '') + '" data-d="' + e.date + '" title="' + esc(e.ticker + ' — ' + fmtDate(e.date) + ' — ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo) + '</span>').join('') + '</div>' : '<div class="muted">Aucun versement</div>') + '</div>').join('') + '</div>';
+    body = '<div class="logo-grid">' + MOIS.map((nm, m) => '<div class="card logo-month"><h4>' + nm + '</h4>' + (byM[m].length ? '<div class="logo-items">' + byM[m].map((e, i) => '<span class="' + (e.status === 'forecast' ? 'forecast' : '') + '" data-d="' + e.date + '" title="' + esc(e.ticker + ' — ' + fmtDate(e.date) + ' — ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo, '', e.isin) + '</span>').join('') + '</div>' : '<div class="muted">Aucun versement</div>') + '</div>').join('') + '</div>';
     host.innerHTML = head + body;
     const byDay = {}; evs.forEach((e) => { (byDay[e.date] = byDay[e.date] || []).push(e); });
     $$('.logo-items [data-d]', host).forEach((b) => b.onclick = () => openDay(b.dataset.d, byDay[b.dataset.d] || []));
@@ -297,7 +297,7 @@ function paymentColumns() {
   const c = (p, v) => v === null || v === undefined ? '—' : fmtMoney(v, p.currency);
   return [
     { key: 'date', label: 'Date de paiement', essential: true, sort: (p) => p.payDate || p.exDate || '', html: (p) => p.payDate ? esc(fmtDate(p.payDate)) : '<span class="muted">' + esc(fmtDate(p.exDate)) + ' (détach.)</span>' },
-    { key: 'asset', label: 'Actif', essential: true, sort: (p) => (p.name || p.ticker || '').toLowerCase(), html: (p) => { const h = holdingById(p.holdingId); return '<button class="asset" type="button" data-open="' + esc(p.id) + '">' + avatar(p.ticker, h && h.logo, 'sm') + '<span><span class="nm">' + esc(p.name || p.ticker) + '</span><span class="tkr">' + esc(p.ticker) + '</span></span></button>'; } },
+    { key: 'asset', label: 'Actif', essential: true, sort: (p) => (p.name || p.ticker || '').toLowerCase(), html: (p) => { const h = holdingById(p.holdingId); return '<button class="asset" type="button" data-open="' + esc(p.id) + '">' + avatar(p.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(p.name || p.ticker) + '</span><span class="tkr">' + esc(p.ticker) + '</span></span></button>'; } },
     { key: 'qty', label: 'Quantité', align: 'r', sort: (p) => p.qty, html: (p) => fmtNum(p.qty) },
     { key: 'perShare', label: 'Par titre', align: 'r', sort: (p) => p.perShare, html: (p) => p.perShare ? fmtMoney(p.perShare, p.currency, { d: 4 }) : '—' },
     { key: 'gross', label: 'Brut', essential: true, align: 'r', sort: (p) => p.gross, html: (p) => c(p, p.gross) },
@@ -324,7 +324,7 @@ function txColumns() {
   return [
     { key: 'date', label: 'Date', essential: true, sort: (t) => t.date, html: (t) => esc(fmtDate(t.date)) },
     { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
-    { key: 'asset', label: 'Actif', essential: true, sort: (t) => (t.name || t.ticker || '').toLowerCase(), html: (t) => { const h = holdingById(t.holdingId); return '<span class="asset">' + avatar(t.ticker, h && h.logo, 'sm') + '<span><span class="nm">' + esc(t.name || t.ticker) + '</span><span class="tkr">' + esc(t.ticker) + '</span></span></span>'; } },
+    { key: 'asset', label: 'Actif', essential: true, sort: (t) => (t.name || t.ticker || '').toLowerCase(), html: (t) => { const h = holdingById(t.holdingId); return '<span class="asset">' + avatar(t.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(t.name || t.ticker) + '</span><span class="tkr">' + esc(t.ticker) + '</span></span></span>'; } },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (t) => t.qty, html: (t) => fmtNum(t.qty) },
     { key: 'price', label: 'Prix', align: 'r', sort: (t) => t.price, html: (t) => fmtMoney(t.price, t.currency, { d: 4 }) },
     { key: 'amount', label: 'Montant', essential: true, align: 'r', sort: (t) => t.qty * t.price, html: (t) => fmtMoney(t.qty * t.price, t.currency) },
