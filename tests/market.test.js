@@ -43,3 +43,9 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
  await t('missing relay gives explicit message', async()=>{ const c=M.makeClient({getRelay:()=>''}); await assert.rejects(()=>c.fetchAsset('AAPL'),/relais/i); });
  console.log(n+' tests passed');
 })();
+(async () => {
+  const c = M.makeClient({ getRelay: () => 'https://r.dev', fetch: async () => ({ status: 200, ok: true, json: async () => ({ chart: { result: [{ meta: { currency: 'GBp', longName: 'X', regularMarketPrice: 250, regularMarketTime: 1791800000 }, events: {} }] } }) }) });
+  const a = await c.fetchAsset('XYZ.L'); assert.strictEqual(a.price, 2.5, 'pence → livres'); assert.ok(a.priceAt.startsWith('2026-'));
+  const h = { id: '1', ticker: 'XYZ.L', dividend: {} }; M.applyToHolding(h, a, '2026-10-12'); assert.strictEqual(h.price, 2.5); assert.strictEqual(h.currency, 'GBP');
+  console.log('ok   cours : récupéré, converti (pence) et enregistré');
+})();

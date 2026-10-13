@@ -79,3 +79,21 @@ t('distribution groups the tail into "Autres"', () => {
   const d = E.distribution(st(hs), 'gross', conv, null, 8); assert.strictEqual(d.items.length, 9); assert.strictEqual(d.items[8].ticker, 'Autres');
 });
 console.log(n + ' tests passed');
+// ---- cours, valeur, plus-value ----
+(() => {
+  const t2 = (name, fn) => { try { fn(); console.log('ok  ', name); } catch (e) { console.log('FAIL', name, '\n   ', e.message); process.exitCode = 1; } };
+  const cv = (a, c) => c === 'EUR' ? a : c === 'USD' ? a / 1.2 : null;
+  const mk2 = (o) => Object.assign({ id: 'h', ticker: 'T', type: 'stock', currency: 'EUR', quantity: 10, avgCost: 50, price: 60, dividend: { lastAmount: 1, anchorMonth: 2, frequency: 'quarterly' } }, o);
+  t2('valeur, plus-value et rendement sur cours', () => {
+    const s = { holdings: [mk2({}), mk2({ id: 'b', price: null }), mk2({ id: 'c', avgCost: null, price: 100 })] };
+    assert.strictEqual(E.value(s.holdings[0]), 600);
+    const pv = E.portfolioValue(s, cv, null); assert.strictEqual(pv.total, 1600); assert.strictEqual(pv.count, 2); assert.strictEqual(pv.of, 3);
+    const u = E.unrealized(s, cv, null); assert.strictEqual(u.gain, 100); assert.strictEqual(u.count, 1); assert.ok(Math.abs(u.pct - 0.2) < 1e-9);   // c exclu : pas de PRU
+    const y = E.yieldOnPrice(s, cv, null); assert.ok(Math.abs(y.rate - (40 + 40) / 1600) < 1e-9); assert.strictEqual(y.count, 2);
+  });
+  t2('PRU dans une autre devise que l\'actif (action USD, PRU en EUR)', () => {
+    const h = mk2({ currency: 'USD', costCurrency: 'EUR', price: 120, avgCost: 90, quantity: 10 });   // valeur 1200 USD = 1000 EUR ; coût 900 EUR
+    const u = E.unrealized({ holdings: [h] }, cv, null); assert.ok(Math.abs(u.gain - 100) < 1e-9, 'gain = ' + u.gain);
+    assert.strictEqual(E.investedTotal({ holdings: [h] }, cv, null).cost, 900);
+  });
+})();

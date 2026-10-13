@@ -40,7 +40,8 @@ function openHoldingModal(id) {
     '<div style="position:relative">' + fld('Nom, ticker ou ISIN', '<input type="text" id="hTicker" value="' + esc(d.ticker) + '" placeholder="ex : Air Liquide, AAPL, AI.PA, FR0000120073" autocomplete="off">',
       'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div>' +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
-    fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Dans la devise de l\'actif — sert au rendement sur coût', 'hCost') + '</div>' +
+    fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Ce que vous avez payé par titre — sert au rendement sur coût et à la plus-value', 'hCost') + '</div>' +
+    '<div class="row2">' + fld('Devise du PRU', '<select id="hCostCur">' + (CURRENCIES.indexOf(d.costCurrency || d.currency) < 0 ? [d.costCurrency || d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === (d.costCurrency || d.currency))).join('') + '</select>', 'Souvent l\'euro, même pour une action cotée en dollars', 'hCostCur') + fld('Cours actuel', '<input type="number" id="hPrice" min="0" step="any" inputmode="decimal" value="' + esc(d.price > 0 ? d.price : '') + '" placeholder="automatique">', d.priceAt ? 'Mis à jour automatiquement (cours du ' + esc(fmtDate(d.priceAt.slice(0, 10))) + ')' : 'Mis à jour par « Actualiser » ; saisie manuelle possible', 'hPrice') + '</div>' +
     '<div class="row2">' + fld('Nom', '<input type="text" id="hName" value="' + esc(d.name) + '">', '', 'hName') + fld('Compte', '<select id="hAcc">' + state.accounts.map((a) => opt(a.id, a.name, a.id === d.account)).join('') + '</select>', '', 'hAcc') + '</div>' +
     '<div class="row2">' + fld('Type', '<select id="hType">' + Object.keys(Engine.TYPES).map((k) => opt(k, Engine.TYPES[k], d.type === k)).join('') + '</select>', 'Un ETF capitalisant ne verse aucun dividende.', 'hType') +
     fld('Devise', '<select id="hCur">' + (CURRENCIES.indexOf(d.currency) < 0 ? [d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === d.currency)).join('') + '</select>', '', 'hCur') + '</div>' +
@@ -96,7 +97,8 @@ async function fetchIntoHoldingForm(m) {
     Market.applyToHolding(tmp, a, todayISO());
     $('#hTicker', m).value = a.symbol;
     if (a.name && !$('#hName', m).value) $('#hName', m).value = a.name;
-    if (a.currency) $('#hCur', m).value = a.currency;
+    if (a.currency) { $('#hCur', m).value = a.currency; if (!$('#hCost', m).value) $('#hCostCur', m).value = a.currency; }
+    if (a.price > 0) { $('#hPrice', m).value = a.price; hDraft.priceAt = a.priceAt; }
     if ($('#hType', m).value !== tmp.type && !hDraft.typeLocked) $('#hType', m).value = tmp.type;
     const d = tmp.dividend;
     $('#hPays', m).value = d.none ? '0' : '1';
@@ -113,7 +115,8 @@ function saveHoldingForm(m, ex) {
   if (q === null || q < 0) { toast('Quantité invalide.', { error: true }); return; }
   const prevType = ex ? ex.type : null;
   d.ticker = t; d.displayTicker = t.toUpperCase(); d.quantity = q; d.avgCost = numOrNull($('#hCost', m).value);
-  d.name = $('#hName', m).value.trim(); d.account = $('#hAcc', m).value; d.currency = $('#hCur', m).value;
+  d.price = numOrNull($('#hPrice', m).value); if (!(d.price > 0)) { d.price = null; d.priceAt = null; } else if (!ex || ex.price !== d.price) d.priceAt = todayISO();
+  d.name = $('#hName', m).value.trim(); d.account = $('#hAcc', m).value; d.currency = $('#hCur', m).value; const cc = $('#hCostCur', m).value; d.costCurrency = cc === d.currency ? null : cc;
   d.type = $('#hType', m).value; if (prevType !== null && prevType !== d.type) d.typeLocked = true; if (prevType === null && d.type !== 'stock') d.typeLocked = d.typeLocked || false;
   if (Market.isISIN(t)) d.isin = t.toUpperCase();
   const dv = d.dividend = d.dividend || {};

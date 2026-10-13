@@ -108,13 +108,20 @@ function renderHome(host) {
     kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
   ].join('');
 
+  const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), yp = Engine.yieldOnPrice(state, convert, ids);
+  const priced = pv.count ? '' : ' — actualisez les données pour obtenir les cours';
+  const kpisV = [
+    kpi('Valeur du portefeuille', pv.count ? money(pv.total, 0) : '—', pv.count ? (pv.latest ? 'Cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) + ' · ' : '') + pv.count + ' / ' + pv.of + ' actif(s) valorisé(s)' : 'Aucun cours disponible' + priced),
+    kpi('Plus / moins-value latente', un.count ? (un.gain >= 0 ? '+' : '') + money(un.gain, 0) : '—', un.count ? fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis (' + un.count + ' actif(s) avec PRU et cours)' : 'Nécessite le prix de revient et le cours', un.count ? (un.gain >= 0 ? 'income' : 'neg') : ''),
+    kpi('Rendement sur cours', yp.rate === null ? '—' : fmtPct(yp.rate, 2), yp.rate === null ? 'Nécessite des cours et des dividendes' : 'Dividendes annuels estimés ÷ valeur actuelle (' + yp.count + ' actif(s))')
+  ].join('');
   const series = Engine.monthlySeries(state, view.home.year, mode, convert, today, ids);
   const dist = Engine.distribution(state, mode, convert, ids, 7);
   const warn = missing.length ? '<div class="notice"><span><b>' + missing.length + ' actif(s) sans données de dividende</b> (' + missing.slice(0, 4).map((h) => esc(h.displayTicker || h.ticker)).join(', ') + (missing.length > 4 ? '…' : '') + '). Ils ne sont pas comptés dans les prévisions.</span><button class="btn sm" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>' : '';
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), modeSeg()) +
     '<section class="ticker"><div class="ticker-head"><h2>Prochains versements</h2><span class="muted" style="font-size:12px">Dates et montants estimés, sauf mention « Confirmé »</span></div>' + tickerHtml(next) + '</section>' +
-    '<div class="grid kpis section-gap">' + kpis + '</div>' + missingNote(allMissing) + (warn ? '<div class="section-gap">' + warn + '</div>' : '') +
+    '<div class="grid kpis section-gap">' + kpis + '</div><h2 class="section-h">Valeur du portefeuille</h2><div class="grid kpis">' + kpisV + '</div>' + missingNote(allMissing.concat(pv.missing)) + (warn ? '<div class="section-gap">' + warn + '</div>' : '') +
     '<div class="grid two section-gap">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + view.home.year + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
     stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
@@ -132,6 +139,15 @@ function nextByHolding() {
   Engine.nextEvents(state, today, 400, null).forEach((e) => { if (!m[e.holdingId]) m[e.holdingId] = e; });
   return m;
 }
+/* +/- value d'une ligne (devise de base) ; null si le cours ou le prix de revient manque. */
+function gainOf(h) {
+  const v = Engine.value(h), i = Engine.invested(h); if (v === null || i === null) return null;
+  const cv = convert(v, h.currency), ci = convert(i, Engine.costCur(h)); return cv === null || ci === null ? null : cv - ci;
+}
+function gainPct(h) {
+  const v = Engine.value(h), i = Engine.invested(h); if (v === null || i === null) return null;
+  const cv = convert(v, h.currency), ci = convert(i, Engine.costCur(h)); return cv === null || !ci ? null : (cv - ci) / ci;
+}
 function portfolioColumns(nextMap) {
   const cur = (h, v, d) => v === null || v === undefined ? '—' : fmtMoney(v, h.currency, d === undefined ? {} : { d });
   return [
@@ -140,8 +156,13 @@ function portfolioColumns(nextMap) {
     { key: 'account', label: 'Compte', sort: (h) => accountName(h.account), html: (h) => esc(accountName(h.account)) },
     { key: 'type', label: 'Type', sort: (h) => h.type, html: (h) => esc(Engine.TYPES[h.type] || 'Action') },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (h) => h.quantity, html: (h) => fmtNum(h.quantity) },
-    { key: 'cost', label: 'Prix de revient', align: 'r', sort: (h) => h.avgCost, html: (h) => cur(h, h.avgCost) },
-    { key: 'invested', label: 'Investi', essential: true, align: 'r', sort: (h) => Engine.invested(h), html: (h) => cur(h, Engine.invested(h)) },
+    { key: 'cost', label: 'Prix de revient', align: 'r', sort: (h) => h.avgCost, html: (h) => h.avgCost == null ? '—' : fmtMoney(h.avgCost, Engine.costCur(h)) },
+    { key: 'invested', label: 'Investi', essential: true, align: 'r', sort: (h) => Engine.invested(h), html: (h) => Engine.invested(h) == null ? '—' : fmtMoney(Engine.invested(h), Engine.costCur(h)) },
+    { key: 'price', label: 'Cours', align: 'r', sort: (h) => h.price, html: (h) => h.price > 0 ? '<span title="' + esc(h.priceAt ? 'Cours du ' + fmtDate(h.priceAt.slice(0, 10)) : '') + '">' + fmtMoney(h.price, h.currency) + '</span>' : '—' },
+    { key: 'value', label: 'Valeur', essential: true, align: 'r', sort: (h) => { const v = Engine.value(h); return v === null ? null : convert(v, h.currency); }, html: (h) => cur(h, Engine.value(h)) },
+    { key: 'gain', label: '+/- value', align: 'r', sort: (h) => gainOf(h), html: (h) => { const g = gainOf(h); return g === null ? '—' : '<span class="' + (g >= 0 ? 'pos' : 'neg') + '">' + (g >= 0 ? '+' : '') + fmtMoney(g, baseCur()) + '</span>'; } },
+    { key: 'gainpct', label: '+/- value (%)', essential: true, align: 'r', sort: (h) => gainPct(h), html: (h) => { const g = gainPct(h); return g === null ? '—' : '<span class="' + (g >= 0 ? 'pos' : 'neg') + '">' + fmtPct(g, 1, true) + '</span>'; } },
+    { key: 'yprice', label: 'Rendement / cours', align: 'r', sort: (h) => { const v = Engine.value(h); return v && Engine.isPayer(h) ? Engine.annualPerShare(h) * h.quantity / v : null; }, html: (h) => { const v = Engine.value(h); return v && Engine.isPayer(h) ? fmtPct(Engine.annualPerShare(h) * h.quantity / v, 2) : '—'; } },
     { key: 'currency', label: 'Devise', sort: (h) => h.currency, html: (h) => esc(h.currency) },
     { key: 'perShare', label: 'Dividende / titre', align: 'r', sort: (h) => (h.dividend || {}).lastAmount, html: (h) => cur(h, (h.dividend || {}).lastAmount, 3) },
     { key: 'freq', label: 'Fréquence', sort: (h) => (h.dividend || {}).frequency, html: (h) => Engine.isPayer(h) ? esc(freqLabel(h.dividend.frequency)) : '—' },
@@ -179,7 +200,8 @@ function renderPortfolio(host) {
     footer: (rows) => {
       const inv = Engine.investedTotal({ holdings: rows }, convert, null);
       const run = Engine.runRate({ holdings: rows }, 'gross', convert, null);
-      return { asset: rows.length + ' actif(s)', invested: money(inv.cost, 0), annual: money(run.total, 0) };
+      const pv = Engine.portfolioValue({ holdings: rows }, convert, null), un = Engine.unrealized({ holdings: rows }, convert, null);
+      return { asset: rows.length + ' actif(s)', invested: money(inv.cost, 0), value: money(pv.total, 0), gain: un.count ? '<span class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + (un.gain >= 0 ? '+' : '') + money(un.gain, 0) + '</span>' : '—', gainpct: un.pct === null ? '—' : fmtPct(un.pct, 1, true), annual: money(run.total, 0) };
     } };
   cfg.rows = filteredHoldings();
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),

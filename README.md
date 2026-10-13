@@ -6,12 +6,16 @@ Application web (installable sur téléphone) entièrement dédiée au **suivi d
 
 | Page | Contenu |
 |---|---|
-| **Accueil** | Bandeau défilant des prochains versements (logo, montant par titre, total selon vos quantités, date et type de date, statut), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. |
-| **Mon portefeuille** | Actifs, quantités, prix de revient, investi, dividende annuel estimé, prochain versement, rendement sur coût… Tableau avec **« Colonnes à afficher »**, tri, recherche, filtres (type, verse un dividende / sans dividende / données manquantes), **suppression multiple** (cases, « Tout sélectionner », compteur, « Annuler la sélection », confirmation, annulation possible). |
+| **Accueil** | Bandeau défilant des prochains versements (logo, montant par titre, total selon vos quantités, date et type de date, statut), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. Section **Valeur du portefeuille** : valeur de marché, plus / moins-value latente et rendement sur cours. |
+| **Mon portefeuille** | Actifs, quantités, prix de revient (PRU, dans la devise de votre choix), investi, cours, valeur, +/- value, dividende annuel estimé, prochain versement, rendement sur coût et sur cours… Tableau avec **« Colonnes à afficher »**, tri, recherche, filtres (type, verse un dividende / sans dividende / données manquantes), **suppression multiple** (cases, « Tout sélectionner », compteur, « Annuler la sélection », confirmation, annulation possible). |
 | **Calendrier des dividendes** | Vues mois / année / logos, filtres actif et statut, versement attendu → « Enregistrer comme reçu ». |
 | **Historique** | Dividendes reçus (brut, retenue, frais, net, devise, source) et opérations (achats / ventes). Filtres année, mois, actif, statut. Import CSV (Trade Republic…), saisie manuelle, pré-remplissage « à vérifier ». |
 | **Statistiques** | Revenus mensuels, répartition, prévision des 12 mois, dividendes reçus par année, par compte / devise / zone / type, principaux contributeurs, ETF capitalisants. |
 | **Paramètres** | Compte et synchronisation, devise d'affichage, brut/net par défaut, portefeuilles, données de marché, sauvegarde, code de verrouillage de l'appareil, rappels. |
+
+## Apparence
+
+Mode automatique / clair / sombre et **thèmes de fond** (Aurore, Émeraude, Saphir, Or, Sobre) avec surfaces vitrées et reflets, dans Paramètres → Apparence. Le choix est enregistré avec vos paramètres (donc synchronisé avec le compte) et appliqué dès le chargement.
 
 ## Fiabilité des données
 
@@ -26,9 +30,11 @@ Règles : un versement reçu **remplace** la prévision du même actif dans le m
 
 ## Données de marché (Yahoo Finance via un relais gratuit)
 
-L'ancienne API Financial Modeling Prep a été **supprimée**. Les historiques de dividendes (date de détachement + montant par titre), noms, devises et la conversion ISIN → ticker viennent de Yahoo Finance, interrogé par un petit relais Cloudflare Workers ([`relay/`](relay/LISEZMOI.md)) dont l'adresse est dans `config.js` / Paramètres.
+L'ancienne API Financial Modeling Prep a été **supprimée**. Les historiques de dividendes (date de détachement + montant par titre), le **dernier cours** (valeur, plus-value), noms, devises et la conversion ISIN → ticker viennent de Yahoo Finance, interrogé par un petit relais Cloudflare Workers ([`relay/`](relay/LISEZMOI.md)) dont l'adresse est dans `config.js` / Paramètres.
 
-Limites à connaître : Yahoo ne fournit **ni la date de mise en paiement ni la retenue fiscale** ; elles se saisissent à la main ou viennent de l'import de transactions. **Logos** : sans API ni clé, l'app essaie dans l'ordre le logo déjà enregistré, le service public Parqet (par ISIN puis par symbole), les images publiques FMP, puis les initiales. Rien n'est stocké (URL calculées à l'affichage). Désactivable dans Paramètres : seuls le ticker ou l'ISIN sont alors jamais transmis à ces services.
+Limites à connaître : Yahoo ne fournit **ni la date de mise en paiement ni la retenue fiscale** ; elles se saisissent à la main ou viennent de l'import de transactions. **Cours et PRU** : le cours vient de la même requête Yahoo que les dividendes (aucun coût supplémentaire, rafraîchi avec « Actualiser » ou chaque jour à l'ouverture). Le PRU est saisi par vous (ou calculé depuis vos transactions) et peut être dans une autre devise que l'actif ; la plus-value n'est calculée que pour les actifs ayant à la fois un cours et un PRU.
+
+**Logos** : sans API ni clé, l'app essaie dans l'ordre le logo déjà enregistré, le service public Parqet (par ISIN puis par symbole), les images publiques FMP, puis les initiales. Rien n'est stocké (URL calculées à l'affichage). Désactivable dans Paramètres : seuls le ticker ou l'ISIN sont alors jamais transmis à ces services.
 
 ## Comptes utilisateurs et synchronisation (Firebase)
 

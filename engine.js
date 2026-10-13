@@ -51,6 +51,10 @@
     return (r === null || r === undefined || r === '' || !isFinite(Number(r))) ? null : Number(r);
   }
   function invested(h) { return h.avgCost > 0 && h.quantity > 0 ? h.quantity * h.avgCost : null; }
+  /* Devise du prix de revient (peut différer de celle de l'actif : ex. action en USD achetée via un compte en EUR). */
+  function costCur(h) { return h.costCurrency || h.currency || 'EUR'; }
+  /* Valeur de marché de la position : quantité × dernier cours (devise de l'actif). */
+  function value(h) { return h.price > 0 && h.quantity > 0 ? h.quantity * h.price : null; }
 
   /* Quantité détenue à une date : on utilise les opérations seulement si elles
      reconstituent exactement la quantité actuelle (sinon l'historique est
@@ -203,7 +207,7 @@
       const inv = invested(h);
       if (inv === null) return;
       const ci = convert(annualPerShare(h) * num(h.quantity), h.currency || 'EUR');
-      const cc = convert(inv, h.currency || 'EUR');
+      const cc = convert(inv, costCur(h));
       if (ci === null || cc === null) return;
       income += ci; cost += cc; withCost++;
     });
@@ -215,11 +219,50 @@
     (state.holdings || []).forEach((h) => {
       if (filterIds && !filterIds.has(h.id)) return;
       const inv = invested(h); if (inv === null) return;
-      const c = convert(inv, h.currency || 'EUR');
-      if (c === null) { missing.add(h.currency); return; }
+      const c = convert(inv, costCur(h));
+      if (c === null) { missing.add(costCur(h)); return; }
       cost += c; n++;
     });
     return { cost, count: n, missing: Array.from(missing) };
+  }
+
+  /* Valeur de marché du portefeuille (actifs ayant un cours). */
+  function portfolioValue(state, convert, filterIds) {
+    let total = 0, n = 0, all = 0; const missing = new Set(); let latest = null;
+    (state.holdings || []).forEach((h) => {
+      if (filterIds && !filterIds.has(h.id)) return;
+      all++;
+      const v = value(h); if (v === null) return;
+      const c = convert(v, h.currency || 'EUR');
+      if (c === null) { missing.add(h.currency); return; }
+      total += c; n++;
+      if (h.priceAt && (!latest || h.priceAt > latest)) latest = h.priceAt;
+    });
+    return { total, count: n, of: all, missing: Array.from(missing), latest };
+  }
+
+  /* Plus ou moins-value latente : uniquement sur les actifs ayant à la fois un cours ET un prix de revient. */
+  function unrealized(state, convert, filterIds) {
+    let gain = 0, cost = 0, n = 0;
+    (state.holdings || []).forEach((h) => {
+      if (filterIds && !filterIds.has(h.id)) return;
+      const v = value(h), inv = invested(h); if (v === null || inv === null) return;
+      const cv = convert(v, h.currency || 'EUR'), ci = convert(inv, costCur(h)); if (cv === null || ci === null) return;
+      gain += cv - ci; cost += ci; n++;
+    });
+    return { gain, cost, pct: cost > 0 ? gain / cost : null, count: n };
+  }
+
+  /* Rendement sur cours : dividendes annuels estimés ÷ valeur actuelle, sur les actifs payeurs ayant un cours. */
+  function yieldOnPrice(state, convert, filterIds) {
+    let income = 0, val = 0, n = 0;
+    (state.holdings || []).forEach((h) => {
+      if (filterIds && !filterIds.has(h.id) || !isPayer(h)) return;
+      const v = value(h); if (v === null) return;
+      const ci = convert(annualPerShare(h) * num(h.quantity), h.currency || 'EUR'), cv = convert(v, h.currency || 'EUR'); if (ci === null || cv === null) return;
+      income += ci; val += cv; n++;
+    });
+    return { rate: val > 0 ? income / val : null, count: n };
   }
 
   function receivedBetween(state, fromISO, toISOd, mode, convert, filterIds) {
@@ -332,7 +375,7 @@
   }
 
   root.Engine = {
-    TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, quantityAt, positionFromTransactions,
+    TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
   };

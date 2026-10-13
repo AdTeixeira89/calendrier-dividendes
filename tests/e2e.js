@@ -50,15 +50,15 @@ const MOCK = `(() => {
 /* ---------- faux relais Yahoo ---------- */
 const ts = (d) => Math.floor(Date.parse(d) / 1000);
 const YAHOO = {
-  'AI.PA': { name: "L'Air Liquide S.A.", cur: 'EUR', type: 'EQUITY', divs: [['2024-05-14', 2.9], ['2025-05-12', 3.2], ['2026-05-11', 3.4]] },
-  'AAPL': { name: 'Apple Inc.', cur: 'USD', type: 'EQUITY', divs: [['2025-11-10', .25], ['2026-02-09', .25], ['2026-05-11', .26], ['2026-08-10', .26]] },
+  'AI.PA': { name: "L'Air Liquide S.A.", cur: 'EUR', type: 'EQUITY', price: 175, divs: [['2024-05-14', 2.9], ['2025-05-12', 3.2], ['2026-05-11', 3.4]] },
+  'AAPL': { name: 'Apple Inc.', cur: 'USD', type: 'EQUITY', price: 190, divs: [['2025-11-10', .25], ['2026-02-09', .25], ['2026-05-11', .26], ['2026-08-10', .26]] },
   'IWDA.AS': { name: 'iShares Core MSCI World', cur: 'EUR', type: 'ETF', divs: [] }
 };
 const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS' };
 async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X' }] : [] }); }
-  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type }, events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
+  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
   return route.fulfill({ status: 404 });
 }
 
@@ -109,7 +109,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('[data-do=add]'); await p.fill('#hTicker', 'AAPL'); await p.fill('#hQty', '5'); await p.fill('#hCost', '100');
     await p.selectOption('#hFreq', 'quarterly'); await p.fill('#hDiv', '0.25'); await p.selectOption('#hMonth', '2'); await p.click('#hSave'); await p.waitForTimeout(200);
     const s = await storeOf(p); eq(s.holdings.length, 1, 'un actif'); eq(s.holdings[0].avgCost, 100, 'PRU'); eq(s.holdings[0].dividend.lastAmount, 0.25, 'dividende');
-    await p.evaluate(() => go('home')); const txt = await p.locator('.kpis').innerText();
+    await p.evaluate(() => go('home')); const txt = await p.locator('.kpis.section-gap').innerText();
     ok(/5,00\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5,00 € — obtenu : ' + txt.slice(0, 120));
     ok(/1,00\s?%/.test(txt), 'rendement sur coût = 5/500 = 1,00 % — obtenu : ' + txt);
     eq(p.errors, [], 'aucune erreur JS');
@@ -167,7 +167,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(ev, [['h0', 'received']], 'un seul versement (reçu), pas de prévision en double, pas d\'ETF capitalisant');
     const rr = await p.evaluate(() => [Engine.runRate(state, 'gross', convert, null).total, Engine.runRate(state, 'net', convert, null).total]);
     eq(rr, [20, 14], 'annuel brut 20, net 14 (30 %), ETF capitalisant exclu');
-    await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/14,00\s?€/.test(await p.locator('.kpis').innerText()), 'KPI en net');
+    await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/14,00\s?€/.test(await p.locator('.kpis.section-gap').innerText()), 'KPI en net');
   });
 
   await test('migration v1 → v2 : aucune donnée perdue, clé FMP et résultats supprimés', async () => {
@@ -307,6 +307,37 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!seen.some((u) => u.includes('/symbol/KO') || u.includes('/KO.png')), 'aucune requête inutile quand un logo existe');
     await p.evaluate(() => { state.settings.autoLogos = false; saveState(); renderPage(); }); await p.waitForTimeout(300);
     const after = await p.evaluate(() => Array.from(document.querySelectorAll('tbody tr .avatar img')).map((i) => i.getAttribute('src'))); eq(after, ['https://logos.test/ko.png'], 'désactivé : seuls les logos déjà enregistrés');
+  });
+
+  await test('cours : actualisation → valeur, plus-value, rendement sur cours ; PRU en EUR pour une action en USD ; PRU modifiable', async () => {
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', costCurrency: 'EUR', quantity: 10, avgCost: 100, dividend: { lastAmount: 0.26, anchorMonth: 8, frequency: 'quarterly', dateKind: 'ex' } })];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200);
+    ok(!/1\s?900/.test(await p.locator('tbody').innerText()), 'pas de cours avant actualisation');
+    await p.click('[data-do=refresh]'); await p.waitForFunction(() => state.holdings[0].price > 0, null, { timeout: 6000 }); await p.waitForTimeout(500);
+    let s = await storeOf(p); eq([s.holdings[0].price, s.holdings[0].priceAt.slice(0, 10)], [190, '2026-10-12'], 'cours et date enregistrés');
+    const g = await p.evaluate(() => [Engine.value(state.holdings[0]), Math.round(Engine.unrealized(state, convert, null).gain * 100) / 100, Math.round(Engine.unrealized(state, convert, null).pct * 1000) / 1000]);
+    eq(g, [1900, 583.33, 0.583], 'valeur 1900 $ = 1583,33 €, coût 1000 € → +583,33 € (+58,3 %)');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(250); const home = await p.locator('main').innerText();
+    ok(/1\s?583\s?€/.test(home) && /\+58,3\s?%/.test(home) && /Rendement sur cours/.test(home), 'accueil : valeur, plus-value, rendement sur cours — ' + home.slice(home.indexOf('Valeur du'), home.indexOf('Valeur du') + 200).replace(/\n/g, ' '));
+    // modification du PRU : investi, rendement sur coût et plus-value suivent
+    await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200); await p.click('.asset'); await p.fill('#hCost', '150'); await p.click('#hSave'); await p.waitForTimeout(300);
+    const after = await p.evaluate(() => [Engine.invested(state.holdings[0]), Math.round(Engine.yieldOnCost(state, convert, null).rate * 10000) / 10000]); eq(after, [1500, Math.round((10 * 0.26 * 4 / 1.2) / 1500 * 10000) / 10000], 'investi 1500 € ; rendement sur coût recalculé');
+    ok(/1\s?500/.test(await p.locator('tbody').innerText()), 'colonne Investi mise à jour');
+    eq(await p.evaluate(() => state.holdings[0].price), 190, 'le PRU ne modifie pas le cours');
+  });
+
+  await test('apparence : mode clair/sombre/auto et thèmes de fond appliqués, mémorisés, sans clignotement au rechargement', async () => {
+    const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('settings')); await p.waitForTimeout(200);
+    eq(await p.evaluate(() => document.documentElement.getAttribute('data-bg')), 'aurore', 'thème par défaut : Aurore');
+    await p.selectOption('#sTheme', 'dark'); eq(await p.evaluate(() => document.documentElement.getAttribute('data-theme')), 'dark', 'mode sombre');
+    await p.click('#sBg [data-bg=saphir]'); eq(await p.evaluate(() => document.documentElement.getAttribute('data-bg')), 'saphir', 'fond Saphir');
+    const bg = await p.evaluate(() => getComputedStyle(document.body).getPropertyValue('--bg') || getComputedStyle(document.documentElement).getPropertyValue('--bg')); ok(bg.trim().toLowerCase() === '#0c1117', 'variables sombres appliquées : ' + bg);
+    await p.waitForTimeout(300); const s = await storeOf(p); eq([s.settings.theme, s.settings.bg], ['dark', 'saphir'], 'enregistré dans les paramètres (donc synchronisé avec le compte)');
+    await p.goto(BASE + '/index.html', { waitUntil: 'commit' }); await p.waitForFunction(() => document.documentElement.hasAttribute('data-bg'), null, { timeout: 3000 });
+    eq(await p.evaluate(() => [document.documentElement.getAttribute('data-theme'), document.documentElement.getAttribute('data-bg')]), ['dark', 'saphir'], 'appliqué dès le chargement (script d\'amorçage)');
+    await p.waitForTimeout(700); await p.evaluate(() => go('settings')); await p.click('#sBg [data-bg=aucun]'); await p.selectOption('#sTheme', 'auto');
+    eq(await p.evaluate(() => [document.documentElement.getAttribute('data-theme'), getComputedStyle(document.body, '::before').display]), [null, 'none'], 'auto + fond sobre : aucun décor');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {

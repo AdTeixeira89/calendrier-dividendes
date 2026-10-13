@@ -96,6 +96,8 @@
         symbol, resolved: symbol.toUpperCase() !== String(input).trim().toUpperCase(),
         name: meta.longName || meta.shortName || null, currency,
         instrumentType: meta.instrumentType || null,        // EQUITY | ETF | …
+        price: meta.regularMarketPrice > 0 ? (pence ? meta.regularMarketPrice / 100 : meta.regularMarketPrice) : null,
+        priceAt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
         dividends: divs
       };
     }
@@ -112,6 +114,7 @@
     if (a.resolved) { h.ticker = a.symbol; h.displayTicker = a.symbol.toUpperCase(); }
     if (a.name && !h.name) h.name = a.name;
     if (a.currency) h.currency = a.currency;
+    if (a.price > 0) { h.price = a.price; h.priceAt = a.priceAt || nowISO; }
     const recent = a.dividends.slice(-12);
     d.history = recent.map((x) => ({ exDate: x.exDate, payDate: null, amount: x.amount }));
     d.updatedAt = nowISO;

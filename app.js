@@ -15,7 +15,7 @@ function defaultState() {
     meta: { uid: null, remoteBase: 0, dirty: false, lastMarketUpdate: null },
     holdings: [], payments: [], transactions: [],
     accounts: [{ id: 'main', name: 'Mon portefeuille' }],
-    settings: { relayUrl: '', baseCurrency: 'EUR', incomeMode: 'gross', autoLogos: true, tickerAuto: true, autoRefresh: true, notify: false, columns: {} },
+    settings: { relayUrl: '', baseCurrency: 'EUR', incomeMode: 'gross', theme: 'auto', bg: 'aurore', autoLogos: true, tickerAuto: true, autoRefresh: true, notify: false, columns: {} },
     sent: { days: {}, months: {} }
   };
 }
@@ -439,7 +439,15 @@ function renderSyncChip() {
   const a = $('#syncChipSide'), b = $('#syncChipTop'); if (a) a.innerHTML = html; if (b) b.innerHTML = html;
   const w = $('#whoSide'); if (w) w.textContent = user ? user.email : '';
 }
+/* Apparence : mode clair / sombre / auto et thème de fond (copie locale pour éviter tout flash au démarrage). */
+function applyAppearance() {
+  const h = document.documentElement, t = state.settings.theme || 'auto', b = state.settings.bg || 'aurore';
+  if (t === 'auto') h.removeAttribute('data-theme'); else h.setAttribute('data-theme', t);
+  h.setAttribute('data-bg', b);
+  try { localStorage.setItem('dca_look', JSON.stringify({ theme: t, bg: b })); } catch (e) { /* ignoré */ }
+}
 function renderShell() {
+  applyAppearance();
   $$('[data-go]').forEach((b) => b.classList.toggle('active', b.dataset.go === view.page));
   const sel = $('#acctSel');
   if (sel) { sel.innerHTML = '<option value="all">Tous les portefeuilles</option>' + state.accounts.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join(''); sel.value = view.account; sel.classList.toggle('hide', state.accounts.length < 2 && view.page === 'settings'); }
