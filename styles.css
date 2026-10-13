@@ -271,7 +271,8 @@ table.tbl{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
 .lock-card .btn{width:100%;min-height:48px}
 .lock-forgot{background:none;border:none;color:var(--muted);font-size:13px;text-decoration:underline;padding:8px}
 
-.cal-head select{flex:1 1 150px;max-width:none}
+.cal-head select{flex:0 1 auto;width:auto;max-width:220px}
+@media (max-width:640px){ .cal-head select{flex:1 1 140px;max-width:none} }
 @media (max-width:640px){ .ticker-head .muted{display:none} .page-head .btn-row{width:100%} }
 
 /* mobile : la barre du haut ne doit jamais déborder */
@@ -281,3 +282,18 @@ table.tbl{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
 .sync-chip{white-space:nowrap}
 @media (max-width:520px){ .topbar{padding-left:12px;padding-right:12px} .brand-m .t{display:none} #acctSel{flex:1 1 auto;max-width:none} .sync-chip{padding:4px 8px;font-size:11.5px} }
 html,body{max-width:100%;overflow-x:hidden}
+
+/* logos dans les calendriers */
+.avatar.xs{width:16px;height:16px;font-size:6.5px;border-radius:4px;flex:none}
+.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%}
+.chip .ct{overflow:hidden;text-overflow:ellipsis}
+.chip.forecast .avatar{opacity:.55}
+.mini-grid .d{display:flex;flex-direction:column;align-items:center;gap:1px}
+.mini-grid .d .dl{display:flex;gap:1px}
+.mini-grid .d.forecast .avatar{opacity:.55}
+@media (max-width:640px){
+  .mday .chips{display:flex;flex-wrap:wrap;gap:2px}
+  .chip{font-size:0;width:auto;height:auto;padding:1px;border-radius:5px;background:transparent;border:1.5px solid var(--income)}
+  .chip.confirmed{border-color:var(--info)} .chip.forecast{border:1.5px dashed var(--border-strong)} .chip.unrecorded{border:1.5px dashed var(--warn)}
+  .chip .ct{display:none}
+}

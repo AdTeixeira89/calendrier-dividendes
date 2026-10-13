@@ -233,7 +233,7 @@ function renderCalendar(host) {
     for (let i = 0; i < off; i++) cells += '<div class="mday pad"></div>';
     for (let d = 1; d <= dim; d++) {
       const iso = y + '-' + pad2(mo + 1) + '-' + pad2(d), es = byDay[iso] || [];
-      cells += '<button type="button" class="mday ' + (iso === t ? 'today' : '') + '" data-d="' + iso + '"><span class="dn">' + d + '</span><span class="chips">' + es.slice(0, 3).map((e) => '<span class="chip ' + e.status + '">' + esc(e.ticker) + '</span>').join('') + (es.length > 3 ? '<span class="muted" style="font-size:11px">+' + (es.length - 3) + '</span>' : '') + '</span></button>';
+      cells += '<button type="button" class="mday ' + (iso === t ? 'today' : '') + '" data-d="' + iso + '"><span class="dn">' + d + '</span><span class="chips">' + es.slice(0, 3).map((e) => '<span class="chip ' + e.status + '" title="' + esc((e.name || e.ticker) + ' — ' + STATUS_LABEL[e.status]) + '">' + avatar(e.ticker, e.logo, 'xs', e.isin) + '<span class="ct">' + esc(e.ticker) + '</span></span>').join('') + (es.length > 3 ? '<span class="muted" style="font-size:11px">+' + (es.length - 3) + '</span>' : '') + '</span></button>';
     }
     const sum = Engine.sumEvents(evs, incomeMode(), convert);
     body = '<div class="month-grid">' + cells + '</div>' +
@@ -252,7 +252,7 @@ function renderCalendar(host) {
       for (let d = 1; d <= dim; d++) {
         const iso = y + '-' + pad2(m + 1) + '-' + pad2(d), es = byDay[iso] || [];
         const onlyF = es.length && es.every((e) => e.status === 'forecast');
-        cells += '<div class="d ' + (es.length ? 'has ' : '') + (onlyF ? 'forecast ' : '') + (iso === t ? 'today' : '') + '" ' + (es.length ? 'data-d="' + iso + '"' : '') + '>' + d + '</div>';
+        cells += '<div class="d ' + (es.length ? 'has ' : '') + (onlyF ? 'forecast ' : '') + (iso === t ? 'today' : '') + '" ' + (es.length ? 'data-d="' + iso + '"' : '') + '>' + d + (es.length ? '<span class="dl">' + es.slice(0, 2).map((e) => avatar(e.ticker, e.logo, 'xs', e.isin)).join('') + '</span>' : '') + '</div>';
       }
       const ms = Engine.sumEvents(evs.filter((e) => Number(e.date.slice(5, 7)) === m + 1), incomeMode(), convert);
       return '<div class="card mini" data-month="' + m + '"><h4><span>' + nm + '</span><span class="pos">' + (ms.count ? money(ms.total, 0) : '') + '</span></h4><div class="mini-grid">' + cells + '</div></div>';
