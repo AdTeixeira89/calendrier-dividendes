@@ -1,7 +1,7 @@
 /* Service worker — hors-ligne + rappels de versement */
 importScripts('payouts.js');
 
-const SHELL = 'dividendes-shell-v5';
+const SHELL = 'dividendes-shell-v6';
 const DATA = 'dividendes-data';
 const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'pages.js', 'dashboard.js', 'forms.js', 'settings.js', 'app.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 

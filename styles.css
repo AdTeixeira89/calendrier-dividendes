@@ -434,3 +434,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
   .donut-wrap{justify-content:center}
   .donut-leg{flex:1 1 100%}
 }
+
+.exp-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;margin-bottom:8px;padding:12px 14px;height:auto}
+.exp-item small{color:var(--muted);font-weight:400;white-space:normal}
+.exp-item:disabled{opacity:.5}

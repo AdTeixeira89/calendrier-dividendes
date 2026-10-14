@@ -30,6 +30,7 @@ function wireDo(host) {
     if (a === 'add') openHoldingModal(null);
     else if (a === 'import') openImportPositions();
     else if (a === 'import-tx') openImportTransactions();
+    else if (a === 'export-csv') openCsvExport();
     else if (a === 'refresh') refreshMarket(visibleHoldings());
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
@@ -214,7 +215,7 @@ function renderPortfolio(host) {
     } };
   cfg.rows = filteredHoldings();
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),
-    '<button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter</button>') +
+    '<button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter</button>') +
     portfolioSummaryHtml(perfAll) +
     '<div class="toolbar"><input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +

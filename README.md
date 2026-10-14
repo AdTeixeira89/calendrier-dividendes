@@ -97,6 +97,10 @@ node tests/engine.test.js && node tests/market.test.js        # calculs et donn�
 NODE_PATH=$(npm root -g) LIBDIR=<dossier papaparse+xlsx> node tests/e2e.js   # parcours complets (faux Firebase, faux relais)
 ```
 
+## Export CSV (tableur)
+
+Paramètres → « Exporter en CSV », ou le bouton **Exporter** de « Mon portefeuille » (respecte le portefeuille sélectionné). Quatre fichiers : **positions** (quantité, PRU, cours, valeur, plus-value, performance, poids, secteur, pays, dividende annuel et rendements), **dividendes reçus** (brut, retenue, frais, net, statut), **transactions** et **valeur mensuelle** du portefeuille (5 ans max, rétrospective sur les positions actuelles tant qu'aucune transaction n'est importée). Format Excel / Numbers / Google Sheets : séparateur « ; », décimales « , », UTF-8 avec BOM, nombres sans symbole monétaire, valeurs inconnues laissées vides (jamais 0), cellules commençant par `=`, `+`, `-` ou `@` neutralisées. Le fichier « positions » peut être ré-importé tel quel par « Importer un relevé » (les actifs existants restent intacts).
+
 ## Sauvegarde
 
 Export / restauration d'un fichier JSON depuis Paramètres (feuille de partage sur iPhone). Sur iPhone, l'app installée sur l'écran d'accueil a un stockage **séparé** de Safari : avec un compte, il suffit de s'y connecter ; sans compte, exportez puis restaurez.

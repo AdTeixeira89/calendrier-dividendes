@@ -564,6 +564,83 @@ async function exportData() {
   const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/* ---------------------------------------------------------------
+   EXPORT CSV (Excel / Sheets / analyse) : séparateur « ; », décimales « , », UTF-8 avec BOM
+   --------------------------------------------------------------- */
+function csvCell(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'number') return isFinite(v) ? String(Math.round(v * 1e6) / 1e6).replace('.', ',') : '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;                      // neutralise les formules dans un tableur
+  return /[";\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvText(head, rows) { return '﻿' + [head].concat(rows).map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n'; }
+function csvPositions() {
+  const hs = visibleHoldings(), perf = Engine.performance(state, convert, visibleIds()), pm = {}, cur = baseCur();
+  perf.rows.forEach((r) => { pm[r.id] = r; });
+  const accName = (id) => (state.accounts.find((a) => a.id === id) || {}).name || '';
+  const pct = (x) => (x === null || x === undefined ? null : x * 100);
+  const head = ['Portefeuille', 'Ticker', 'ISIN', 'Nom', 'Type', 'Secteur', 'Pays', 'Devise', 'Quantité', 'PRU', 'Devise du PRU', 'Cours', 'Date du cours',
+    'Investi (' + cur + ')', 'Valeur (' + cur + ')', 'Plus/moins-value (' + cur + ')', 'Performance (%)', 'Poids (%)', 'Dividende annuel par titre (brut)', 'Dividende annuel (brut, ' + cur + ')',
+    'Rendement sur coût (%)', 'Rendement sur cours (%)', 'Fréquence du dividende'];
+  const rows = hs.map((h) => {
+    const r = pm[h.id] || {}, aps = Engine.annualPerShare(h), div = aps > 0 ? convert(aps * Number(h.quantity || 0), h.currency || 'EUR') : null;
+    return [accName(h.account), h.displayTicker || h.ticker, h.isin || '', h.name || '', Engine.TYPES[h.type] || h.type, h.type === 'stock' ? (sectorFr(h.sector) || '') : '', h.country || '',
+      h.currency || '', Number(h.quantity) || 0, h.avgCost > 0 ? h.avgCost : null, h.avgCost > 0 ? Engine.costCur(h) : '', h.price > 0 ? h.price : null, h.priceAt || '',
+      r.cost, r.value, r.gain, pct(r.pct), pct(r.weight), aps > 0 ? aps : null, div,
+      div !== null && r.cost > 0 ? div / r.cost * 100 : null, div !== null && r.value > 0 ? div / r.value * 100 : null,
+      aps > 0 ? (FREQ_LABEL[h.dividend.frequency] || h.dividend.frequency || '') : (Engine.isAccumulating(h) ? 'Capitalisant' : 'Aucun')];
+  });
+  return csvText(head, rows);
+}
+function csvDividends() {
+  const ids = visibleIds(), cur = baseCur();
+  const rows = state.payments.filter((p) => !ids || ids.has(p.holdingId)).slice().sort((a, b) => String(a.payDate).localeCompare(String(b.payDate))).map((p) => [
+    p.payDate || '', p.exDate || '', p.ticker || '', p.name || '', p.qty, p.perShare, p.gross, p.tax, p.fees, p.net, p.currency || '', p.verified === false ? 'À vérifier' : 'Vérifié', p.source || '']);
+  void cur;
+  return csvText(['Date de paiement', 'Date de détachement', 'Ticker', 'Nom', 'Quantité', 'Par titre', 'Brut', 'Retenue', 'Frais', 'Net', 'Devise', 'Statut', 'Source'], rows);
+}
+function csvTransactions() {
+  const ids = visibleIds(), L = { buy: 'Achat', sell: 'Vente' };
+  const rows = state.transactions.filter((t) => !ids || ids.has(t.holdingId)).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((t) => [
+    t.date || '', L[t.type] || t.type || '', t.ticker || '', t.name || '', t.qty, t.price, t.fees, t.currency || '', t.source || '']);
+  return csvText(['Date', 'Opération', 'Ticker', 'Nom', 'Quantité', 'Prix', 'Frais', 'Devise', 'Source'], rows);
+}
+async function csvValueSeries() {
+  await ensureFxHistory();
+  const vs = Engine.valueSeries(state, convertAt, { months: 60, today: new Date(), ids: visibleIds() });
+  return { text: csvText(['Mois', 'Valeur du portefeuille (' + baseCur() + ')', 'Actifs valorisés'], vs.points.map((p) => [p.ym, p.value, p.n])), n: vs.points.length, retro: vs.retro };
+}
+async function saveFile(name, text, mime) {
+  const file = new File([text], name, { type: mime });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return true; } }
+  catch (e) { if (e && e.name === 'AbortError') return false; }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return true;
+}
+function openCsvExport() {
+  const scope = view.account === 'all' ? 'tous les portefeuilles' : 'portefeuille « ' + ((state.accounts.find((a) => a.id === view.account) || {}).name || '') + ' »';
+  const item = (k, t, d, dis) => '<button class="btn exp-item" type="button" data-exp="' + k + '"' + (dis ? ' disabled' : '') + '><b>' + t + '</b><small>' + d + '</small></button>';
+  const m = openModal('<h2>Exporter en CSV</h2><div class="sub">Données exportées : ' + esc(scope) + '. Fichiers lisibles dans Excel, Numbers ou Google Sheets (séparateur « ; », décimales « , »).</div>' +
+    item('positions', 'Portefeuille — positions', 'Une ligne par actif : quantité, PRU, cours, valeur, plus-value, poids, secteur, pays, dividende estimé.', !visibleHoldings().length) +
+    item('dividends', 'Dividendes reçus', 'Tous les versements enregistrés : brut, retenue, frais, net, statut (vérifié / à vérifier).', !state.payments.length) +
+    item('transactions', 'Transactions', 'Achats et ventes.', !state.transactions.length) +
+    item('series', 'Évolution de la valeur (mensuelle)', 'Valeur du portefeuille mois par mois (5 ans max). Nécessite l\'historique de cours.', !state.holdings.some((h) => h.hist && h.hist.c && h.hist.c.length)) +
+    '<div class="hint">Le fichier contient vos positions : gardez-le en lieu sûr. Les nombres sont de vrais nombres (pas de symbole monétaire).</div>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Fermer</button></div></div>');
+  $$('[data-exp]', m).forEach((b) => b.onclick = async () => {
+    const k = b.dataset.exp, d = todayISO(); let text, name, note = '';
+    try {
+      if (k === 'positions') { text = csvPositions(); name = 'portefeuille-' + d + '.csv'; }
+      else if (k === 'dividends') { text = csvDividends(); name = 'dividendes-' + d + '.csv'; }
+      else if (k === 'transactions') { text = csvTransactions(); name = 'transactions-' + d + '.csv'; }
+      else { const r = await csvValueSeries(); if (!r.n) { toast('Pas d\'historique de cours : actualisez d\'abord les données.', { error: true }); return; } text = r.text; name = 'valeur-portefeuille-' + d + '.csv'; if (r.retro) note = ' (valeur rétrospective de vos positions actuelles)'; }
+    } catch (e) { toast('Export impossible : ' + e.message, { error: true }); return; }
+    if (await saveFile(name, text, 'text/csv;charset=utf-8')) toast(name + ' exporté' + note + '.');
+  });
+}
 function importBackup(file) {
   const reader = new FileReader();
   reader.onload = async () => {

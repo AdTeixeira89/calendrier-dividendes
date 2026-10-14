@@ -519,6 +519,35 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('export CSV : positions, dividendes, transactions, valeur mensuelle — format tableur FR, valeurs justes, formules neutralisées, relisible par l\'import', async () => {
+    const seed = PSEED(3); const y = new Date().getFullYear();
+    seed.holdings[0].name = '=HYPERLINK("http://x")'; seed.holdings[1].avgCost = 0; seed.holdings[0].dividend = { lastAmount: 1, anchorMonth: 3, frequency: 'quarterly', dateKind: 'ex' };
+    seed.payments = [{ id: 'p1', holdingId: 'h0', ticker: 'T0', name: 'Société 0', payDate: y + '-03-10', qty: 10, perShare: 1.5, gross: 15, tax: 3, net: 12, currency: 'EUR', source: 'manual', verified: true }];
+    seed.transactions = [{ id: 't1', holdingId: 'h0', ticker: 'T0', name: 'Société 0', date: y + '-01-05', type: 'buy', qty: 10, price: 50.5, fees: 1, currency: 'EUR', source: 'csv' }];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(250);
+    const grab = async (k) => { await p.click('[data-do=export-csv]'); await p.waitForSelector('[data-exp=' + k + ']'); const [dl] = await Promise.all([p.waitForEvent('download'), p.click('[data-exp=' + k + ']')]); const f = await dl.path(); await p.keyboard.press('Escape'); await p.waitForTimeout(150); return { name: dl.suggestedFilename(), text: fs.readFileSync(f, 'utf-8') }; };
+    const pos = await grab('positions');
+    ok(/^portefeuille-\d{4}-\d{2}-\d{2}\.csv$/.test(pos.name), 'nom de fichier : ' + pos.name); ok(pos.text.charCodeAt(0) === 0xFEFF, 'BOM UTF-8 (accents corrects dans Excel)');
+    const lines = pos.text.replace(/^﻿/, '').trim().split('\r\n'); const head = lines[0].split(';'); eq(lines.length, 4, 'une ligne par actif + en-tête');
+    ok(head.includes('Quantité') && head.includes('PRU') && head.includes('Performance (%)') && head.includes('Poids (%)') && head.includes('Secteur') && head.includes('Pays'), 'colonnes : ' + head.join(' | '));
+    const row = (i) => { const o = {}; lines[i].match(/("([^"]|"")*"|[^;]*)(;|$)/g).slice(0, head.length).forEach((c, j) => { o[head[j]] = c.replace(/;$/, ''); }); return o; };
+    const r0 = row(1); eq(r0['Ticker'], 'T0', 'ticker'); eq(r0['Quantité'], '10', 'quantité'); eq(r0['PRU'], '50', 'PRU'); eq(r0['Cours'], '60', 'cours'); eq(r0['Performance (%)'], '20', 'performance (60/50 − 1 = 20 %)');
+    eq(r0['Plus/moins-value (EUR)'], '100', 'plus-value'); eq(r0['Secteur'], 'Technologie', 'secteur en français'); ok(/^"?'=HYPERLINK/.test(r0['Nom']), 'formule neutralisée : ' + r0['Nom']);
+    ok(!/[€$]/.test(lines.slice(1).join('')), 'aucun symbole monétaire dans les nombres');
+    const r1 = row(2); eq(r1['PRU'], '', 'PRU absent = vide (jamais 0)'); eq(r1['Plus/moins-value (EUR)'], '', 'pas de plus-value sans PRU'); ok(r1['Poids (%)'] !== '', 'poids calculé');
+    const dv = await grab('dividends'); const dl = dv.text.replace(/^﻿/, '').trim().split('\r\n'); eq(dl.length, 2, 'dividendes : 1 versement'); ok(dl[1].startsWith(y + '-03-10;;T0;') && dl[1].includes(';15;3;;12;EUR;Vérifié;manual'), 'versement exporté : ' + dl[1]);
+    const tx = await grab('transactions'); ok(tx.text.includes(';Achat;T0;') && tx.text.includes(';10;50,5;1;EUR;csv'), 'transaction exportée (décimale virgule) : ' + tx.text.slice(0, 200));
+    const se = await grab('series'); const sl = se.text.replace(/^﻿/, '').trim().split('\r\n'); ok(sl.length > 12 && /^\d{4}-\d{2};[\d,]+;3$/.test(sl[sl.length - 1]), 'série mensuelle : ' + sl.length + ' lignes, dernière ' + sl[sl.length - 1]);
+    // relisible par l'import de relevé : mêmes colonnes ticker / quantité / PRU détectées
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportPositions(); })]); await fc.setFiles(csvFile('portefeuille.csv', pos.text)); await p.waitForSelector('#mGo');
+    eq(await p.evaluate(() => [document.querySelector('#mT').selectedOptions[0].textContent, document.querySelector('#mQ').selectedOptions[0].textContent, document.querySelector('#mC').selectedOptions[0].textContent]), ['Ticker', 'Quantité', 'PRU'], 'ré-import : colonnes reconnues');
+    ok(/déjà présent|conserv/i.test(await p.locator('#mSummary').innerText()), 'ré-import : actifs déjà présents conservés : ' + await p.locator('#mSummary').innerText());
+    // état vide : boutons inactifs
+    const e = await device({ guest: true, seed: SEED(2) }); await e.open(); await e.evaluate(() => go('portfolio')); await e.waitForTimeout(200); await e.click('[data-do=export-csv]'); await e.waitForSelector('[data-exp=series]');
+    eq(await e.evaluate(() => ['dividends', 'transactions', 'series'].map((k) => document.querySelector('[data-exp=' + k + ']').disabled)), [true, true, true], 'exports sans données désactivés');
+    eq(p.errors.concat(e.errors), [], 'aucune erreur JS');
+  });
+
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open();
     await p.evaluate(() => Vault.setPin('123456', JSON.stringify(state))); const raw = await p.evaluate(() => localStorage.getItem('dividendCalendarApp_v1'));
