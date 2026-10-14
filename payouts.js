@@ -41,14 +41,18 @@
         amount: amt, total: amt * base.quantity });
     }
     if (!div.lastAmount) return null;
-    if (monthsInCycle(div.anchorMonth, div.frequency).indexOf(m) === -1) return null;
+    // Créneaux observés (ex. acompte 3,75 en août + solde 7,95 en mars) : un montant par mois de versement.
+    const slot = Array.isArray(div.slots) && div.slots.length ? div.slots.find(function (s) { return s.month === m; }) : null;
+    if (Array.isArray(div.slots) && div.slots.length && !slot) return null;
+    if (!slot && monthsInCycle(div.anchorMonth, div.frequency).indexOf(m) === -1) return null;
+    const amountM = slot ? slot.amount : div.lastAmount;
     // 2) jour saisi à la main, 3) jour habituel relevé par l'API, 4) mois seul
     const pd = parseInt(div.payDay, 10), pa = parseInt(div.payDayApi, 10);
     const manual = pd >= 1 && pd <= 31, api = !manual && pa >= 1 && pa <= 31;
     const known = manual || api;
     const day = known ? Math.min(manual ? pd : pa, daysIn(y, m)) : 15;
     return Object.assign(base, { date: iso(y, m, day), dayKnown: known, dayFrom: manual ? 'manual' : api ? 'api' : null, confirmed: false,
-      amount: div.lastAmount, total: div.lastAmount * base.quantity });
+      amount: amountM, total: amountM * base.quantity });
   }
 
   /* Tous les versements entre deux dates incluses (objets Date). */

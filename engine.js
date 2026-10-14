@@ -43,6 +43,8 @@
 
   function annualPerShare(h) {
     if (!isPayer(h)) return 0;
+    const sl = h.dividend.slots;
+    if (Array.isArray(sl) && sl.length) return sl.reduce(function (s, x) { return s + num(x.amount); }, 0);
     const step = P.freqMonths(h.dividend.frequency);
     return num(h.dividend.lastAmount) * (12 / step);
   }
@@ -270,6 +272,8 @@
       .map((p) => ({ currency: p.currency || 'EUR', gross: num(p.gross), net: p.net == null ? null : num(p.net), unverified: p.verified === false }));
     const s = sumEvents(evs, mode, convert);
     s.unverified = evs.filter((e) => e.unverified).length;
+    s.verified = sumEvents(evs.filter((e) => !e.unverified), mode, convert);    // versements confirmés par l'utilisateur
+    s.unverifiedSum = sumEvents(evs.filter((e) => e.unverified), mode, convert); // générés d'après l'historique de marché
     return s;
   }
 
@@ -286,15 +290,15 @@
   /* Série mensuelle d'une année : reçu (réel) + à venir (confirmé/prévu), en devise de base. */
   function monthlySeries(state, year, mode, convert, today, filterIds) {
     const evs = buildEvents(state, new Date(year, 0, 1), new Date(year, 11, 31), today, filterIds);
-    const received = Array(12).fill(0), upcoming = Array(12).fill(0), unrecorded = Array(12).fill(0);
+    const received = Array(12).fill(0), unverified = Array(12).fill(0), upcoming = Array(12).fill(0), unrecorded = Array(12).fill(0);
     evs.forEach((e) => {
       const c = convert(amount(e, mode).v, e.currency); if (c === null) return;
       const m = Number(e.date.slice(5, 7)) - 1;
-      if (e.status === 'received') received[m] += c;
+      if (e.status === 'received') { if (e.verified === false) unverified[m] += c; else received[m] += c; }
       else if (e.status === 'unrecorded') unrecorded[m] += c;
       else upcoming[m] += c;
     });
-    return { received, upcoming, unrecorded };
+    return { received, unverified, upcoming, unrecorded };
   }
 
   function yearlySeries(state, mode, convert, filterIds) {
@@ -305,9 +309,10 @@
       const y = d.slice(0, 4);
       const c = convert(amount({ gross: num(p.gross), net: p.net == null ? null : num(p.net) }, mode).v, p.currency || 'EUR');
       if (c === null) return;
-      years[y] = (years[y] || 0) + c;
+      years[y] = years[y] || { total: 0, unverified: 0 };
+      years[y].total += c; if (p.verified === false) years[y].unverified += c;
     });
-    return Object.keys(years).sort().map((y) => ({ year: Number(y), total: years[y] }));
+    return Object.keys(years).sort().map((y) => ({ year: Number(y), total: years[y].total, unverified: years[y].unverified, verified: years[y].total - years[y].unverified }));
   }
 
   /* Prévision des 12 prochains mois (à partir du mois courant). */

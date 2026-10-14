@@ -33,6 +33,7 @@ function wireDo(host) {
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
     else if (a === 'prefill') runPrefill();
+    else if (a === 'validate-all') runValidateAll();
   }));
 }
 function holdingById(id) { return state.holdings.find((h) => h.id === id); }
@@ -93,6 +94,11 @@ function renderHome(host) {
   const mReceived = mEvs.filter((e) => e.status === 'received').length;
   const yoc = Engine.yieldOnCost(state, convert, ids);
   const yo = Engine.yoy(state, today, mode, convert, ids);
+  // Réconciliation : le « annuel estimé » est un rythme sur 12 mois ; ici, le total de l'année civile en cours.
+  const yEvs = Engine.buildEvents(state, new Date(y, 0, 1), new Date(y, 11, 31), today, ids);
+  const yRec = Engine.sumEvents(yEvs.filter((e) => e.status === 'received'), mode, convert);
+  const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
+  const anyUnver = state.payments.some((p) => p.verified === false);
   const mask = !!state.settings.hideNumbers;
   const hs = visibleHoldings();
   const payers = hs.filter((h) => Engine.isPayer(h)).length;
@@ -104,13 +110,13 @@ function renderHome(host) {
 
   const kpi = (label, val, sub, cls) => '<div class="card kpi"><div class="lbl">' + label + '</div><div class="val ' + (cls || '') + '">' + val + '</div><div class="sub">' + (sub || '') + '</div></div>';
   const kpis = [
-    kpi('Dividendes annuels estimés', money(run.total), 'Dernier dividende × fréquence · estimation' + (netNote ? '<br>' + netNote : ''), 'income'),
-    kpi('Reçus depuis le 1er janvier', rec.count ? money(rec.total) : '—', rec.count ? rec.count + ' versement(s) enregistré(s)' + (rec.unverified ? ' · ' + rec.unverified + ' à vérifier' : '') : 'Aucun versement enregistré (voir Historique)', rec.count ? 'income' : ''),
+    kpi('Dividendes annuels estimés', money(run.total), 'Rythme sur 12 mois à dividendes actuels (estimation)<br>Année ' + y + ' : ' + money(yRec.total) + ' reçus + ' + money(yUp.total) + ' à venir = ' + money(yRec.total + yUp.total) + (netNote ? '<br>' + netNote : ''), 'income'),
+    kpi('Reçus depuis le 1er janvier', rec.count ? money(rec.verified.total) : '—', rec.count ? (rec.count - rec.unverified) + ' versement(s) vérifié(s)' + (rec.unverified ? '<br>+ ' + money(rec.unverifiedSum.total) + ' à vérifier (' + rec.unverified + ', générés d\'après l\'historique de marché : voir Historique)' : '') : 'Aucun versement enregistré (voir Historique)', rec.verified.count ? 'income' : ''),
     kpi('Estimés pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
     kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
     kpi('Rendement sur coût', yoc.rate === null ? '—' : fmtPct(yoc.rate, 2), yoc.rate === null ? 'Renseignez le prix de revient de vos actifs' : 'Calculé sur ' + yoc.withCost + ' / ' + yoc.payers + ' actif(s) avec prix de revient'),
     kpi('Actifs détenus', String(hs.length), payers + ' versent un dividende' + (missing.length ? ' · ' + missing.length + ' sans données' : '')),
-    kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
+    kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) + (anyUnver ? ' (inclut des versements à vérifier)' : '') : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
   ].join('');
 
   const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), yp = Engine.yieldOnPrice(state, convert, ids);
@@ -128,7 +134,7 @@ function renderHome(host) {
     '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><section class="ticker"><div class="ticker-head"><h2>Prochains versements</h2><span class="muted">≈ estimé · survolez ou touchez un versement pour le détail</span></div>' + tickerHtml(next, mask) + '</section>' +
     '<div class="grid two section-gap">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + view.home.year + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', mask, layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
+    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', mask, layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
     '<section class="card card-pad"><h3>Répartition du revenu annuel estimé</h3>' + (dist.total ? donut(dist.items, baseCur(), mask) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>' +
     '<div class="grid kpis section-gap">' + kpis + '</div><h2 class="section-h">Valeur du portefeuille</h2><div class="grid kpis">' + kpisV + '</div>' + missingNote(allMissing.concat(pv.missing)) + (warn ? '<div class="section-gap">' + warn + '</div>' : '') +
     '</div>';
@@ -390,7 +396,7 @@ function renderHistory(host) {
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
     (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Vérifiés</option><option value="unverified">À vérifier</option></select>' : '') +
     '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
-    (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais).</div>' : '') +
+    (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais), ou acceptez-les tels quels : <button class="btn sm" type="button" data-do="validate-all" style="margin-left:6px">Tout valider</button></div>' : '') +
     '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Le net marqué * est incomplet : les versements sans net connu sont comptés en brut.</p>' : '');
   $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset; if (isPay) $('#hStatus', host).value = h.status;
   ['hYear:year', 'hMonth:month', 'hAsset:asset', 'hStatus:status'].forEach((x) => { const [id, k] = x.split(':'); const el = $('#' + id, host); if (el) el.onchange = (e) => { h[k] = e.target.value; renderHistory(host); }; });
@@ -445,12 +451,12 @@ function renderStats(host) {
   host.innerHTML = pageHead('Statistiques', 'Évolution des revenus et prévisions · montants en ' + esc(baseCur()), modeSeg()) +
     '<div class="grid two even">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + y + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
+    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
     '<section class="card card-pad"><h3>Répartition par actif (revenu annuel estimé)</h3>' + (dist.total ? donut(dist.items, baseCur()) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>' +
     '<div class="grid two even section-gap">' +
     '<section class="card card-pad"><h3>Prévision des 12 prochains mois <span class="muted" style="font-weight:500">· ' + money(f12Total, 0) + '</span></h3>' +
     stackedBars({ labels: f12.map((m) => MOIS_C[m.month]), cur: baseCur(), title: 'Prévision 12 mois', layers: [{ name: 'Confirmé / reçu', color: 'var(--chart-1)', values: f12.map((m) => m.confirmed) }, { name: 'Estimé', color: 'var(--chart-1)', faded: true, values: f12.map((m) => m.value - m.confirmed) }] }) + '</section>' +
-    '<section class="card card-pad"><h3>Dividendes reçus par année</h3>' + (yearly.length ? simpleBars(yearly, baseCur()) : '<div class="muted">Aucun versement enregistré : saisissez-les ou importez vos transactions (Historique).</div>') + '</section></div>' +
+    '<section class="card card-pad"><h3>Dividendes reçus par année</h3>' + (yearly.length ? stackedBars({ labels: yearly.map((x) => String(x.year)), cur: baseCur(), title: 'Dividendes reçus par année', layers: [{ name: 'Reçus (vérifiés)', color: 'var(--chart-1)', values: yearly.map((x) => x.verified) }, { name: 'À vérifier', color: 'var(--chart-3)', values: yearly.map((x) => x.unverified) }] }) : '<div class="muted">Aucun versement enregistré : saisissez-les ou importez vos transactions (Historique).</div>') + '</section></div>' +
     missingNote(run.missing) +
     '<div class="grid two even section-gap">' + groupTable('Par compte', byAcc) + groupTable('Par devise', byCur, true) + groupTable('Par zone', byReg) + groupTable('Par type d\'actif', byType) + '</div>' +
     '<section class="card card-pad section-gap"><h3>Principaux contributeurs</h3>' + (top.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Actif</th><th class="r">Revenu annuel est.</th><th class="r">Part</th></tr></thead><tbody>' + top.map((t) => '<tr><td><b>' + esc(t.name || t.ticker) + '</b> <span class="muted">' + esc(t.ticker) + '</span></td><td class="r">' + money(t.value) + '</td><td class="r">' + fmtPct(run.total ? t.value / run.total : 0, 1) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">Aucun actif ne verse de dividende.</div>') + '</section>' +

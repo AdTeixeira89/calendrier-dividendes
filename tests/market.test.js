@@ -49,3 +49,15 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   const h = { id: '1', ticker: 'XYZ.L', dividend: {} }; M.applyToHolding(h, a, '2026-10-12'); assert.strictEqual(h.price, 2.5); assert.strictEqual(h.currency, 'GBP');
   console.log('ok   cours : récupéré, converti (pence) et enregistré');
 })();
+(() => {
+  const d = (a) => a.map((x) => ({ exDate: x[0], amount: x[1] }));
+  const sl = M.buildSlots(d([['2024-03-22', 6.4], ['2024-08-15', 3.5], ['2025-03-28', 7.9], ['2025-08-15', 3.75], ['2026-03-27', 7.95], ['2026-08-14', 3.75]]), '2026-10-14');
+  assert.deepStrictEqual(sl, [{ month: 3, amount: 7.95 }, { month: 8, amount: 3.75 }]);
+  assert.strictEqual(M.buildSlots(d([['2025-03-10', 1], ['2025-09-10', 1], ['2026-03-10', 1], ['2026-09-10', 1], ['2026-12-01', 5]]), '2026-12-20'), null, 'dividende exceptionnel isolé jamais reconduit');
+  assert.strictEqual(M.buildSlots(d([['2025-02-10', 1], ['2025-05-10', 1], ['2025-08-10', 1], ['2025-11-10', 1.02], ['2026-02-10', 1.02], ['2026-05-10', 1.02], ['2026-08-10', 1.02], ['2026-11-10', 1.04]]), '2026-11-20'), null, 'montants quasi égaux : modèle simple');
+  assert.strictEqual(M.buildSlots(d([['2025-05-10', 3], ['2026-05-10', 3.2]]), '2026-10-14'), null, 'un seul versement par an : modèle simple');
+  const h = { id: '1', ticker: 'NOVO-B.CO', type: 'stock', dividend: {} };
+  M.applyToHolding(h, { symbol: 'NOVO-B.CO', resolved: false, currency: 'DKK', dividends: d([['2024-03-22', 6.4], ['2024-08-15', 3.5], ['2025-03-28', 7.9], ['2025-08-15', 3.75], ['2026-03-27', 7.95], ['2026-08-14', 3.75]]) }, '2026-10-14');
+  assert.deepStrictEqual(h.dividend.slots, [{ month: 3, amount: 7.95 }, { month: 8, amount: 3.75 }]);
+  console.log('ok   créneaux de versement (acompte + solde) : détection sûre');
+})();

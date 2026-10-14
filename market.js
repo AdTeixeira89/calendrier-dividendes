@@ -105,6 +105,24 @@
     return { call, search, resolveSymbol, fetchAsset };
   }
 
+  /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
+     (ex. Novo Nordisk : acompte ~3,75 en août, solde ~7,95 en mars). Retenus seulement si le même schéma
+     (mêmes mois, même nombre de versements) existait déjà l'année précédente : un dividende exceptionnel
+     isolé n'est donc jamais reconduit. Sinon null → modèle simple « dernier montant × fréquence ». */
+  function buildSlots(divs, nowISO) {
+    const t12 = shiftMonths(nowISO, -12), t24 = shiftMonths(nowISO, -24);
+    const cur = divs.filter((d) => d.exDate > t12), prev = divs.filter((d) => d.exDate > t24 && d.exDate <= t12);
+    if (cur.length < 2 || cur.length !== prev.length) return null;
+    const byM = {}; cur.forEach((d) => { const m = Number(d.exDate.slice(5, 7)); byM[m] = (byM[m] || 0) + d.amount; });
+    const months = Object.keys(byM).map(Number);
+    const prevM = prev.map((d) => Number(d.exDate.slice(5, 7)));
+    const near = (a, b) => { const x = Math.abs(a - b); return Math.min(x, 12 - x) <= 1; };
+    if (!months.every((m) => prevM.some((pm) => near(pm, m)))) return null;
+    const amts = months.map((m) => byM[m]);
+    if (Math.max.apply(null, amts) / Math.min.apply(null, amts) < 1.25) return null;
+    return months.sort((a, b) => a - b).map((m) => ({ month: m, amount: Math.round(byM[m] * 1e6) / 1e6 }));
+  }
+
   /* Applique les données de marché à un actif. Ne touche jamais aux champs saisis
      à la main (quantité, prix de revient, compte, retenue fiscale, jour de paiement). */
   function applyToHolding(h, a, nowISO) {
@@ -122,7 +140,7 @@
     const active = a.dividends.filter((x) => x.exDate >= shiftMonths(nowISO, -18));
     if (!active.length) {
       // Aucun dividende récent : on ne prévoit rien. ETF → capitalisant probable (modifiable).
-      d.none = true; d.lastAmount = null; d.anchorMonth = null; d.frequency = 'none';
+      d.none = true; d.lastAmount = null; d.anchorMonth = null; d.frequency = 'none'; d.slots = null;
       if (a.instrumentType === 'ETF' && !h.typeLocked) h.type = 'etf_acc';
     } else {
       d.none = false;
@@ -133,6 +151,7 @@
       if (freq === 'irregular' && active.length === 1) freq = 'annual';
       d.frequency = freq;
       d.dateKind = 'ex';
+      d.slots = buildSlots(a.dividends, nowISO);
       if (a.instrumentType === 'ETF' && !h.typeLocked && h.type === 'stock') h.type = 'etf_dist';
     }
     return h;
@@ -165,6 +184,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, detectFrequency, makeClient, applyToHolding, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, makeClient, applyToHolding, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

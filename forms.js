@@ -120,6 +120,7 @@ function saveHoldingForm(m, ex) {
   d.type = $('#hType', m).value; if (prevType !== null && prevType !== d.type) d.typeLocked = true; if (prevType === null && d.type !== 'stock') d.typeLocked = d.typeLocked || false;
   if (Market.isISIN(t)) d.isin = t.toUpperCase();
   const dv = d.dividend = d.dividend || {};
+  const dvBefore = ex ? JSON.stringify([ex.dividend && ex.dividend.lastAmount, ex.dividend && ex.dividend.frequency, ex.dividend && ex.dividend.anchorMonth]) : null;
   const none = d.type === 'etf_acc' || $('#hPays', m).value === '0';
   dv.none = none;
   if (none) { dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; }
@@ -129,6 +130,8 @@ function saveHoldingForm(m, ex) {
     const day = $('#hDay', m).value; dv.payDay = day ? Number(day) : null; dv.taxRate = numOrNull($('#hTax', m).value);
   }
   if (none) dv.taxRate = numOrNull($('#hTax', m).value);
+  // une saisie manuelle du dividende prime sur les créneaux automatiques (recalculés à la prochaine actualisation)
+  if (dvBefore !== JSON.stringify([dv.lastAmount, dv.frequency, dv.anchorMonth])) dv.slots = null;
   const i = state.holdings.findIndex((h) => h.id === d.id);
   if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
   saveState(); closeModal(); toast('Actif enregistré.'); renderPage();
@@ -224,6 +227,15 @@ function openPaymentModal(id, preset) {
     if (i >= 0) state.payments[i] = np; else state.payments.push(np);
     saveState(); closeModal(); toast('Versement enregistré.'); renderPage();
   };
+}
+
+/* Valide d'un coup les versements générés d'après l'historique de marché (ils deviennent des versements « reçus »). */
+async function runValidateAll() {
+  const n = state.payments.filter((p) => p.verified === false).length; if (!n) return;
+  const c = await confirmDialog({ title: 'Valider ' + n + ' versement(s) ?', body: 'Ces versements ont été générés d\'après les dates de détachement passées, avec votre quantité actuelle et le montant brut théorique (sans retenue ni frais réels). Une fois validés, ils comptent comme <b>dividendes reçus</b>.', confirmLabel: 'Tout valider' });
+  if (!c.ok) return;
+  state.payments.forEach((p) => { if (p.verified === false) p.verified = true; });
+  saveState(); renderPage(); toast(n + ' versement(s) validé(s).');
 }
 
 /* Pré-remplissage d'après les dates de détachement passées (« à vérifier ») */

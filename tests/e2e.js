@@ -387,6 +387,23 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('#tickerTrack .tk-chip'); await p.waitForSelector('.modal'); ok((await p.locator('.modal').innerText()).includes('versement'), 'détail du jour');
   });
 
+  await test('accueil : « reçus » = versements vérifiés ; générés d\'après l\'historique comptés à part ; réconciliation annuel = reçus + à venir ; « Tout valider »', async () => {
+    const y = new Date().getFullYear(); const seed = SEED(0);
+    seed.holdings = [H(0, { ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 10, dividend: { lastAmount: 1, anchorMonth: 2, frequency: 'quarterly', dateKind: 'ex' } })];
+    seed.payments = [
+      { id: 'v1', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-01-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'manual', verified: true },
+      { id: 'u1', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-04-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false },
+      { id: 'u2', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-07-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false }];
+    const p = await device({ guest: true, seed }); await p.open();
+    const k = await p.locator('.kpis.section-gap').innerText();
+    ok(/Reçus depuis le 1er janvier\s+10,00\s?€/.test(k), 'reçus = uniquement le versement vérifié (10 €) — ' + k.replace(/\n/g, ' | ').slice(0, 260));
+    ok(/\+\s?20,00\s?€\s?à vérifier/.test(k), 'montant « à vérifier » affiché séparément');
+    ok(/Année \d{4} : .*reçus \+ .*à venir = /.test(k.replace(/\n/g, ' ')), 'ligne de réconciliation : annuel estimé = reçus + à venir de l\'année');
+    await p.evaluate(() => go('history')); await p.waitForTimeout(200); await p.click('[data-do=validate-all]'); await p.click('#cdYes'); await p.waitForTimeout(300);
+    eq((await storeOf(p)).payments.every((x) => x.verified !== false), true, 'tout validé');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Reçus depuis le 1er janvier\s+30,00\s?€/.test(await p.locator('.kpis.section-gap').innerText()), 'après validation : 30 € reçus');
+  });
+
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open();
     await p.evaluate(() => Vault.setPin('123456', JSON.stringify(state))); const raw = await p.evaluate(() => localStorage.getItem('dividendCalendarApp_v1'));

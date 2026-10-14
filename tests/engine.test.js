@@ -97,3 +97,30 @@ console.log(n + ' tests passed');
     assert.strictEqual(E.investedTotal({ holdings: [h] }, cv, null).cost, 900);
   });
 })();
+// ---- créneaux (acompte + solde), versements vérifiés / à vérifier ----
+(() => {
+  const t3 = (name, fn) => { try { fn(); console.log('ok  ', name); } catch (e) { console.log('FAIL', name, '\n   ', e.message); process.exitCode = 1; } };
+  const cv3 = (a, c) => (c === 'EUR' ? a : null);
+  const nov = { id: 'n', ticker: 'NOVO-B.CO', type: 'stock', currency: 'EUR', quantity: 10, dividend: { lastAmount: 3.75, anchorMonth: 8, frequency: 'semiannual', dateKind: 'ex', slots: [{ month: 3, amount: 7.95 }, { month: 8, amount: 3.75 }] } };
+  t3('créneaux : l\'estimation annuelle additionne acompte + solde (11,70 et non 2 × 3,75)', () => {
+    assert.ok(Math.abs(E.annualPerShare(nov) - 11.7) < 1e-9);
+    assert.ok(Math.abs(E.runRate({ holdings: [nov] }, 'gross', cv3, null).total - 117) < 1e-9);
+    const evs = E.buildEvents({ holdings: [nov], payments: [] }, new Date(2027, 0, 1), new Date(2027, 11, 31), new Date(2026, 9, 14));
+    assert.deepStrictEqual(evs.map((e) => [e.date.slice(5, 7), e.gross]), [['03', 79.5], ['08', 37.5]]);
+  });
+  t3('sans créneaux : comportement inchangé (dernier montant × fréquence)', () => {
+    const h = Object.assign({}, nov, { dividend: { lastAmount: 3.75, anchorMonth: 8, frequency: 'semiannual' } });
+    assert.ok(Math.abs(E.annualPerShare(h) - 7.5) < 1e-9);
+  });
+  const pays = [
+    { id: 'a', holdingId: 'n', payDate: '2026-03-10', qty: 10, gross: 100, net: null, currency: 'EUR', verified: true },
+    { id: 'b', holdingId: 'n', payDate: '2026-05-10', qty: 10, gross: 40, net: null, currency: 'EUR', verified: false },
+    { id: 'c', holdingId: 'n', payDate: '2026-06-10', qty: 10, gross: 10, net: null, currency: 'EUR', verified: false }];
+  t3('« reçus » : les versements vérifiés sont séparés de ceux générés d\'après l\'historique', () => {
+    const r = E.receivedBetween({ holdings: [nov], payments: pays }, '2026-01-01', '2026-10-14', 'gross', cv3, null);
+    assert.strictEqual(r.total, 150); assert.strictEqual(r.verified.total, 100); assert.strictEqual(r.unverifiedSum.total, 50); assert.strictEqual(r.unverified, 2);
+    const m = E.monthlySeries({ holdings: [nov], payments: pays }, 2026, 'gross', cv3, new Date(2026, 9, 14), null);
+    assert.strictEqual(m.received[2], 100); assert.strictEqual(m.unverified[4], 40); assert.strictEqual(m.unverified[5], 10); assert.strictEqual(m.received[4], 0);
+    const y = E.yearlySeries({ holdings: [nov], payments: pays }, 'gross', cv3, null); assert.deepStrictEqual([y[0].verified, y[0].unverified], [100, 50]);
+  });
+})();
