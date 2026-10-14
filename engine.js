@@ -348,6 +348,82 @@
     return { items: top.concat(rest > 0 ? [{ ticker: 'Autres', name: 'Autres', value: rest }] : []), total: r.total };
   }
 
+  /* ---------- évolution de la valeur dans le temps ---------- */
+  const ymOf = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  const addYM = (y, n) => { const a = y.split('-').map(Number), t = a[0] * 12 + a[1] - 1 + n; return Math.floor(t / 12) + '-' + pad2((t % 12) + 1); };
+  const lastDayOf = (y) => { const a = y.split('-').map(Number); return iso(a[0], a[1], new Date(a[0], a[1], 0).getDate()); };
+  function closeAt(h, ym) {
+    const hs = h.hist; if (!hs || !hs.c || !hs.c.length) return null;
+    const i = (Number(ym.slice(0, 4)) - Number(hs.from.slice(0, 4))) * 12 + Number(ym.slice(5)) - Number(hs.from.slice(5));
+    if (i < 0) { for (let k = 0; k < hs.c.length; k++) if (hs.c[k] > 0) return hs.c[k]; return null; }    // avant le début de l'historique : premier cours connu
+    for (let k = Math.min(i, hs.c.length - 1); k >= 0; k--) if (hs.c[k] > 0) return hs.c[k];                // mois manquant : dernier cours connu
+    return null;
+  }
+  /* Valeur du portefeuille mois par mois. Sans opérations, les quantités ACTUELLES sont appliquées à tout l'historique
+     (« positions actuelles, rétrospectif ») ; avec des opérations cohérentes, les quantités réellement détenues. */
+  function valueSeries(state, convertAt, o) {
+    o = o || {}; const today = o.today || new Date(), ids = o.ids || null, months = o.months || 12;
+    const endYM = ymOf(today);
+    const hs = (state.holdings || []).filter((h) => (!ids || ids.has(h.id)) && num(h.quantity) > 0);
+    const withHist = hs.filter((h) => h.hist && h.hist.c && h.hist.c.length), missing = hs.filter((h) => !(h.hist && h.hist.c && h.hist.c.length)).map((h) => h.displayTicker || h.ticker);
+    if (!withHist.length) return { points: [], coverage: { have: 0, total: hs.length, missing }, retro: true };
+    const minFrom = withHist.reduce((m, h) => (h.hist.from < m ? h.hist.from : m), '9999-99');
+    const startYM = addYM(endYM, -(months - 1)) > minFrom ? addYM(endYM, -(months - 1)) : minFrom;
+    const retro = !withHist.some((h) => (state.transactions || []).some((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell')));
+    const points = [];
+    for (let ym = startYM; ym <= endYM; ym = addYM(ym, 1)) {
+      let v = 0, n = 0;
+      withHist.forEach((h) => {
+        const q = retro ? num(h.quantity) : quantityAt(state, h, ym === endYM ? toISO(today) : lastDayOf(ym));
+        if (q <= 0) return;
+        const close = ym === endYM && h.price > 0 ? h.price : closeAt(h, ym); if (!(close > 0)) return;
+        const c = convertAt(q * close, h.currency || 'EUR', ym); if (c === null) return;
+        v += c; n++;
+      });
+      points.push({ ym, value: v, n });
+    }
+    return { points, coverage: { have: withHist.length, total: hs.length, missing }, retro };
+  }
+
+  /* ---------- performance par actif et globale (PRU) ---------- */
+  function performance(state, convert, ids) {
+    const rows = []; let value = 0, cost = 0, gain = 0, valAll = 0;
+    (state.holdings || []).forEach((h) => {
+      if (ids && !ids.has(h.id)) return;
+      const v = value_(h), inv = invested(h);
+      const cv = v === null ? null : convert(v, h.currency || 'EUR'), ci = inv === null ? null : convert(inv, costCur(h));
+      if (cv !== null) valAll += cv;
+      const g = cv !== null && ci !== null ? cv - ci : null;
+      if (g !== null) { value += cv; cost += ci; gain += g; }
+      rows.push({ id: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', value: cv, cost: ci, gain: g, pct: g !== null && ci > 0 ? g / ci : null });
+    });
+    rows.forEach((r) => { r.weight = r.value !== null && valAll > 0 ? r.value / valAll : null; });
+    const ranked = rows.filter((r) => r.pct !== null).sort((a, b) => b.pct - a.pct);
+    return { rows, value, cost, gain, pct: cost > 0 ? gain / cost : null, count: ranked.length, valueAll: valAll, best: ranked.slice(0, 3), worst: ranked.slice(-3).reverse().filter((r) => r.pct < 0 || ranked.length > 3) };
+  }
+  const value_ = (h) => value(h);
+
+  /* ---------- répartition (secteur, pays, devise, type, compte…) ---------- */
+  function allocation(state, keyFn, basis, convert, ids, topN) {
+    const sums = {}, counts = {}; let total = 0, excluded = 0, fallback = 0;
+    (state.holdings || []).forEach((h) => {
+      if (ids && !ids.has(h.id)) return;
+      let w = null;
+      if (basis === 'dividend') { const g = annualPerShare(h) * num(h.quantity); w = g > 0 ? convert(g, h.currency || 'EUR') : null; }
+      else if (basis === 'cost') { const i = invested(h); w = i === null ? null : convert(i, costCur(h)); }
+      else {                                       // valeur de marché ; à défaut, montant investi (compté à part)
+        const v = value_(h); w = v === null ? null : convert(v, h.currency || 'EUR');
+        if (w === null) { const i = invested(h); const ci = i === null ? null : convert(i, costCur(h)); if (ci !== null) { w = ci; fallback++; } }
+      }
+      if (w === null || !(w > 0)) { excluded++; return; }
+      const k = keyFn(h) || 'Non renseigné'; sums[k] = (sums[k] || 0) + w; counts[k] = (counts[k] || 0) + 1; total += w;
+    });
+    const items = Object.keys(sums).map((k) => ({ key: k, value: sums[k], count: counts[k], pct: total > 0 ? sums[k] / total : 0 })).sort((a, b) => b.value - a.value);
+    const top = items.slice(0, topN || 8), rest = items.slice(topN || 8);
+    if (rest.length) top.push({ key: 'Autres', value: rest.reduce((s, x) => s + x.value, 0), count: rest.reduce((s, x) => s + x.count, 0), pct: rest.reduce((s, x) => s + x.pct, 0), rest: rest.map((x) => x.key) });
+    return { items: top, all: items, total, excluded, fallback };
+  }
+
   /* Anti-doublon à l'import / à la saisie : un même versement = même actif + même date + même montant. */
   function paymentKey(p) {
     return [p.holdingId || p.ticker, p.payDate || p.exDate || '', Math.round(num(p.gross) * 100)].join('|');
@@ -380,7 +456,7 @@
   }
 
   root.Engine = {
-    TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
   };

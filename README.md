@@ -1,17 +1,24 @@
-# Suivi des dividendes
+# Suivi de portefeuille et de dividendes
 
-Application web (installable sur téléphone) entièrement dédiée au **suivi des dividendes et des revenus** d'un portefeuille d'actions et d'ETF : prochains versements, prévisions, historique des dividendes reçus, statistiques. Hébergée sur GitHub Pages, sans serveur à maintenir.
+Application web (installable sur téléphone) de **suivi complet d'un portefeuille d'actions et d'ETF** : valeur et performance dans le temps, diversification par secteur et par pays, et suivi détaillé des dividendes (prochains versements, prévisions, historique, statistiques). Hébergée sur GitHub Pages, sans serveur à maintenir.
 
-## Pages
+## Navigation (5 rubriques)
 
-| Page | Contenu |
+| Rubrique | Contenu |
 |---|---|
-| **Accueil** | Bandeau compact des prochains versements en défilement continu (pastille : logo, ticker, total estimé, date ; détail au survol ou au toucher), œil pour **masquer les chiffres**, infobulles de valeurs sur les graphiques (survol ou toucher), 7 indicateurs (dividendes annuels estimés, reçus depuis le 1er janvier, estimés du mois, prochain dividende, rendement sur coût, nombre d'actifs, évolution vs année précédente), revenus mensuels et répartition par actif. Bascule **bruts / nets**. Section **Valeur du portefeuille** : valeur de marché, plus / moins-value latente et rendement sur cours. |
-| **Mon portefeuille** | Actifs, quantités, prix de revient (PRU, dans la devise de votre choix), investi, cours, valeur, +/- value, dividende annuel estimé, prochain versement, rendement sur coût et sur cours… Tableau avec **« Colonnes à afficher »**, tri, recherche, filtres (type, verse un dividende / sans dividende / données manquantes), **suppression multiple** (cases, « Tout sélectionner », compteur, « Annuler la sélection », confirmation, annulation possible). |
-| **Calendrier des dividendes** | Vues mois / année / logos, filtres actif et statut, versement attendu → « Enregistrer comme reçu ». |
-| **Historique** | Dividendes reçus (brut, retenue, frais, net, devise, source) et opérations (achats / ventes). Filtres année, mois, actif, statut. Import CSV (Trade Republic…), saisie manuelle, pré-remplissage « à vérifier ». |
-| **Statistiques** | Revenus mensuels, répartition, prévision des 12 mois, dividendes reçus par année, par compte / devise / zone / type, principaux contributeurs, ETF capitalisants. |
-| **Paramètres** | Compte et synchronisation, devise d'affichage, brut/net par défaut, portefeuilles, données de marché, sauvegarde, code de verrouillage de l'appareil, rappels. |
+| **Accueil** | Bandeau compact des prochains versements en défilement continu, œil pour **masquer les chiffres**. **Courbe de la valeur du portefeuille** (1 an / 3 ans / 5 ans, repère « Investi (PRU) »), **dividendes de l'année** (perçus, à vérifier, à venir, prochain versement, revenus mensuels), 4 indicateurs (plus-value latente, dividendes annuels estimés, rendement sur coût, nombre d'actifs), répartition par **secteur** et par **pays**, meilleures et moins bonnes performances. |
+| **Mon portefeuille** | Résumé (valeur, investi, plus / moins-value, rendement total) puis tableau des actifs : quantité, PRU, cours, valeur, **poids**, **+/- value (€ et %)**, dividende estimé, prochain versement… Colonnes à afficher, tri, recherche, filtres, **suppression multiple** avec annulation. |
+| **Répartition** | Diagrammes par **secteur**, **pays**, devise, type d'actif et compte, pondérables par **valeur**, **montant investi** ou **dividendes** ; principales positions ; la queue des petites lignes est regroupée en « Autres » pour rester lisible avec de nombreux actifs. |
+| **Dividendes** | Trois onglets : **Calendrier** (mois / année / logos, filtres, « Enregistrer comme reçu »), **Historique** (versements et opérations, import CSV, saisie manuelle, pré-remplissage « à vérifier ») et **Statistiques** (indicateurs de revenus, prévision 12 mois, par année, contributeurs). |
+| **Paramètres** | Apparence, devise d'affichage, brut/net, portefeuilles, données de marché, sauvegarde, code de verrouillage, rappels. |
+
+Les anciens liens (`#/historique`, `#/calendrier`, `#/statistiques`…) ouvrent l'onglet correspondant de « Dividendes ».
+
+## Suivi de la performance
+
+- **PRU** : votre prix de revient unitaire (saisi, importé ou calculé depuis vos transactions) sert de base à la plus / moins-value de chaque actif et du portefeuille. Un actif sans PRU ou sans cours est exclu du calcul et signalé, jamais deviné.
+- **Évolution de la valeur** : reconstituée à partir de l'historique mensuel des cours (5 ans, Yahoo) × vos quantités actuelles (ou celles reconstituées par vos transactions s'il y en a), converties au taux de change de l'époque (BCE / Frankfurter). **C'est donc une valeur « rétrospective » de la position actuelle, pas l'historique exact de vos achats** tant que vous n'avez pas importé vos transactions. Les actifs sans historique sont signalés et exclus plutôt qu'inventés.
+- **Secteur et pays** : le secteur vient de la recherche Yahoo (actions uniquement), le pays de l'ISIN ou du suffixe de la place de cotation ; les ETF sont classés « ETF multi-pays ». Les deux sont **modifiables à la main** dans la fiche de l'actif (ils ne sont alors plus écrasés par les actualisations). Appuyez sur « Actualiser » une fois pour récupérer historique, secteur et pays de vos actifs existants.
 
 ## Apparence
 
@@ -58,7 +65,7 @@ Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protég
 
 ## Imports
 
-- **Relevé de portefeuille** (DEGIRO, Trade Republic, autre ; CSV ou Excel) : choix des colonnes ticker / ISIN, quantité, nom, prix de revient, devise. Les ISIN sont convertis en tickers et les dividendes récupérés automatiquement.
+- **Relevé de portefeuille** (DEGIRO, Trade Republic, autre ; CSV ou Excel) : choix des colonnes ticker / ISIN, quantité, nom, prix de revient, devise. Les ISIN sont convertis en tickers et les dividendes récupérés automatiquement. **Les actifs déjà présents (même ISIN, ticker ou nom) ne sont jamais modifiés** (quantité, PRU, secteur, logo, dividendes… restent tels quels) : seuls les nouveaux actifs sont ajoutés, un récapitulatif l'indique avant validation.
 - **Transactions** (CSV) : achats, ventes, dividendes. Format Trade Republic reconnu par ses en-têtes (`datetime, type, symbol, shares, price, amount, fee, tax…`) ; colonnes modifiables et aperçu avant import. Un dividende y est interprété comme *net reçu* (modifiable en *brut*), la colonne `tax` donne la retenue. Les doublons (identifiant de transaction ou actif + date + montant) sont ignorés. Quantité et prix de revient moyen pondéré sont calculés pour les actifs créés.
 
 > Le format exact des exports varie selon le courtier et sa version : vérifiez l'aperçu avant d'importer.
@@ -67,13 +74,14 @@ Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protég
 
 ```
 index.html  styles.css  config.js          page, style, configuration publique
-engine.js   fonctions pures : statuts, prévisions, indicateurs (testé sous Node)
+engine.js   fonctions pures : statuts, prévisions, valeur / performance / répartition (testé sous Node)
 market.js   données de marché (relais Yahoo), conversion ISIN, détection de fréquence
 cloud.js    Firebase Auth + Firestore (comptes, synchronisation transactionnelle)
 vault.js    stockage durable local (localStorage + IndexedDB) et code de verrouillage
 payouts.js  calcul mensuel, rappels, export agenda (partagé avec le service worker)
 ui.js       composants : formats, fenêtres, tableau configurable, graphiques SVG
-pages.js    Accueil, Portefeuille, Calendrier, Historique, Statistiques
+pages.js    Portefeuille, Calendrier, Historique, Statistiques
+dashboard.js Accueil, Répartition, rubrique Dividendes (onglets)
 forms.js    actif, versement, suppressions, comptes, imports CSV
 settings.js Paramètres
 app.js      état, migration, synchronisation, navigation, démarrage

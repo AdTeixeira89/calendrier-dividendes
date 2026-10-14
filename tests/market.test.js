@@ -61,3 +61,18 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.deepStrictEqual(h.dividend.slots, [{ month: 3, amount: 7.95 }, { month: 8, amount: 3.75 }]);
   console.log('ok   créneaux de versement (acompte + solde) : détection sûre');
 })();
+(async () => {
+  const ts = (d) => Math.floor(Date.parse(d) / 1000);
+  const res = { timestamp: [ts('2026-07-01'), ts('2026-08-01'), ts('2026-10-01'), ts('2026-10-14')], indicators: { quote: [{ close: [100, 110, 120, 125] }] } };
+  const s = M.monthlySeries(res, false);
+  assert.deepStrictEqual(s, { from: '2026-07', c: [100, 110, null, 125] }, 'mois manquant = null, dernière valeur du mois retenue');
+  assert.strictEqual(M.monthlySeries(res, true).c[0], 1);
+  assert.strictEqual(M.deriveCountry('AI.PA', 'FR0000120073'), 'France'); assert.strictEqual(M.deriveCountry('AAPL', ''), 'États-Unis'); assert.strictEqual(M.deriveCountry('NOVO-B.CO', ''), 'Danemark');
+  assert.strictEqual(M.deriveCountry('CCO.TO', 'CA13321L1085'), 'Canada'); assert.strictEqual(M.deriveCountry('IWDA.AS', 'IE00B4L5Y983', true), 'ETF multi-pays');
+  const c = M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => ({ status: 200, ok: true, json: async () => u.includes('/search') ? { quotes: [{ symbol: 'NOVO-B.CO', sector: 'Healthcare', industry: 'Drug Manufacturers—General' }] } : { chart: { result: [{ meta: { currency: 'DKK', longName: 'Novo', regularMarketPrice: 300 }, timestamp: res.timestamp, indicators: res.indicators, events: {} }] } } }) });
+  const a = await c.fetchAsset('NOVO-B.CO', '', { needSector: true }); assert.strictEqual(a.sector, 'Healthcare'); assert.strictEqual(a.hist.c.length, 4);
+  const h = { id: '1', ticker: 'NOVO-B.CO', type: 'stock', dividend: {} }; M.applyToHolding(h, a, '2026-10-14');
+  assert.deepStrictEqual([h.sector, h.country, h.hist.from], ['Healthcare', 'Danemark', '2026-07']);
+  const h2 = { id: '2', ticker: 'NOVO-B.CO', type: 'stock', geoLocked: true, sector: 'Ma saisie', country: 'Mon pays', dividend: {} }; M.applyToHolding(h2, a, '2026-10-14'); assert.deepStrictEqual([h2.sector, h2.country], ['Ma saisie', 'Mon pays']);
+  console.log('ok   historique de cours mensuel, secteur et pays (dérivé ou saisi)');
+})();

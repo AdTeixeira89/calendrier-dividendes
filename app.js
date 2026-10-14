@@ -22,11 +22,12 @@ function defaultState() {
 let state = defaultState();
 let view = {
   page: 'home', account: 'all', tables: {},
+  divTab: 'calendar', alloc: { basis: 'value' },
   cal: { mode: 'month', cursor: new Date(), asset: 'all', status: 'all' },
   hist: { tab: 'payments', year: 'all', month: 'all', asset: 'all', status: 'all' },
   port: { q: '', type: 'all', div: 'all' },
   stats: { year: new Date().getFullYear() },
-  home: { year: new Date().getFullYear() },
+  home: { year: new Date().getFullYear(), period: 12 },
   sync: { state: 'local', msg: '', at: 0 }
 };
 
@@ -105,6 +106,40 @@ async function ensureFx() {
     if (d && d.rates) { fx = { rates: Object.assign({ EUR: 1 }, d.rates), date: d.date }; localStorage.setItem('fxRatesCache_v2', JSON.stringify({ day: todayISO(), date: d.date, rates: fx.rates })); renderPageSoft(); }
   } catch (e) { /* les totaux restent affichés dans leur devise d'origine si possible */ }
 }
+/* Taux de change HISTORIQUES (fin de chaque mois), pour valoriser le passé au bon taux. Une seule requête
+   (Frankfurter, données BCE) mise en cache pour la journée ; sans réseau on retombe sur le taux actuel. */
+let fxHist = null;
+async function ensureFxHistory() {
+  try {
+    const curs = Array.from(new Set(state.holdings.flatMap((h) => [h.currency, Engine.costCur(h)]).concat([baseCur()]))).filter((c) => c && c !== 'EUR').sort();
+    if (!curs.length) { fxHist = {}; return; }
+    const from = state.holdings.reduce((m, h) => (h.hist && h.hist.from < m ? h.hist.from : m), Engine.addYM(Engine.ymOf(new Date()), -60)) + '-01';
+    const raw = localStorage.getItem('fxHist_v1');
+    if (raw) { const c = JSON.parse(raw); if (c.day === todayISO() && c.from <= from && curs.every((x) => c.curs.indexOf(x) >= 0)) { fxHist = c.rates; return; } }
+    const r = await fetch('https://api.frankfurter.dev/v1/' + from + '..' + todayISO() + '?base=EUR&symbols=' + curs.join(','));
+    if (!r.ok) return;
+    const d = await r.json(), out = {};
+    Object.keys(d.rates || {}).sort().forEach((day) => { Object.keys(d.rates[day]).forEach((c) => { (out[c] = out[c] || {})[day.slice(0, 7)] = d.rates[day][c]; }); });   // le dernier jour du mois l'emporte
+    fxHist = out;
+    localStorage.setItem('fxHist_v1', JSON.stringify({ day: todayISO(), from, curs, rates: out }));
+    renderPageSoft();
+  } catch (e) { /* silencieux : taux actuel utilisé à la place */ }
+}
+function rateAt(cur, ym) {
+  if (!cur || cur === 'EUR') return 1;
+  const m = fxHist && fxHist[cur];
+  if (m) {
+    if (m[ym]) return m[ym];
+    let best = null; Object.keys(m).sort().forEach((k) => { if (k <= ym) best = m[k]; });
+    if (best) return best; const ks = Object.keys(m).sort(); if (ks.length) return m[ks[0]];
+  }
+  return (fx.rates || {})[cur] || null;
+}
+/* Montant dans sa devise → devise de base, au taux de fin de mois ym. */
+function convertAt(amount, cur, ym) {
+  const a = rateAt(cur, ym), b = rateAt(baseCur(), ym);
+  return a && b ? amount / a * b : null;
+}
 const baseCur = () => state.settings.baseCurrency || 'EUR';
 /* Convertit vers la devise de base ; null si le taux est indisponible (jamais de faux chiffre). */
 function convert(amount, cur) {
@@ -149,7 +184,7 @@ async function refreshMarket(list, o) {
     progress: (i, n, h) => { if (modal) { const m = $('#rfMsg'), b = $('#rfBar'); if (m) m.textContent = i + ' / ' + n + ' — ' + (h.displayTicker || h.ticker); if (b) b.style.width = (100 * i / n) + '%'; } }
   });
   refreshing = false;
-  if (res.ok) { state.meta.lastMarketUpdate = Date.now(); saveState(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
+  if (res.ok) { state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
   if (!o.silent) renderPage(); else if (res.ok) renderPageSoft();
   if (!o.silent) {
@@ -404,20 +439,29 @@ function showAuth(mode) {
 const PAGES = {
   home: { label: 'Accueil', icon: 'home', render: (h) => renderHome(h) },
   portfolio: { label: 'Mon portefeuille', short: 'Portefeuille', icon: 'wallet', render: (h) => renderPortfolio(h) },
-  calendar: { label: 'Calendrier des dividendes', short: 'Calendrier', icon: 'calendar', render: (h) => renderCalendar(h) },
-  history: { label: 'Historique', icon: 'history', render: (h) => renderHistory(h) },
-  stats: { label: 'Statistiques', short: 'Stats', icon: 'stats', render: (h) => renderStats(h) },
+  allocation: { label: 'Répartition', icon: 'pie', render: (h) => renderAllocation(h) },
+  dividends: { label: 'Dividendes', icon: 'coins', render: (h) => renderDividends(h) },
   settings: { label: 'Paramètres', short: 'Réglages', icon: 'settings', render: (h) => renderSettings(h) }
 };
-const SLUG = { home: 'accueil', portfolio: 'portefeuille', calendar: 'calendrier', history: 'historique', stats: 'statistiques', settings: 'parametres' };
+const SLUG = { home: 'accueil', portfolio: 'portefeuille', allocation: 'repartition', dividends: 'dividendes', settings: 'parametres' };
+const DIV_SLUG = { calendar: 'calendrier', history: 'historique', stats: 'statistiques' };
+/* Anciens liens conservés : #/calendrier, #/historique, #/statistiques ouvrent l'onglet correspondant des Dividendes. */
 function go(page) {
+  if (page === 'calendar' || page === 'history' || page === 'stats') { view.divTab = page; page = 'dividends'; }
   if (!PAGES[page]) page = 'home';
   view.page = page;
-  const slug = '#/' + SLUG[page];
+  const slug = '#/' + SLUG[page] + (page === 'dividends' ? '/' + DIV_SLUG[view.divTab || 'calendar'] : '');
   if (location.hash !== slug) history.replaceState(null, '', slug);
   renderPage(); window.scrollTo(0, 0);
 }
-function pageFromHash() { const s = location.hash.replace('#/', ''); return Object.keys(SLUG).find((k) => SLUG[k] === s) || 'home'; }
+function pageFromHash() {
+  const parts = location.hash.replace('#/', '').split('/'), s = parts[0];
+  const old = Object.keys(DIV_SLUG).find((k) => DIV_SLUG[k] === s);
+  if (old) { view.divTab = old; return 'dividends'; }
+  const page = Object.keys(SLUG).find((k) => SLUG[k] === s) || 'home';
+  if (page === 'dividends' && parts[1]) { const t = Object.keys(DIV_SLUG).find((k) => DIV_SLUG[k] === parts[1]); if (t) view.divTab = t; }
+  return page;
+}
 
 function buildShell() {
   const nav = Object.keys(PAGES).map((k) => '<button class="nav-link" type="button" data-go="' + k + '">' + icon(PAGES[k].icon) + '<span>' + PAGES[k].label.replace('Calendrier des dividendes', 'Calendrier') + '</span></button>').join('');
@@ -546,11 +590,11 @@ function startApp() {
     appStarted = true;
     buildShell();
     view.page = pageFromHash();
-    window.addEventListener('hashchange', () => { const p = pageFromHash(); if (p !== view.page) { view.page = p; renderPage(); } });
+    window.addEventListener('hashchange', () => { const tab = view.divTab, p = pageFromHash(); if (p !== view.page || (p === 'dividends' && tab !== view.divTab)) { view.page = p; renderPage(); } });
     window.addEventListener('online', () => { if (Cloud.user()) { pullIfChanged(); if (state.meta.dirty) scheduleSync(); } });
     window.addEventListener('offline', () => { if (Cloud.user()) setSync('offline', 'Hors-ligne'); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); } });
-    ensureFx();
+    ensureFx(); ensureFxHistory();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(() => { snapshotForWorker(); checkNotifications(); }).catch(() => {});
     setTimeout(() => { if (state.settings.autoRefresh && state.settings.relayUrl && state.holdings.length && staleMarket()) refreshMarket(null, { silent: true }); }, 2500);
   }

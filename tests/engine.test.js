@@ -124,3 +124,42 @@ console.log(n + ' tests passed');
     const y = E.yearlySeries({ holdings: [nov], payments: pays }, 'gross', cv3, null); assert.deepStrictEqual([y[0].verified, y[0].unverified], [100, 50]);
   });
 })();
+// ---- valeur dans le temps, performance, répartition ----
+(() => {
+  const t4 = (name, fn) => { try { fn(); console.log('ok  ', name); } catch (e) { console.log('FAIL', name, '\n   ', e.message); process.exitCode = 1; } };
+  const today = new Date(2026, 9, 14);
+  const cvA = (a, c) => (c === 'EUR' ? a : c === 'USD' ? a / 1.2 : null);
+  const cvAt = (a, c, ym) => (c === 'EUR' ? a : c === 'USD' ? a / (ym < '2026-06' ? 1.0 : 1.2) : null);
+  const hh = (id, o) => Object.assign({ id, ticker: id, type: 'stock', currency: 'EUR', quantity: 10, avgCost: 50, price: 60, hist: { from: '2026-05', c: [40, 45, 50, 55, 58, 60] }, account: 'a', dividend: { lastAmount: 1, anchorMonth: 2, frequency: 'quarterly' } }, o || {});
+  t4('valeur mensuelle : quantités actuelles (rétrospectif), dernier point = cours actuel, devise historique', () => {
+    const s = { holdings: [hh('a'), hh('b', { currency: 'USD', hist: { from: '2026-05', c: [100, 100, 100, 100, 100, 100] }, price: 120, quantity: 1 })], transactions: [] };
+    const v = E.valueSeries(s, cvAt, { months: 12, today });
+    assert.strictEqual(v.retro, true); assert.strictEqual(v.points.length, 6); assert.strictEqual(v.points[0].ym, '2026-05');
+    assert.ok(Math.abs(v.points[0].value - (400 + 100 / 1.0)) < 1e-9, 'mai : 400 + 100 USD au taux de mai : ' + v.points[0].value);
+    assert.ok(Math.abs(v.points[5].value - (600 + 120 / 1.2)) < 1e-9, 'octobre = cours actuel : ' + v.points[5].value);
+    assert.deepStrictEqual(v.coverage, { have: 2, total: 2, missing: [] });
+  });
+  t4('valeur mensuelle : les actifs sans historique sont signalés, jamais inventés ; les opérations pilotent les quantités', () => {
+    const s = { holdings: [hh('a'), hh('b', { hist: null })], transactions: [] };
+    const v = E.valueSeries(s, cvAt, { months: 3, today }); assert.deepStrictEqual(v.coverage.missing, ['b']); assert.strictEqual(v.points.length, 3);
+    const s2 = { holdings: [hh('a', { quantity: 15 })], transactions: [{ holdingId: 'a', type: 'buy', qty: 10, date: '2026-04-01' }, { holdingId: 'a', type: 'buy', qty: 5, date: '2026-09-10' }] };
+    const v2 = E.valueSeries(s2, cvAt, { months: 12, today }); assert.strictEqual(v2.retro, false);
+    assert.strictEqual(v2.points[0].value, 10 * 40); assert.strictEqual(v2.points[4].value, 15 * 58);   // septembre : 15 titres au cours de septembre
+  });
+  t4('performance : gain et % par actif et global (PRU), classement', () => {
+    const s = { holdings: [hh('a'), hh('b', { price: 40 }), hh('c', { avgCost: null })] };
+    const p = E.performance(s, cvA, null);
+    assert.strictEqual(p.gain, 100 - 100); assert.strictEqual(p.cost, 1000); assert.strictEqual(p.count, 2);
+    assert.strictEqual(p.rows.find((r) => r.id === 'a').pct, 0.2); assert.strictEqual(p.rows.find((r) => r.id === 'c').pct, null, 'sans PRU : pas de performance');
+    assert.strictEqual(p.best[0].id, 'a'); assert.strictEqual(p.worst[0].id, 'b'); assert.ok(Math.abs(p.rows.find((r) => r.id === 'a').weight - 600 / 1600) < 1e-9);
+  });
+  t4('répartition : somme à 100 %, « Autres » regroupe la queue, valeur à défaut investi (compté à part), exclusions signalées', () => {
+    const hs = Array.from({ length: 12 }, (_, i) => hh('h' + i, { sector: 'S' + (i % 10), quantity: i + 1 }));
+    hs.push(hh('np', { price: null, hist: null, sector: 'S1' }));      // sans cours : investi
+    hs.push(hh('nz', { price: null, avgCost: null, hist: null }));      // sans rien : exclu
+    const a = E.allocation({ holdings: hs }, (h) => h.sector, 'value', cvA, null, 5);
+    assert.strictEqual(a.items.length, 6); assert.strictEqual(a.items[5].key, 'Autres'); assert.ok(Math.abs(a.items.reduce((s, x) => s + x.pct, 0) - 1) < 1e-9);
+    assert.strictEqual(a.fallback, 1); assert.strictEqual(a.excluded, 1);
+    assert.strictEqual(E.allocation({ holdings: hs }, (h) => h.sector || 'Non renseigné', 'dividend', cvA, null, 5).excluded, 0 + 2 - 2 + (hs.filter((h) => !E.isPayer(h)).length));
+  });
+})();

@@ -45,6 +45,8 @@ function openHoldingModal(id) {
     '<div class="row2">' + fld('Nom', '<input type="text" id="hName" value="' + esc(d.name) + '">', '', 'hName') + fld('Compte', '<select id="hAcc">' + state.accounts.map((a) => opt(a.id, a.name, a.id === d.account)).join('') + '</select>', '', 'hAcc') + '</div>' +
     '<div class="row2">' + fld('Type', '<select id="hType">' + Object.keys(Engine.TYPES).map((k) => opt(k, Engine.TYPES[k], d.type === k)).join('') + '</select>', 'Un ETF capitalisant ne verse aucun dividende.', 'hType') +
     fld('Devise', '<select id="hCur">' + (CURRENCIES.indexOf(d.currency) < 0 ? [d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === d.currency)).join('') + '</select>', '', 'hCur') + '</div>' +
+    '<div class="row2">' + fld('Secteur', '<select id="hSector"><option value="">Automatique (données de marché)</option>' + Object.keys(SECTOR_FR).map((k) => opt(k, SECTOR_FR[k], d.sector === k)).join('') + (d.sector && !SECTOR_FR[d.sector] ? opt(d.sector, d.sector, true) : '') + '</select>', d.geoLocked ? 'Saisi par vous : jamais écrasé' : 'Récupéré automatiquement, modifiable', 'hSector') +
+    fld('Pays', '<input type="text" id="hCountry" list="countryList" value="' + esc(d.country || '') + '" placeholder="automatique"><datalist id="countryList">' + Array.from(new Set(Object.values(Market.COUNTRY_NAME).concat(['ETF multi-pays']))).sort().map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>', 'Pays de l\'émetteur (d\'après l\'ISIN)', 'hCountry') + '</div>' +
     '<div id="hDivBox"><div class="sec">Dividende</div>' +
     '<div class="btn-row" style="margin-bottom:10px"><button class="btn sm" type="button" id="hFetch">' + icon('refresh') + 'Récupérer automatiquement</button><span class="hint" id="hFetchMsg"></span></div>' +
     fld('Distribution', '<select id="hPays"><option value="1"' + (payer ? ' selected' : '') + '>Verse un dividende</option><option value="0"' + (!payer ? ' selected' : '') + '>Ne verse pas de dividende</option></select>', 'Aucun dividende n\'est jamais inventé : sans données, l\'actif reste « données manquantes ».', 'hPays') +
@@ -119,6 +121,10 @@ function saveHoldingForm(m, ex) {
   d.name = $('#hName', m).value.trim(); d.account = $('#hAcc', m).value; d.currency = $('#hCur', m).value; const cc = $('#hCostCur', m).value; d.costCurrency = cc === d.currency ? null : cc;
   d.type = $('#hType', m).value; if (prevType !== null && prevType !== d.type) d.typeLocked = true; if (prevType === null && d.type !== 'stock') d.typeLocked = d.typeLocked || false;
   if (Market.isISIN(t)) d.isin = t.toUpperCase();
+  // secteur / pays : une saisie manuelle est protégée des actualisations ; vide = retour à l'automatique
+  const secV = $('#hSector', m).value, ctyV = $('#hCountry', m).value.trim();
+  if (secV || ctyV) { d.sector = secV || d.sector || null; d.country = ctyV || d.country || null; d.geoLocked = true; }
+  else { if (d.geoLocked) { d.sector = null; d.country = null; } d.geoLocked = false; }
   const dv = d.dividend = d.dividend || {};
   const dvBefore = ex ? JSON.stringify([ex.dividend && ex.dividend.lastAmount, ex.dividend && ex.dividend.frequency, ex.dividend && ex.dividend.anchorMonth]) : null;
   const none = d.type === 'etf_acc' || $('#hPays', m).value === '0';
@@ -332,29 +338,50 @@ function renderPositionsMapping(rows, hIdx) {
     '<div class="row2">' + fld('Ticker ou ISIN', colSelect('mT', head, T, false), '', 'mT') + fld('Quantité', colSelect('mQ', head, Q, false), '', 'mQ') + '</div>' +
     '<div class="row2">' + fld('Nom (facultatif)', colSelect('mN', head, N), '', 'mN') + fld('Prix de revient unitaire (facultatif)', colSelect('mC', head, C), 'Ne choisissez pas « Clôture » : ce n\'est pas votre prix d\'achat.', 'mC') + '</div>' +
     '<div class="row2">' + fld('Devise (facultatif)', colSelect('mU', head, U), '', 'mU') + fld('Portefeuille de destination', '<select id="mA">' + state.accounts.map((a) => opt(a.id, a.name, (view.account !== 'all' ? view.account : state.accounts[0].id) === a.id)).join('') + '</select>', '', 'mA') + '</div>' +
-    '<div class="sec">Aperçu</div>' + previewTable(rows, hIdx) + '<span class="hint">Les actifs déjà présents dans le portefeuille (même ticker / ISIN) sont ignorés. Après l\'import, les données de dividende sont récupérées automatiquement.</span>' +
+    '<div id="mSummary" class="notice info" style="margin-top:6px"></div><span class="hint">Les actifs déjà présents (même ISIN, ticker ou nom) sont <b>conservés tels quels</b> : quantité, PRU et toutes leurs données restent inchangés. Seuls les nouveaux actifs sont ajoutés, puis leurs données de marché sont récupérées automatiquement.</span><div class="sec">Aperçu</div>' + previewTable(rows, hIdx) +
     '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="mGo">Importer</button></div></div>', { wide: true });
   $('#mH', m).onchange = (e) => renderPositionsMapping(rows, Number(e.target.value));
+  const cols = () => ({ t: Number($('#mT', m).value), q: Number($('#mQ', m).value), nm: Number($('#mN', m).value), cc: Number($('#mC', m).value), cu: Number($('#mU', m).value), acc: $('#mA', m).value });
+  const refresh = () => {
+    const c = cols(); const sm = $('#mSummary', m);
+    if (c.t < 0 || c.q < 0) { sm.innerHTML = '<span>Choisissez les colonnes ticker / ISIN et quantité.</span>'; return null; }
+    const r = classifyPositions(rows, hIdx, c);
+    sm.innerHTML = '<span><b>' + r.fresh.length + '</b> nouvel(s) actif(s) à ajouter · <b>' + r.dups.length + '</b> déjà présent(s) <b>conservé(s) sans modification</b>' + (r.bad ? ' · ' + r.bad + ' ligne(s) ignorée(s)' : '') + '</span>';
+    return r;
+  };
+  $$('select', m).forEach((x) => x.addEventListener('change', (e) => { if (e.target.id !== 'mH') refresh(); }));
+  refresh();
   $('#mGo', m).onclick = async () => {
-    const col = (id) => Number($('#' + id, m).value), t = col('mT'), q = col('mQ'), nm = col('mN'), cc = col('mC'), cu = col('mU'), acc = $('#mA', m).value;
-    if (t < 0 || q < 0) { toast('Sélectionnez au minimum les colonnes ticker et quantité.', { error: true }); return; }
-    const have = new Set(state.holdings.filter((h) => h.account === acc).flatMap((h) => [String(h.ticker).toUpperCase(), String(h.isin || '').toUpperCase()]).filter(Boolean));
-    const added = []; let skipDup = 0, skipBad = 0;
-    rows.slice(hIdx + 1).forEach((r) => {
-      const tk = String(r[t] || '').trim(); const qty = parseNum(r[q]);
-      if (!tk || !qty || qty <= 0 || isNaN(qty)) { skipBad++; return; }
-      if (have.has(tk.toUpperCase())) { skipDup++; return; }
-      have.add(tk.toUpperCase());
-      const cur = cu >= 0 ? String(r[cu] || '').trim().toUpperCase() : '';
-      const h = { id: uid(), ticker: tk, displayTicker: tk.toUpperCase(), isin: Market.isISIN(tk) ? tk.toUpperCase() : '', name: nm >= 0 ? String(r[nm] || '').trim() : '', type: 'stock', quantity: qty,
-        avgCost: cc >= 0 && !isNaN(parseNum(r[cc])) ? parseNum(r[cc]) : null, currency: /^[A-Z]{3}$/.test(cur) ? cur : baseCur(), account: acc, logo: null, source: 'import', addedAt: todayISO(), dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } };
-      added.push(h);
-    });
-    if (!added.length) { closeModal(); toast('0 actif importé' + (skipDup ? ' · ' + skipDup + ' déjà présent(s)' : '') + (skipBad ? ' · ' + skipBad + ' ligne(s) invalide(s) (colonnes mal choisies ?)' : '') + '.', { error: true, ms: 6000 }); return; }
+    const c = cols(); if (c.t < 0 || c.q < 0) { toast('Sélectionnez au minimum les colonnes ticker et quantité.', { error: true }); return; }
+    const r = classifyPositions(rows, hIdx, c), added = r.fresh;
+    if (!added.length) { closeModal(); toast('Aucun nouvel actif : ' + r.dups.length + ' déjà présent(s), conservé(s) tel(s) quel(s)' + (r.bad ? ' · ' + r.bad + ' ligne(s) invalide(s) (colonnes mal choisies ?)' : '') + '.', { ms: 6000 }); return; }
+    // Les actifs existants ne sont JAMAIS modifiés : on n'ajoute que les nouveaux.
     state.holdings.push.apply(state.holdings, added); saveState(); closeModal(); renderPage();
-    toast(added.length + ' actif(s) importé(s)' + (skipDup ? ', ' + skipDup + ' déjà présent(s)' : '') + (skipBad ? ', ' + skipBad + ' ligne(s) ignorée(s)' : '') + '.');
+    toast(added.length + ' nouvel(s) actif(s) ajouté(s) · ' + r.dups.length + ' déjà présent(s) conservé(s) sans modification' + (r.bad ? ' · ' + r.bad + ' ligne(s) ignorée(s)' : '') + '.', { ms: 6000 });
     if (state.settings.relayUrl) await refreshMarket(added);
   };
+}
+
+/* Sépare les lignes d'un relevé en NOUVEAUX actifs et actifs DÉJÀ PRÉSENTS (même portefeuille).
+   Un actif est « déjà présent » s'il porte le même ISIN, le même ticker ou, à défaut, le même nom
+   (cas d'un ancien actif dont l'ISIN n'a pas été conservé). */
+function classifyPositions(rows, hIdx, c) {
+  const inAcc = state.holdings.filter((h) => h.account === c.acc);
+  const keys = new Set(), names = new Set();
+  inAcc.forEach((h) => { [h.ticker, h.displayTicker, h.isin].forEach((k) => { if (k) keys.add(String(k).trim().toUpperCase()); }); if (h.name) names.add(norm(h.name)); });
+  const fresh = [], dups = []; let bad = 0;
+  rows.slice(hIdx + 1).forEach((r) => {
+    const tk = String(r[c.t] || '').trim(), qty = parseNum(r[c.q]);
+    if (!tk || !qty || qty <= 0 || isNaN(qty)) { bad++; return; }
+    const name = c.nm >= 0 ? String(r[c.nm] || '').trim() : '';
+    if (keys.has(tk.toUpperCase()) || (name && names.has(norm(name)))) { dups.push(tk); return; }
+    keys.add(tk.toUpperCase()); if (name) names.add(norm(name));
+    const cur = c.cu >= 0 ? String(r[c.cu] || '').trim().toUpperCase() : '';
+    fresh.push({ id: uid(), ticker: tk, displayTicker: tk.toUpperCase(), isin: Market.isISIN(tk) ? tk.toUpperCase() : '', name, type: 'stock', quantity: qty,
+      avgCost: c.cc >= 0 && !isNaN(parseNum(r[c.cc])) ? parseNum(r[c.cc]) : null, currency: /^[A-Z]{3}$/.test(cur) ? cur : baseCur(), account: c.acc, logo: null, source: 'import', addedAt: todayISO(),
+      dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } });
+  });
+  return { fresh, dups, bad };
 }
 
 /* ===============================================================

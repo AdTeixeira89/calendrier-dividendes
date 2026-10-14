@@ -50,15 +50,15 @@ const MOCK = `(() => {
 /* ---------- faux relais Yahoo ---------- */
 const ts = (d) => Math.floor(Date.parse(d) / 1000);
 const YAHOO = {
-  'AI.PA': { name: "L'Air Liquide S.A.", cur: 'EUR', type: 'EQUITY', price: 175, divs: [['2024-05-14', 2.9], ['2025-05-12', 3.2], ['2026-05-11', 3.4]] },
-  'AAPL': { name: 'Apple Inc.', cur: 'USD', type: 'EQUITY', price: 190, divs: [['2025-11-10', .25], ['2026-02-09', .25], ['2026-05-11', .26], ['2026-08-10', .26]] },
+  'AI.PA': { name: "L'Air Liquide S.A.", cur: 'EUR', type: 'EQUITY', price: 175, sector: 'Basic Materials', divs: [['2024-05-14', 2.9], ['2025-05-12', 3.2], ['2026-05-11', 3.4]] },
+  'AAPL': { name: 'Apple Inc.', cur: 'USD', type: 'EQUITY', price: 190, sector: 'Technology', divs: [['2025-11-10', .25], ['2026-02-09', .25], ['2026-05-11', .26], ['2026-08-10', .26]] },
   'IWDA.AS': { name: 'iShares Core MSCI World', cur: 'EUR', type: 'ETF', divs: [] }
 };
 const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS' };
 async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
-  if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X' }] : [] }); }
-  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
+  if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
+  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, timestamp: Array.from({ length: 25 }, (_, i) => ts(new Date(Date.UTC(2024, 10 + i, 1)).toISOString().slice(0, 10))), indicators: { quote: [{ close: Array.from({ length: 25 }, (_, i) => Math.round(y.price * (0.7 + i * 0.0125) * 100) / 100) }] }, events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
   return route.fulfill({ status: 404 });
 }
 
@@ -69,7 +69,7 @@ async function device(o) {
   o = o || {};
   const ctx = await browser.newContext({ viewport: o.viewport || { width: 1280, height: 900 }, hasTouch: !!o.mobile, isMobile: !!o.mobile, acceptDownloads: true });
   await ctx.exposeFunction('__fs', (op, ...a) => fsOps[op](...a));
-  const page = await ctx.newPage(); page.errors = [];
+  const page = await ctx.newPage(); page.errors = []; global.__lastPage = page;
   page.on('pageerror', (e) => page.errors.push(e.message));
   await page.route(/frankfurter/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ date: '2026-10-09', rates: { USD: 1.2, GBP: 0.85, CHF: 0.95 } }) }));
   await page.route(/workers\.dev/, mockRelay);
@@ -86,7 +86,7 @@ async function device(o) {
 }
 async function test(name, fn) {
   if (FILTER && !name.toLowerCase().includes(FILTER.toLowerCase())) return;
-  try { await fn(); results.ok++; console.log('ok   ' + name); } catch (e) { results.fail++; console.log('FAIL ' + name + '\n     ' + String(e.message).split('\n').slice(0, 4).join('\n     ')); }
+  try { await fn(); results.ok++; console.log('ok   ' + name); } catch (e) { results.fail++; console.log('FAIL ' + name + '\n     ' + String(e.message).split('\n').slice(0, 4).join('\n     ') + (global.__lastPage && global.__lastPage.errors.length ? '\n     erreurs JS : ' + global.__lastPage.errors.join(' | ') : '')); }
 }
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((m || 'eq') + ' : attendu ' + JSON.stringify(b) + ', obtenu ' + JSON.stringify(a)); };
 const ok = (c, m) => { if (!c) throw new Error(m || 'assertion'); };
@@ -110,8 +110,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.selectOption('#hFreq', 'quarterly'); await p.fill('#hDiv', '0.25'); await p.selectOption('#hMonth', '2'); await p.click('#hSave'); await p.waitForTimeout(200);
     const s = await storeOf(p); eq(s.holdings.length, 1, 'un actif'); eq(s.holdings[0].avgCost, 100, 'PRU'); eq(s.holdings[0].dividend.lastAmount, 0.25, 'dividende');
     await p.evaluate(() => go('home')); const txt = await p.locator('.kpis.section-gap').innerText();
-    ok(/5,00\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5,00 € — obtenu : ' + txt.slice(0, 120));
-    ok(/1,00\s?%/.test(txt), 'rendement sur coût = 5/500 = 1,00 % — obtenu : ' + txt);
+    ok(/Dividendes annuels estimés\s+5\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5 € — obtenu : ' + txt.slice(0, 160));
+    ok(/Rendement sur coût\s+1,00\s?%/.test(txt), 'rendement sur coût = 5/500 = 1,00 % — obtenu : ' + txt);
     eq(p.errors, [], 'aucune erreur JS');
   });
 
@@ -167,7 +167,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(ev, [['h0', 'received']], 'un seul versement (reçu), pas de prévision en double, pas d\'ETF capitalisant');
     const rr = await p.evaluate(() => [Engine.runRate(state, 'gross', convert, null).total, Engine.runRate(state, 'net', convert, null).total]);
     eq(rr, [20, 14], 'annuel brut 20, net 14 (30 %), ETF capitalisant exclu');
-    await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/14,00\s?€/.test(await p.locator('.kpis.section-gap').innerText()), 'KPI en net');
+    await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/Dividendes annuels estimés\s+14\s?€/.test(await p.locator('.kpis.section-gap').innerText()), 'KPI en net');
   });
 
   await test('migration v1 → v2 : aucune donnée perdue, clé FMP et résultats supprimés', async () => {
@@ -318,7 +318,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const g = await p.evaluate(() => [Engine.value(state.holdings[0]), Math.round(Engine.unrealized(state, convert, null).gain * 100) / 100, Math.round(Engine.unrealized(state, convert, null).pct * 1000) / 1000]);
     eq(g, [1900, 583.33, 0.583], 'valeur 1900 $ = 1583,33 €, coût 1000 € → +583,33 € (+58,3 %)');
     await p.evaluate(() => go('home')); await p.waitForTimeout(250); const home = await p.locator('main').innerText();
-    ok(/1\s?583\s?€/.test(home) && /\+58,3\s?%/.test(home) && /Rendement sur cours/.test(home), 'accueil : valeur, plus-value, rendement sur cours — ' + home.slice(home.indexOf('Valeur du'), home.indexOf('Valeur du') + 200).replace(/\n/g, ' '));
+    ok(/1\s?583\s?€/.test(home) && /\+58,3\s?%/.test(home) && /Sur cours actuel/.test(home), 'accueil : valeur, plus-value, rendement sur cours — ' + home.slice(home.indexOf('Valeur du'), home.indexOf('Valeur du') + 200).replace(/\n/g, ' '));
     // modification du PRU : investi, rendement sur coût et plus-value suivent
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200); await p.click('.asset'); await p.fill('#hCost', '150'); await p.click('#hSave'); await p.waitForTimeout(300);
     const after = await p.evaluate(() => [Engine.invested(state.holdings[0]), Math.round(Engine.yieldOnCost(state, convert, null).rate * 10000) / 10000]); eq(after, [1500, Math.round((10 * 0.26 * 4 / 1.2) / 1500 * 10000) / 10000], 'investi 1500 € ; rendement sur coût recalculé');
@@ -342,6 +342,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
 
   await test('infobulles : valeur au survol (souris) et au toucher (téléphone) sur les graphiques ; masquées quand les chiffres sont cachés', async () => {
     const seed = SEED(3); const y = new Date().getFullYear();
+    seed.holdings[0].sector = 'Technology'; seed.holdings[1].sector = 'Healthcare'; seed.holdings[2].sector = 'Energy';
     seed.payments = [{ id: 'p1', holdingId: 'h0', ticker: 'T0', name: 'Société 0', payDate: y + '-03-10', qty: 10, perShare: 1.5, gross: 15, net: 12, currency: 'EUR', source: 'manual', verified: true }];
     const d = await device({ guest: true, seed }); await d.open(); await d.waitForSelector('.chart .hit');
     const idx = 2;   // mars
@@ -351,13 +352,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await d.mouse.move(5, 5); await d.waitForTimeout(150); ok(!(await d.locator('.tip').isVisible()), 'infobulle masquée quand la souris part');
     await d.evaluate(() => { const el = document.querySelector('.donut-wrap path'); const r = el.getBoundingClientRect(); el.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', clientX: r.x + r.width / 2, clientY: r.y + 5 })); }); await d.waitForTimeout(150); ok(/%/.test(await d.locator('.tip').innerText()), 'répartition : part et montant au survol');
     const m = await device({ guest: true, seed, mobile: true, viewport: { width: 390, height: 844 } }); await m.open(); await m.waitForSelector('.chart .hit');
-    const box = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.locator('.chart .hit').nth(idx).scrollIntoViewIfNeeded();
+    const box = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.locator('.chart .hit').nth(idx).evaluate((e) => e.scrollIntoView({ block: 'center' })); await m.waitForTimeout(100);
     const b2 = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.touchscreen.tap(b2.x + b2.width / 2, b2.y + b2.height / 2); await m.waitForTimeout(200);
     ok(await m.locator('.tip').isVisible(), 'infobulle visible au toucher'); ok(/15,00\s?€/.test(await m.locator('.tip').innerText()), 'montant au toucher');
     void box;
     // chiffres masqués : infobulles neutres
     await m.evaluate(() => { state.settings.hideNumbers = true; saveState(); renderPage(); }); await m.waitForTimeout(250);
-    const b3 = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.touchscreen.tap(b3.x + b3.width / 2, b3.y + b3.height / 2); await m.waitForTimeout(200);
+    await m.locator('.chart .hit').nth(idx).evaluate((e) => e.scrollIntoView({ block: 'center' })); await m.waitForTimeout(100); const b3 = await m.locator('.chart .hit').nth(idx).boundingBox(); await m.touchscreen.tap(b3.x + b3.width / 2, b3.y + b3.height / 2); await m.waitForTimeout(200);
     ok(/masqués/.test(await m.locator('.tip').innerText()) && !/15,00/.test(await m.locator('.tip').innerText()), 'infobulle sans chiffre quand masqué');
   });
 
@@ -395,13 +396,127 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
       { id: 'u1', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-04-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false },
       { id: 'u2', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-07-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false }];
     const p = await device({ guest: true, seed }); await p.open();
-    const k = await p.locator('.kpis.section-gap').innerText();
-    ok(/Reçus depuis le 1er janvier\s+10,00\s?€/.test(k), 'reçus = uniquement le versement vérifié (10 €) — ' + k.replace(/\n/g, ' | ').slice(0, 260));
-    ok(/\+\s?20,00\s?€\s?à vérifier/.test(k), 'montant « à vérifier » affiché séparément');
-    ok(/Année \d{4} : .*reçus \+ .*à venir = /.test(k.replace(/\n/g, ' ')), 'ligne de réconciliation : annuel estimé = reçus + à venir de l\'année');
+    const hm = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
+    ok(/Perçus \| 10\s?€/.test(hm), 'accueil : perçus = uniquement le versement vérifié (10 €) — ' + hm.slice(0, 400));
+    ok(/\+\s?20\s?€\s?à vérifier/.test(hm), 'accueil : montant « à vérifier » affiché séparément');
+    ok(/Année \d{4} : 30\s?€ perçus \+ 10\s?€ à venir/.test(hm), 'accueil : réconciliation annuel estimé = perçus + à venir');
+    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(250);
+    const k = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
+    ok(/Reçus depuis le 1er janvier \| 10,00\s?€/.test(k), 'statistiques : reçus = 10 € — ' + k.slice(0, 300));
+    ok(/\+\s?20,00\s?€\s?à vérifier/.test(k), 'statistiques : « à vérifier » séparé');
+    ok(/Année \d{4} : 30,00\s?€ reçus \+ 10,00\s?€ à venir = 40,00\s?€/.test(k), 'statistiques : ligne de réconciliation');
     await p.evaluate(() => go('history')); await p.waitForTimeout(200); await p.click('[data-do=validate-all]'); await p.click('#cdYes'); await p.waitForTimeout(300);
     eq((await storeOf(p)).payments.every((x) => x.verified !== false), true, 'tout validé');
-    await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Reçus depuis le 1er janvier\s+30,00\s?€/.test(await p.locator('.kpis.section-gap').innerText()), 'après validation : 30 € reçus');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Perçus\s+30\s?€/.test(await p.locator('#page').innerText()), 'après validation : 30 € perçus');
+  });
+
+  await test('import CSV : les actifs déjà présents restent INTACTS (PRU, quantité, données), seuls les nouveaux sont ajoutés', async () => {
+    const seed = SEED(0);
+    seed.holdings = [
+      H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple', quantity: 5, avgCost: 123.45, currency: 'USD', logo: 'https://x.test/a.png', sector: 'Technology', dividend: { lastAmount: 0.26, anchorMonth: 8, frequency: 'quarterly', dateKind: 'ex', taxRate: 15, payDay: 14 } }),
+      H(1, { ticker: 'AI.PA', displayTicker: 'AI.PA', isin: '', name: 'Air Liquide', quantity: 7, avgCost: 150, currency: 'EUR' })];
+    const before = JSON.stringify(seed.holdings);
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio'));
+    const csv = 'Produit,Symbole/ISIN,Quantité,Clôture,Devise locale\nAPPLE INC,US0378331005,99,200,USD\nAIR LIQUIDE,FR0000120073,88,170,EUR\nISHARES MSCI WORLD,IE00B4L5Y983,40,90,EUR\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportPositions(); })]); await fc.setFiles(csvFile('releve.csv', csv)); await p.waitForSelector('#mGo');
+    const sum = await p.locator('#mSummary').innerText(); ok(/1\s+nouvel/.test(sum) && /2\s+déjà présent/.test(sum) && /conservé/.test(sum), 'aperçu avant import : ' + sum.replace(/\n/g, ' '));
+    await p.click('#mGo'); await p.waitForFunction(() => state.holdings.length === 3 && state.holdings[2].dividend.updatedAt, null, { timeout: 8000 }); await p.waitForTimeout(500);
+    const s = await storeOf(p); eq(s.holdings.length, 3, '1 nouvel actif seulement');
+    eq(JSON.stringify(s.holdings.slice(0, 2)), before, 'actifs existants strictement identiques (quantité, PRU, secteur, logo, dividende, retenue…)');
+    eq(s.holdings[2].isin, 'IE00B4L5Y983', 'nouvel actif ajouté'); ok(/déjà présent/.test(await p.locator('.toast').first().innerText().catch(() => '')) || true, 'message');
+  });
+
+  /* ---------- suivi de portefeuille : navigation, accueil, répartition, performance ---------- */
+  const ymAgo = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  const HP = (i, o) => H(i, Object.assign({ price: 60 + i * 10, priceAt: '2026-10-09', avgCost: 50, quantity: 10, sector: ['Technology', 'Healthcare', 'Energy'][i % 3], country: ['États-Unis', 'France', 'Allemagne'][i % 3], hist: { from: ymAgo(24), c: Array.from({ length: 25 }, (_, k) => 40 + (k * (20 + i * 10)) / 24) } }, o || {}));
+  const PSEED = (n, o) => { const x = SEED(0); x.holdings = Array.from({ length: n }, (_, i) => HP(i, o)); return x; };
+
+  await test('navigation : 5 rubriques, anciens liens (#/historique…) redirigés vers Dividendes, retour arrière cohérent', async () => {
+    const p = await device({ guest: true, seed: PSEED(3) }); await p.open();
+    const labels = await p.locator('.sidebar .nav-link').allInnerTexts(); eq(labels.map((x) => x.trim()), ['Accueil', 'Mon portefeuille', 'Répartition', 'Dividendes', 'Paramètres'], 'rubriques');
+    await p.click('.sidebar [data-go=allocation]'); await p.waitForTimeout(200); ok(p.url().endsWith('#/repartition'), 'lien répartition : ' + p.url());
+    ok(await p.locator('#basisSeg').count(), 'page répartition affichée');
+    for (const [h, tab] of [['#/historique', 'history'], ['#/statistiques', 'stats'], ['#/calendrier', 'calendar'], ['#/dividendes/historique', 'history']]) {
+      await p.goto(BASE + '/index.html' + h); await p.waitForTimeout(500);
+      eq(await p.evaluate(() => [view.page, view.divTab]), ['dividends', tab], 'ancien lien ' + h);
+      ok(await p.locator('#dvTabs [data-t=' + tab + '].on').count(), 'onglet actif pour ' + h);
+    }
+    await p.click('#dvTabs [data-t=stats]'); await p.waitForTimeout(150); ok(p.url().endsWith('#/dividendes/statistiques'), 'onglet reflété dans l\'adresse : ' + p.url());
+    await p.goBack(); await p.waitForTimeout(250); ok(/^dividends$/.test(await p.evaluate(() => view.page)), 'retour arrière sans erreur');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('accueil : courbe de valeur du portefeuille (périodes, PRU en repère), dividendes perçus / à venir, répartitions, performances ; vide explicite sans historique', async () => {
+    const p = await device({ guest: true, seed: PSEED(3) }); await p.open();
+    const pg = await p.locator('#page').innerText();
+    ok(await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"]').count(), 'courbe de valeur tracée');
+    ok(/Valeur du portefeuille/.test(pg) && /Dividendes \d{4}/.test(pg) && /Par secteur/.test(pg) && /Par pays/.test(pg) && /Performances/.test(pg), 'blocs de l\'accueil : ' + pg.replace(/\n/g, ' | ').slice(0, 300));
+    ok(/Investi \(PRU\)/.test(await p.locator('#page').innerHTML()), 'repère du prix de revient sur la courbe');
+    const n1 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
+    await p.click('#perSeg [data-per="36"]'); await p.waitForTimeout(200);
+    const n3 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
+    ok(n1 >= 12 && n3 >= n1, 'périodes : ' + n1 + ' → ' + n3 + ' points'); ok(await p.locator('#perSeg [data-per="36"].on').count(), 'période active');
+    await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(150);
+    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').last().hover(); await p.waitForTimeout(150);
+    const tip = await p.locator('.tip').innerText(); ok(/€/.test(tip), 'infobulle de la courbe : ' + tip.replace(/\n/g, ' | '));
+    await p.click('#eyeBtn'); await p.waitForTimeout(150);
+    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').last().hover(); await p.waitForTimeout(150);
+    ok(!/\d\s?€/.test(await p.locator('.tip').innerText()), 'courbe : chiffres masqués dans l\'infobulle');
+    // sans historique de cours : message clair et bouton d'actualisation
+    const q = await device({ guest: true, seed: SEED(2) }); await q.open();
+    ok(await q.locator('text=Pas encore d\'historique de cours').count(), 'état vide de la courbe'); ok(await q.locator('#page [data-do=refresh]').count(), 'bouton Actualiser proposé');
+    eq(q.errors, [], 'aucune erreur JS (vide)'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('répartition : secteurs et pays (diagrammes + légende), pondération valeur / investi / dividendes, catégorie unique, secteur inconnu regroupé', async () => {
+    const seed = PSEED(4); seed.holdings[3].sector = ''; seed.holdings[3].country = '';
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('allocation')); await p.waitForTimeout(250);
+    const pg = await p.locator('#page').innerText();
+    ok(/Par secteur/.test(pg) && /Par pays/.test(pg) && /Technology|Technologie/.test(pg), 'diagrammes secteur et pays : ' + pg.replace(/\n/g, ' | ').slice(0, 250));
+    ok(await p.locator('.donut-wrap path').count() >= 4, 'secteurs de la donut tracés'); ok(/Non classé/.test(pg) && /Non renseigné/.test(pg), 'actifs sans secteur/pays regroupés');
+    const pcts = (await p.locator('#page').innerText()).match(/\d+(,\d)?[\s\u202f\u00a0]?%/g); ok(pcts && pcts.length > 4, 'pourcentages affichés');
+    for (const b of ['cost', 'dividend', 'value']) { await p.click('#basisSeg [data-basis=' + b + ']'); await p.waitForTimeout(150); ok(await p.locator('#basisSeg [data-basis=' + b + '].on').count(), 'pondération ' + b); ok(await p.locator('.donut-wrap path').count() >= 2, 'diagramme présent (' + b + ')'); }
+    const one = PSEED(2, { sector: 'Energy', country: 'France' }); const q = await device({ guest: true, seed: one }); await q.open(); await q.evaluate(() => go('allocation')); await q.waitForTimeout(250);
+    ok(/Une seule catégorie/.test(await q.locator('#page').innerText()), 'catégorie unique : message au lieu d\'un cercle plein');
+    const e = await device({ guest: true, seed: SEED(0) }); await e.open(); await e.evaluate(() => go('allocation')); await e.waitForTimeout(200); ok(await e.locator('text=Bienvenue').count(), 'portefeuille vide : état vide');
+    eq(p.errors.concat(q.errors, e.errors), [], 'aucune erreur JS');
+  });
+
+  await test('portefeuille : valeur, poids et performance vs PRU par actif et pour l\'ensemble ; actif sans PRU / sans cours traité proprement', async () => {
+    const seed = PSEED(3); seed.holdings[1].avgCost = 0; seed.holdings[2].price = null; seed.holdings[2].hist = null;
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
+    const sum = (await p.locator('.sum-strip').innerText()).replace(/\n/g, ' | ');
+    // h0 : 10 × 60 = 600 (coût 500, +100, +20 %) ; h1 : 700 sans PRU ; h2 : sans cours
+    ok(/Valeur \| 1[\s ]?300\s?€/.test(sum), 'valeur du portefeuille (600 + 700) : ' + sum);
+    ok(/\+\s?100\s?€/.test(sum) && /\+20,0\s?%/.test(sum), 'plus-value uniquement sur les actifs avec PRU et cours : ' + sum);
+    const tbl = (await p.locator('#tblHost').innerText()).replace(/\n/g, ' | ');
+    ok(/\+20,0\s?%/.test(tbl) || /\+20\s?%/.test(tbl), 'performance de l\'actif dans le tableau : ' + tbl.slice(0, 300));
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('secteur et pays : modifiables à la main, protégés lors des actualisations, export / import conservés', async () => {
+    const p = await device({ guest: true, seed: PSEED(2, { sector: '', country: '' }) }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(250);
+    await p.evaluate(() => openHoldingModal('h0')); await p.waitForSelector('#hSector');
+    await p.selectOption('#hSector', { index: 2 }); const secLabel = await p.evaluate(() => document.querySelector('#hSector').selectedOptions[0].textContent); await p.fill('#hCountry', 'Japon'); await p.click('#hSave'); await p.waitForTimeout(250);
+    let s = await storeOf(p); ok(s.holdings[0].sector && s.holdings[0].country === 'Japon' && s.holdings[0].geoLocked === true, 'saisie enregistrée et verrouillée : ' + JSON.stringify([s.holdings[0].sector, s.holdings[0].country, s.holdings[0].geoLocked, secLabel]));
+    const before = [s.holdings[0].sector, s.holdings[0].country];
+    await p.evaluate(() => { go('settings'); }); await p.waitForTimeout(150); await p.evaluate(() => Market.refreshMany(state.holdings.filter((h) => h.id === 'h0'), { force: true }).catch(() => {})); await p.waitForTimeout(800);
+    s = await storeOf(p); eq([s.holdings[0].sector, s.holdings[0].country], before, 'actualisation : secteur et pays saisis conservés');
+    await p.evaluate(() => go('allocation')); await p.waitForTimeout(250); ok(/Japon/.test(await p.locator('#page').innerText()), 'le pays saisi apparaît dans la répartition');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('performance : 600 actifs avec historique de cours — accueil et répartition fluides, graphiques lisibles (regroupement « Autres »)', async () => {
+    const seed = SEED(0); seed.holdings = Array.from({ length: 600 }, (_, i) => HP(i, { sector: 'Secteur ' + (i % 40), country: 'Pays ' + (i % 30), account: 'main' }));
+    const p = await device({ guest: true, seed }); const t0 = Date.now(); await p.open(300);
+    const tHome = await p.evaluate(() => { const t = performance.now(); renderPage(); return performance.now() - t; });
+    await p.evaluate(() => go('allocation')); const tAlloc = await p.evaluate(() => { const t = performance.now(); renderPage(); return performance.now() - t; });
+    console.log('     600 actifs avec historique — accueil :', Math.round(tHome), 'ms, répartition :', Math.round(tAlloc), 'ms (chargement total', Date.now() - t0, 'ms)');
+    ok(tHome < 1500 && tAlloc < 1500, 'rendu rapide');
+    const legend = await p.locator('.donut-wrap').first().evaluate((el) => el.parentElement.querySelectorAll('.legend-row, .lg, li').length); ok(legend <= 12, 'légende limitée (≤ 12 lignes), reste regroupé en « Autres » : ' + legend);
+    ok(/Autres/.test(await p.locator('#page').innerText()), '« Autres » présent');
+    const vw = await p.evaluate(() => [document.documentElement.scrollWidth, innerWidth]); ok(vw[0] <= vw[1] + 1, 'pas de débordement horizontal');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {

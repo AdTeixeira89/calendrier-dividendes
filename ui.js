@@ -52,6 +52,8 @@ function relDays(iso) {
 
 /* ---------- icônes ---------- */
 const ICONS = {
+  pie: '<path d="M12 3v9h9A9 9 0 1 1 12 3z"/><path d="M15 3.6A9 9 0 0 1 20.4 9H15z"/>',
+  coins: '<circle cx="9" cy="9" r="5.5"/><path d="M14 5.2A5.5 5.5 0 1 1 9.8 14.8"/><path d="M9 7v4m-1.5-3h2.2"/>',
   home: '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1z"/>',
   wallet: '<rect x="3.5" y="7" width="17" height="12.5" rx="2.5"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3.5 12.5h17"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
@@ -324,6 +326,11 @@ document.addEventListener('pointerdown', (e) => {
 });
 document.addEventListener('scroll', () => { if (Tip.touch) tipHide(); }, true);
 
+/* ---------- vocabulaire secteurs (Yahoo → français) ---------- */
+const SECTOR_FR = { 'Technology': 'Technologie', 'Healthcare': 'Santé', 'Financial Services': 'Finance', 'Consumer Defensive': 'Consommation de base', 'Consumer Cyclical': 'Consommation cyclique',
+  'Basic Materials': 'Matériaux', 'Industrials': 'Industrie', 'Energy': 'Énergie', 'Utilities': 'Services publics', 'Real Estate': 'Immobilier', 'Communication Services': 'Communication', 'ETF': 'ETF / Fonds' };
+const sectorFr = (s) => (s ? (SECTOR_FR[s] || s) : null);
+
 /* ---------- graphiques SVG ---------- */
 function niceMax(v) {
   if (v <= 0) return 1;
@@ -337,7 +344,7 @@ function axisFmt(v, cur) {
 
 /* Barres empilées. layers : [{ name, color, values[], dashed? }] */
 function stackedBars(o) {
-  const W = 640, H = 230, L = 44, R = 8, T = 10, B = 26;
+  const W = 640, H = o.h || 230, L = 44, R = 8, T = 10, B = 26;
   const n = o.labels.length, mask = !!o.mask;
   const totals = o.labels.map((_, i) => o.layers.reduce((s, l) => s + (l.values[i] || 0), 0));
   const max = niceMax(Math.max.apply(null, totals.concat([0.01])));
@@ -386,4 +393,26 @@ function donut(items, cur, mask) {
 
 function simpleBars(items, cur, label) {
   return stackedBars({ labels: items.map((x) => String(x.year)), layers: [{ name: label || 'Dividendes reçus', color: 'var(--chart-1)', values: items.map((x) => x.total) }], cur, title: label });
+}
+
+/* Courbe (aire + ligne) avec zones de survol / toucher. points : [{ label, value }], ref : ligne de référence facultative. */
+function lineChart(o) {
+  const W = 640, H = 220, L = 52, R = 10, T = 12, B = 26, pts = o.points, n = pts.length, mask = !!o.mask;
+  if (n < 2) return '<div class="muted" style="padding:24px 0;text-align:center">' + esc(o.empty || 'Pas assez de données pour tracer la courbe.') + '</div>';
+  const vals = pts.map((p) => p.value).concat(o.ref ? [o.ref.value] : []);
+  let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.12; lo = Math.max(0, lo - pad); hi += pad;
+  const X = (i) => L + (W - L - R) * i / (n - 1), Y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  let svg = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.title || 'Évolution') + '"><defs><linearGradient id="lcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--chart-1)" stop-opacity=".30"/><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0"/></linearGradient></defs>';
+  for (let g = 0; g <= 4; g++) { const v = lo + (hi - lo) * g / 4, y = Y(v); svg += '<line class="grid-l" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + axisFmt(v) + '</text>'; }
+  const step = Math.max(1, Math.ceil(n / 7));
+  pts.forEach((p, i) => { if ((i % step === 0 && i < n - 1 - Math.floor(step / 2)) || i === n - 1) svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="' + (i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle') + '">' + esc(p.label) + '</text>'; });
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p.value).toFixed(1)).join(' ');
+  svg += '<path d="' + line + ' L' + X(n - 1).toFixed(1) + ' ' + (H - B) + ' L' + L + ' ' + (H - B) + ' Z" fill="url(#lcg)"/><path d="' + line + '" fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
+  if (o.ref) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(o.ref.value) + '" y2="' + Y(o.ref.value) + '" stroke="var(--chart-3)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="' + (W - R) + '" y="' + (Y(o.ref.value) - 5) + '" text-anchor="end" style="fill:var(--chart-3)">' + esc(o.ref.label) + '</text>';
+  svg += '<circle cx="' + X(n - 1) + '" cy="' + Y(pts[n - 1].value) + '" r="4" fill="var(--chart-1)" stroke="var(--surface)" stroke-width="2"/>';
+  const bw = (W - L - R) / (n - 1);
+  pts.forEach((p, i) => { svg += '<rect class="hit" x="' + (X(i) - bw / 2) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B + 18) + '" fill="transparent" data-tip="' + esc(p.tip || (p.label + (mask ? '\nMontants masqués' : '\n' + fmtMoney(p.value, o.cur)))) + '"/>'; });
+  return svg + '</svg>';
 }

@@ -6,6 +6,7 @@ const FREQ_LABEL = { monthly: 'Mensuelle', quarterly: 'Trimestrielle', semiannua
 const freqLabel = (f) => FREQ_LABEL[f] || '—';
 
 function pageHead(title, sub, actions) {
+  if (view.page === 'dividends') return '<div class="page-head page-head-sub"><div>' + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div><div class="btn-row">' + (actions || '') + '</div></div>';   // dans les onglets Dividendes, l'onglet fait office de titre
   return '<div class="page-head"><div><h1>' + esc(title) + '</h1>' + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div><div class="btn-row">' + (actions || '') + '</div></div>';
 }
 function modeSeg() {
@@ -83,9 +84,11 @@ function tickerHtml(next, mask) {
   }).join('') + '</div>';
 }
 
-function renderHome(host) {
+const kpiCard = (label, val, sub, cls) => '<div class="card kpi"><div class="lbl">' + label + '</div><div class="val ' + (cls || '') + '">' + val + '</div><div class="sub">' + (sub || '') + '</div></div>';
+
+/* Indicateurs de dividendes (onglet Dividendes → Statistiques) */
+function dividendKpisHtml() {
   const today = new Date(), mode = incomeMode(), ids = visibleIds(), y = today.getFullYear();
-  if (!state.holdings.length) { host.innerHTML = pageHead('Accueil', 'Résumé de votre portefeuille de dividendes') + emptyPortfolio(); wireDo(host); return; }
   const next = Engine.nextEvents(state, today, 120, ids);
   const run = Engine.runRate(state, mode, convert, ids);
   const rec = Engine.receivedBetween(state, y + '-01-01', Engine.toISO(today), mode, convert, ids);
@@ -99,7 +102,6 @@ function renderHome(host) {
   const yRec = Engine.sumEvents(yEvs.filter((e) => e.status === 'received'), mode, convert);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const anyUnver = state.payments.some((p) => p.verified === false);
-  const mask = !!state.settings.hideNumbers;
   const hs = visibleHoldings();
   const payers = hs.filter((h) => Engine.isPayer(h)).length;
   const missing = hs.filter((h) => Engine.dividendStatus(h) === 'missing');
@@ -108,7 +110,7 @@ function renderHome(host) {
   const allMissing = Array.from(new Set([].concat(run.missing, rec.missing, mSum.missing)));
   const netNote = mode === 'net' && (run.fallbacks || mSum.fallbacks) ? 'Net inconnu pour ' + (run.fallbacks) + ' actif(s) : brut utilisé' : '';
 
-  const kpi = (label, val, sub, cls) => '<div class="card kpi"><div class="lbl">' + label + '</div><div class="val ' + (cls || '') + '">' + val + '</div><div class="sub">' + (sub || '') + '</div></div>';
+  const kpi = kpiCard;
   const kpis = [
     kpi('Dividendes annuels estimés', money(run.total), 'Rythme sur 12 mois à dividendes actuels (estimation)<br>Année ' + y + ' : ' + money(yRec.total) + ' reçus + ' + money(yUp.total) + ' à venir = ' + money(yRec.total + yUp.total) + (netNote ? '<br>' + netNote : ''), 'income'),
     kpi('Reçus depuis le 1er janvier', rec.count ? money(rec.verified.total) : '—', rec.count ? (rec.count - rec.unverified) + ' versement(s) vérifié(s)' + (rec.unverified ? '<br>+ ' + money(rec.unverifiedSum.total) + ' à vérifier (' + rec.unverified + ', générés d\'après l\'historique de marché : voir Historique)' : '') : 'Aucun versement enregistré (voir Historique)', rec.verified.count ? 'income' : ''),
@@ -119,31 +121,7 @@ function renderHome(host) {
     kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) + (anyUnver ? ' (inclut des versements à vérifier)' : '') : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
   ].join('');
 
-  const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), yp = Engine.yieldOnPrice(state, convert, ids);
-  const priced = pv.count ? '' : ' — actualisez les données pour obtenir les cours';
-  const kpisV = [
-    kpi('Valeur du portefeuille', pv.count ? money(pv.total, 0) : '—', pv.count ? (pv.latest ? 'Cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) + ' · ' : '') + pv.count + ' / ' + pv.of + ' actif(s) valorisé(s)' : 'Aucun cours disponible' + priced),
-    kpi('Plus / moins-value latente', un.count ? (un.gain >= 0 ? '+' : '') + money(un.gain, 0) : '—', un.count ? fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis (' + un.count + ' actif(s) avec PRU et cours)' : 'Nécessite le prix de revient et le cours', un.count ? (un.gain >= 0 ? 'income' : 'neg') : ''),
-    kpi('Rendement sur cours', yp.rate === null ? '—' : fmtPct(yp.rate, 2), yp.rate === null ? 'Nécessite des cours et des dividendes' : 'Dividendes annuels estimés ÷ valeur actuelle (' + yp.count + ' actif(s))')
-  ].join('');
-  const series = Engine.monthlySeries(state, view.home.year, mode, convert, today, ids);
-  const dist = Engine.distribution(state, mode, convert, ids, 7);
-  const warn = missing.length ? '<div class="notice"><span><b>' + missing.length + ' actif(s) sans données de dividende</b> (' + missing.slice(0, 4).map((h) => esc(h.displayTicker || h.ticker)).join(', ') + (missing.length > 4 ? '…' : '') + '). Ils ne sont pas comptés dans les prévisions.</span><button class="btn sm" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>' : '';
-
-  host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>' + modeSeg()) +
-    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><section class="ticker"><div class="ticker-head"><h2>Prochains versements</h2><span class="muted">≈ estimé · survolez ou touchez un versement pour le détail</span></div>' + tickerHtml(next, mask) + '</section>' +
-    '<div class="grid two section-gap">' +
-    '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + view.home.year + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', mask, layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
-    '<section class="card card-pad"><h3>Répartition du revenu annuel estimé</h3>' + (dist.total ? donut(dist.items, baseCur(), mask) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>' +
-    '<div class="grid kpis section-gap">' + kpis + '</div><h2 class="section-h">Valeur du portefeuille</h2><div class="grid kpis">' + kpisV + '</div>' + missingNote(allMissing.concat(pv.missing)) + (warn ? '<div class="section-gap">' + warn + '</div>' : '') +
-    '</div>';
-  wireMode(host); wireDo(host);
-  $$('[data-yr]', host).forEach((b) => b.onclick = () => { view.home.year += Number(b.dataset.yr); renderHome(host); });
-  $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
-  const tr = $('#tickerTrack', host);
-  if (tr) tr.addEventListener('click', (e) => { const c = e.target.closest('.tk-chip'); if (!c) return; const ev = next[Number(c.dataset.i)]; if (ev) openDay(ev.date, next.filter((x) => x.date === ev.date)); });
-  startTickerScroll(tr);
+  return '<div class="grid kpis">' + kpis + '</div>' + missingNote(allMissing);
 }
 
 /* ===============================================================
@@ -163,7 +141,7 @@ function gainPct(h) {
   const v = Engine.value(h), i = Engine.invested(h); if (v === null || i === null) return null;
   const cv = convert(v, h.currency), ci = convert(i, Engine.costCur(h)); return cv === null || !ci ? null : (cv - ci) / ci;
 }
-function portfolioColumns(nextMap) {
+function portfolioColumns(nextMap, wMap) {
   const cur = (h, v, d) => v === null || v === undefined ? '—' : fmtMoney(v, h.currency, d === undefined ? {} : { d });
   return [
     { key: 'asset', label: 'Actif', essential: true, sort: (h) => (h.name || h.displayTicker || h.ticker || '').toLowerCase(),
@@ -175,6 +153,7 @@ function portfolioColumns(nextMap) {
     { key: 'invested', label: 'Investi', essential: true, align: 'r', sort: (h) => Engine.invested(h), html: (h) => Engine.invested(h) == null ? '—' : fmtMoney(Engine.invested(h), Engine.costCur(h)) },
     { key: 'price', label: 'Cours', align: 'r', sort: (h) => h.price, html: (h) => h.price > 0 ? '<span title="' + esc(h.priceAt ? 'Cours du ' + fmtDate(h.priceAt.slice(0, 10)) : '') + '">' + fmtMoney(h.price, h.currency) + '</span>' : '—' },
     { key: 'value', label: 'Valeur', essential: true, align: 'r', sort: (h) => { const v = Engine.value(h); return v === null ? null : convert(v, h.currency); }, html: (h) => cur(h, Engine.value(h)) },
+    { key: 'weight', label: 'Poids', align: 'r', sort: (h) => (wMap[h.id] === undefined ? null : wMap[h.id]), html: (h) => wMap[h.id] > 0 ? fmtPct(wMap[h.id], 1) : '—' },
     { key: 'gain', label: '+/- value', align: 'r', sort: (h) => gainOf(h), html: (h) => { const g = gainOf(h); return g === null ? '—' : '<span class="' + (g >= 0 ? 'pos' : 'neg') + '">' + (g >= 0 ? '+' : '') + fmtMoney(g, baseCur()) + '</span>'; } },
     { key: 'gainpct', label: '+/- value (%)', essential: true, align: 'r', sort: (h) => gainPct(h), html: (h) => { const g = gainPct(h); return g === null ? '—' : '<span class="' + (g >= 0 ? 'pos' : 'neg') + '">' + fmtPct(g, 1, true) + '</span>'; } },
     { key: 'yprice', label: 'Rendement / cours', align: 'r', sort: (h) => { const v = Engine.value(h); return v && Engine.isPayer(h) ? Engine.annualPerShare(h) * h.quantity / v : null; }, html: (h) => { const v = Engine.value(h); return v && Engine.isPayer(h) ? fmtPct(Engine.annualPerShare(h) * h.quantity / v, 2) : '—'; } },
@@ -205,10 +184,25 @@ function filteredHoldings() {
   });
 }
 
+/* Bandeau de synthèse : valeur, investi, plus-value (PRU) et rendement total (plus-value + dividendes perçus vérifiés). */
+function portfolioSummaryHtml(perf) {
+  const ids = visibleIds(), pv = Engine.portfolioValue(state, convert, ids), inv = Engine.investedTotal(state, convert, ids);
+  const rec = Engine.receivedBetween(state, '2000-01-01', todayISO(), 'gross', convert, ids), div = rec.verified.total;
+  const tr = perf.count && perf.cost > 0 ? (perf.gain + div) / perf.cost : null;
+  const cls = (v) => (v >= 0 ? 'pos' : 'neg');
+  const mask = !!state.settings.hideNumbers;
+  return '<div class="grid kpis sum-strip' + (mask ? ' hide-nums' : '') + '" style="margin-bottom:12px">' +
+    kpiCard('Valeur', pv.count ? money(pv.total, 0) : '—', pv.count + ' / ' + visibleHoldings().length + ' actif(s) valorisé(s)') +
+    kpiCard('Investi (PRU)', inv.count ? money(inv.cost, 0) : '—', inv.count + ' actif(s) avec PRU') +
+    kpiCard('Plus / moins-value', perf.count ? (perf.gain >= 0 ? '+' : '') + money(perf.gain, 0) : '—', perf.count ? fmtPct(perf.pct, 1, true) + ' sur ' + perf.count + ' actif(s) (PRU + cours)' : 'Nécessite le PRU et le cours', perf.count ? cls(perf.gain) === 'pos' ? 'income' : 'neg' : '') +
+    kpiCard('Rendement total', tr === null ? '—' : fmtPct(tr, 1, true), tr === null ? 'Plus-value + dividendes perçus' : 'Plus-value + ' + money(div, 0) + ' de dividendes perçus (vérifiés)', tr !== null ? (tr >= 0 ? 'income' : 'neg') : '') + '</div>';
+}
+
 function renderPortfolio(host) {
   if (!state.holdings.length) { host.innerHTML = pageHead('Mon portefeuille', 'Vos actifs, quantités et prix de revient') + emptyPortfolio(); wireDo(host); return; }
   const nextMap = nextByHolding();
-  const cols = portfolioColumns(nextMap);
+  const perfAll = Engine.performance(state, convert, visibleIds()), wMap = {}; perfAll.rows.forEach((r) => { if (r.weight !== null) wMap[r.id] = r.weight; });
+  const cols = portfolioColumns(nextMap, wMap);
   const cfg = { id: 'portfolio', columns: cols, rows: [], getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
     onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids),
     empty: '<div class="card empty"><h3>Aucun actif ne correspond</h3><p>Modifiez la recherche ou les filtres.</p></div>',
@@ -221,6 +215,7 @@ function renderPortfolio(host) {
   cfg.rows = filteredHoldings();
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),
     '<button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter</button>') +
+    portfolioSummaryHtml(perfAll) +
     '<div class="toolbar"><input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +
     '<select id="pd" aria-label="Dividendes"><option value="all">Tous les actifs</option><option value="payer">Versent un dividende</option><option value="none">Sans dividende / capitalisants</option><option value="missing">Données manquantes</option></select>' +
@@ -407,31 +402,6 @@ function renderHistory(host) {
 /* ===============================================================
    STATISTIQUES
    =============================================================== */
-function regionOf(h) {
-  const t = String(h.ticker || ''), isin = String(h.isin || '').toUpperCase();
-  if (isin.startsWith('US') || (!t.includes('.') && h.currency === 'USD')) return 'États-Unis';
-  if (/\.(PA|AS|DE|F|MI|MC|BR|LS|L|SW|ST|CO|HE|OL|VI|IR)$/i.test(t) || /^(FR|DE|NL|IT|ES|BE|PT|GB|CH|SE|DK|FI|NO|AT|IE)/.test(isin)) return 'Europe';
-  return 'Autres';
-}
-function groupRunRate(groupFn) {
-  const out = {};
-  visibleHoldings().forEach((h) => {
-    const g = groupFn(h);
-    const v = Engine.annualPerShare(h) * h.quantity; if (!v) return;
-    const c = convert(v, h.currency);
-    out[g] = out[g] || { conv: 0, missing: false, native: {} };
-    if (c === null) out[g].missing = true; else out[g].conv += c;
-    out[g].native[h.currency] = (out[g].native[h.currency] || 0) + v;
-  });
-  return out;
-}
-function groupTable(title, data, native) {
-  const keys = Object.keys(data).sort((a, b) => data[b].conv - data[a].conv);
-  const tot = keys.reduce((s, k) => s + data[k].conv, 0);
-  if (!keys.length) return '<section class="card card-pad"><h3>' + title + '</h3><div class="muted">Aucune donnée.</div></section>';
-  return '<section class="card card-pad"><h3>' + title + '</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Groupe</th>' + (native ? '<th class="r">Montant d\'origine</th>' : '') + '<th class="r">Revenu annuel est.</th><th class="r">Part</th></tr></thead><tbody>' +
-    keys.map((k) => '<tr><td>' + esc(k) + '</td>' + (native ? '<td class="r">' + Object.keys(data[k].native).map((c) => fmtMoney(data[k].native[c], c)).join(' + ') + '</td>' : '') + '<td class="r">' + (data[k].missing ? '<span class="badge warn">taux manquant</span>' : money(data[k].conv)) + '</td><td class="r">' + (tot ? fmtPct(data[k].conv / tot, 1) : '—') + '</td></tr>').join('') + '</tbody></table></div></section>';
-}
 function renderStats(host) {
   if (!state.holdings.length) { host.innerHTML = pageHead('Statistiques', 'Évolution des revenus et prévisions') + emptyPortfolio(); wireDo(host); return; }
   const today = new Date(), mode = incomeMode(), ids = visibleIds(), y = view.stats.year;
@@ -442,14 +412,9 @@ function renderStats(host) {
   const run = Engine.runRate(state, mode, convert, ids);
   const f12Total = f12.reduce((s, x) => s + x.value, 0);
   const top = run.per.slice().sort((a, b) => b.value - a.value).slice(0, 10);
-  const accounts = {}; state.accounts.forEach((a) => { accounts[a.name] = null; });
-  const byAcc = groupRunRate((h) => accountName(h.account));
-  const byCur = groupRunRate((h) => h.currency || '—');
-  const byReg = groupRunRate(regionOf);
-  const byType = groupRunRate((h) => Engine.TYPES[h.type] || 'Action');
   const acc = visibleHoldings().filter((h) => Engine.isAccumulating(h));
   host.innerHTML = pageHead('Statistiques', 'Évolution des revenus et prévisions · montants en ' + esc(baseCur()), modeSeg()) +
-    '<div class="grid two even">' +
+    dividendKpisHtml() + '<div class="grid two even section-gap">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + y + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
     stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
     '<section class="card card-pad"><h3>Répartition par actif (revenu annuel estimé)</h3>' + (dist.total ? donut(dist.items, baseCur()) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>' +
@@ -458,7 +423,6 @@ function renderStats(host) {
     stackedBars({ labels: f12.map((m) => MOIS_C[m.month]), cur: baseCur(), title: 'Prévision 12 mois', layers: [{ name: 'Confirmé / reçu', color: 'var(--chart-1)', values: f12.map((m) => m.confirmed) }, { name: 'Estimé', color: 'var(--chart-1)', faded: true, values: f12.map((m) => m.value - m.confirmed) }] }) + '</section>' +
     '<section class="card card-pad"><h3>Dividendes reçus par année</h3>' + (yearly.length ? stackedBars({ labels: yearly.map((x) => String(x.year)), cur: baseCur(), title: 'Dividendes reçus par année', layers: [{ name: 'Reçus (vérifiés)', color: 'var(--chart-1)', values: yearly.map((x) => x.verified) }, { name: 'À vérifier', color: 'var(--chart-3)', values: yearly.map((x) => x.unverified) }] }) : '<div class="muted">Aucun versement enregistré : saisissez-les ou importez vos transactions (Historique).</div>') + '</section></div>' +
     missingNote(run.missing) +
-    '<div class="grid two even section-gap">' + groupTable('Par compte', byAcc) + groupTable('Par devise', byCur, true) + groupTable('Par zone', byReg) + groupTable('Par type d\'actif', byType) + '</div>' +
     '<section class="card card-pad section-gap"><h3>Principaux contributeurs</h3>' + (top.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Actif</th><th class="r">Revenu annuel est.</th><th class="r">Part</th></tr></thead><tbody>' + top.map((t) => '<tr><td><b>' + esc(t.name || t.ticker) + '</b> <span class="muted">' + esc(t.ticker) + '</span></td><td class="r">' + money(t.value) + '</td><td class="r">' + fmtPct(run.total ? t.value / run.total : 0, 1) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">Aucun actif ne verse de dividende.</div>') + '</section>' +
     (acc.length ? '<section class="card card-pad section-gap"><h3>ETF capitalisants (aucun dividende versé)</h3><div class="muted">' + acc.map((h) => esc(h.name || h.displayTicker || h.ticker)).join(' · ') + '</div></section>' : '');
   wireMode(host); wireDo(host);

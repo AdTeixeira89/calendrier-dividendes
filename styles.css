@@ -385,3 +385,52 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 /* chiffres masqués (œil de l'accueil) */
 .hide-nums .kpi .val,.hide-nums .kpi .sub,.hide-nums .tk-amt,.hide-nums .chart,.hide-nums .donut-leg .v,.hide-nums .legend{filter:blur(7px);user-select:none;-webkit-user-select:none}
 #eyeBtn[aria-pressed="true"]{color:var(--accent)}
+
+/* ================= Tableau de bord, répartition ================= */
+.grid.three{grid-template-columns:1fr}
+.dash-main{grid-template-columns:1fr}
+@media (min-width:900px){ .grid.three{grid-template-columns:repeat(3,1fr)} .dash-main{grid-template-columns:1.7fr 1fr} }
+.page-head-sub{margin-bottom:12px}
+.hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.hero .lbl{font-size:12.5px;color:var(--muted);font-weight:600}
+.hero-val{font-size:34px;font-weight:750;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px}
+.hero-sub{font-size:13.5px;margin-top:4px}
+.chart-note{font-size:12px;color:var(--muted);margin-top:8px}
+.warn-t{color:var(--warn)}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.card-head h3{margin:0}
+.mini-kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.mini-kv > div{display:flex;flex-direction:column;gap:1px}
+.mini-kv span{font-size:11.5px;color:var(--muted);font-weight:600}
+.mini-kv b{font-size:17px;font-variant-numeric:tabular-nums}
+.mini-kv small{font-size:11px;color:var(--muted)}
+.perf-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.perf-cols h4{font-size:11.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.perf-row{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
+.perf-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chips-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.stat-chip{padding:10px 14px;display:flex;flex-direction:column;gap:2px}
+.stat-chip span{font-size:11.5px;color:var(--muted);font-weight:600}
+.stat-chip b{font-size:16px}
+.bar-row{display:grid;grid-template-columns:minmax(90px,200px) 1fr 52px;gap:10px;align-items:center;padding:5px 0;font-size:13px}
+.bar-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-row .bar{height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.bar-row .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+.bar-row b{text-align:right;font-variant-numeric:tabular-nums}
+.donut-wrap{gap:14px}
+.donut-leg{max-height:240px;overflow:auto}
+.hide-nums .sens,.hide-nums .hero-val,.hide-nums .sum-strip .kpi .val{filter:blur(8px);user-select:none;-webkit-user-select:none}
+.hide-nums.sum-strip .kpi .val,.hide-nums.sum-strip .kpi .sub{filter:blur(7px)}
+
+.single-cat{padding:14px 2px;color:var(--muted)}
+.donut-leg div span:nth-child(2){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.donut-leg span.v{white-space:nowrap}
+@media (max-width:640px){
+  .kpis-2{grid-template-columns:1fr 1fr}
+  .kpis-2 .kpi{padding:12px}
+  .kpis-2 .kpi .val{font-size:18px}
+  .kpis-2 .kpi .sub{font-size:11px}
+  .hero-val{font-size:30px}
+  .donut-wrap{justify-content:center}
+  .donut-leg{flex:1 1 100%}
+}

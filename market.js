@@ -28,6 +28,37 @@
     return rows[0].symbol;
   }
 
+  const COUNTRY_NAME = { US: 'États-Unis', FR: 'France', DE: 'Allemagne', NL: 'Pays-Bas', GB: 'Royaume-Uni', CH: 'Suisse', IT: 'Italie', ES: 'Espagne', BE: 'Belgique', PT: 'Portugal',
+    SE: 'Suède', DK: 'Danemark', FI: 'Finlande', NO: 'Norvège', IE: 'Irlande', AT: 'Autriche', LU: 'Luxembourg', CA: 'Canada', JP: 'Japon', AU: 'Australie', CN: 'Chine', HK: 'Hong Kong',
+    KY: 'Îles Caïmans', BM: 'Bermudes', JE: 'Jersey', GG: 'Guernesey', SG: 'Singapour', KR: 'Corée du Sud', TW: 'Taïwan', IN: 'Inde', BR: 'Brésil', MX: 'Mexique', PL: 'Pologne', GR: 'Grèce' };
+  const SUFFIX_COUNTRY = { PA: 'FR', AS: 'NL', DE: 'DE', F: 'DE', L: 'GB', MI: 'IT', MC: 'ES', BR: 'BE', LS: 'PT', SW: 'CH', ST: 'SE', CO: 'DK', HE: 'FI', OL: 'NO', VI: 'AT', IR: 'IE', TO: 'CA', V: 'CA', T: 'JP', AX: 'AU', HK: 'HK' };
+  /* Pays d'une action : pays de l'ISIN (domiciliation de l'émetteur), à défaut place de cotation.
+     Un ETF n'a pas de pays unique (« ETF multi-pays ») ; modifiable à la main sur la fiche de l'actif. */
+  function deriveCountry(ticker, isin, isEtf) {
+    if (isEtf) return 'ETF multi-pays';
+    const i = String(isin || (isISIN(ticker) ? ticker : '') || '').toUpperCase();
+    if (i.length >= 2 && COUNTRY_NAME[i.slice(0, 2)]) return COUNTRY_NAME[i.slice(0, 2)];
+    const m = String(ticker || '').toUpperCase().match(/\.([A-Z]{1,2})$/);
+    if (m && SUFFIX_COUNTRY[m[1]]) return COUNTRY_NAME[SUFFIX_COUNTRY[m[1]]];
+    if (ticker && !String(ticker).includes('.') && !isISIN(ticker)) return 'États-Unis';
+    return null;
+  }
+
+  /* Série mensuelle des cours de clôture (devise de cotation) : { from: 'AAAA-MM', c: [cours…] }, null si mois manquant. */
+  function monthlySeries(res, pence) {
+    const ts = res.timestamp || [], cl = ((res.indicators || {}).quote || [{}])[0].close || [];
+    const by = {};
+    for (let i = 0; i < ts.length; i++) {
+      const v = cl[i]; if (!(v > 0)) continue;
+      const d = new Date(ts[i] * 1000); const ym = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+      by[ym] = Math.round((pence ? v / 100 : v) * 10000) / 10000;     // la dernière valeur du mois l'emporte
+    }
+    const keys = Object.keys(by).sort(); if (!keys.length) return null;
+    const out = [], y0 = Number(keys[0].slice(0, 4)), m0 = Number(keys[0].slice(5)), y1 = Number(keys[keys.length - 1].slice(0, 4)), m1 = Number(keys[keys.length - 1].slice(5));
+    for (let y = y0, m = m0; y < y1 || (y === y1 && m <= m1); m++) { if (m > 12) { m = 1; y++; } const k = y + '-' + String(m).padStart(2, '0'); out.push(by[k] === undefined ? null : by[k]); if (y === y1 && m === m1) break; }
+    return { from: keys[0], c: out };
+  }
+
   function detectFrequency(isoDates) {
     if (isoDates.length < 2) return 'irregular';
     const ms = (s) => { const a = s.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]); };
@@ -77,7 +108,8 @@
     }
 
     /* Données d'un actif. Renvoie toujours un objet explicite, jamais de valeurs inventées. */
-    async function fetchAsset(input, nameHint) {
+    async function fetchAsset(input, nameHint, opts) {
+      opts = opts || {};
       const symbol = await resolveSymbol(input, nameHint);
       const data = await call('/chart?symbol=' + encodeURIComponent(symbol));
       const res = data.chart && data.chart.result && data.chart.result[0];
@@ -92,12 +124,20 @@
         .filter((d) => d && d.amount > 0 && d.date)
         .map((d) => ({ exDate: new Date(d.date * 1000).toISOString().slice(0, 10), payDate: null, amount: pence ? d.amount / 100 : d.amount }))
         .sort((a, b) => (a.exDate < b.exDate ? -1 : 1));
+      let sector = null, industry = null;
+      if (opts.needSector !== false) {      // un appel de plus, une seule fois par actif (le secteur ne change presque jamais)
+        try {
+          const q = (await search(symbol)).find((x) => x.symbol && x.symbol.toUpperCase() === symbol.toUpperCase());
+          if (q) { sector = q.sector || null; industry = q.industry || null; }
+        } catch (e) { if (e.rate || e.fatal) throw e; }
+      }
       return {
         symbol, resolved: symbol.toUpperCase() !== String(input).trim().toUpperCase(),
         name: meta.longName || meta.shortName || null, currency,
         instrumentType: meta.instrumentType || null,        // EQUITY | ETF | …
         price: meta.regularMarketPrice > 0 ? (pence ? meta.regularMarketPrice / 100 : meta.regularMarketPrice) : null,
         priceAt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
+        hist: monthlySeries(res, pence), sector, industry,
         dividends: divs
       };
     }
@@ -133,6 +173,12 @@
     if (a.name && !h.name) h.name = a.name;
     if (a.currency) h.currency = a.currency;
     if (a.price > 0) { h.price = a.price; h.priceAt = a.priceAt || nowISO; }
+    if (a.hist) h.hist = a.hist;
+    if (!h.geoLocked) {     // secteur et pays : sauf si vous les avez saisis vous-même
+      if (a.sector) { h.sector = a.sector; h.industry = a.industry || h.industry || null; }
+      else if (a.instrumentType === 'ETF' && !h.sector) h.sector = 'ETF';
+      if (!h.country) h.country = deriveCountry(a.resolved ? a.symbol : h.ticker, h.isin, a.instrumentType === 'ETF' || h.type === 'etf_dist' || h.type === 'etf_acc');
+    }
     const recent = a.dividends.slice(-12);
     d.history = recent.map((x) => ({ exDate: x.exDate, payDate: null, amount: x.amount }));
     d.updatedAt = nowISO;
@@ -170,7 +216,7 @@
       if (hooks.cancelled && hooks.cancelled()) { res.stopped = true; break; }
       const h = holdings[i];
       try {
-        const a = await client.fetchAsset(h.ticker, h.name);
+        const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
         applyToHolding(h, a, nowISO);
         res.ok++;
       } catch (e) {
@@ -184,6 +230,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, makeClient, applyToHolding, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, deriveCountry, monthlySeries, COUNTRY_NAME, makeClient, applyToHolding, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);
