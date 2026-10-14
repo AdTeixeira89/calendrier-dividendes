@@ -30,6 +30,7 @@ function wireDo(host) {
     if (a === 'add') openHoldingModal(null);
     else if (a === 'import') openImportPositions();
     else if (a === 'import-tx') openImportTransactions();
+    else if (a === 'import-degiro') openImportDegiro();
     else if (a === 'export-csv') openCsvExport();
     else if (a === 'refresh') refreshMarket(visibleHoldings());
     else if (a === 'add-payment') openPaymentModal(null);
@@ -200,7 +201,9 @@ function portfolioSummaryHtml(perf) {
 }
 
 function renderPortfolio(host) {
-  if (!state.holdings.length) { host.innerHTML = pageHead('Mon portefeuille', 'Vos actifs, quantités et prix de revient') + emptyPortfolio(); wireDo(host); return; }
+  if (view.port.tab === 'ops') return renderOperations(host);
+  if (view.port.tab === 'closed') return renderClosed(host);
+  if (!state.holdings.length && !(state.archive || []).length && !state.transactions.length) { host.innerHTML = pageHead('Mon portefeuille', 'Vos actifs, quantités et prix de revient') + emptyPortfolio(); wireDo(host); return; }
   const nextMap = nextByHolding();
   const perfAll = Engine.performance(state, convert, visibleIds()), wMap = {}; perfAll.rows.forEach((r) => { if (r.weight !== null) wMap[r.id] = r.weight; });
   const cols = portfolioColumns(nextMap, wMap);
@@ -217,7 +220,7 @@ function renderPortfolio(host) {
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),
     '<button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter</button>') +
     portfolioSummaryHtml(perfAll) +
-    '<div class="toolbar"><input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
+    '<div class="toolbar">' + portTabsHtml() + '<input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +
     '<select id="pd" aria-label="Dividendes"><option value="all">Tous les actifs</option><option value="payer">Versent un dividende</option><option value="none">Sans dividende / capitalisants</option><option value="missing">Données manquantes</option></select>' +
     '<span class="grow"></span>' + Tbl.menuHtml(cfg) + '</div><div id="tblHost"></div>';
@@ -225,7 +228,7 @@ function renderPortfolio(host) {
   let t; $('#pq', host).oninput = (e) => { view.port.q = e.target.value; clearTimeout(t); t = setTimeout(() => { cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); }, 160); };
   $('#pt', host).onchange = (e) => { view.port.type = e.target.value; cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); };
   $('#pd', host).onchange = (e) => { view.port.div = e.target.value; cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); };
-  Tbl.render($('#tblHost'), cfg); wireDo(host);
+  wirePortTabs(host); Tbl.render($('#tblHost'), cfg); wireDo(host);
 }
 
 /* ===============================================================

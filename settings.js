@@ -28,7 +28,8 @@ function renderSettings(host) {
     '<label class="chk"><input type="checkbox" id="sTicker" ' + (s.tickerAuto ? 'checked' : '') + '><span>Défilement automatique du bandeau des prochains versements</span></label>' +
     '<div class="btn-row" style="margin-top:10px"><button class="btn" type="button" id="sAcc">Gérer les portefeuilles</button><button class="btn" type="button" id="sCols">Réinitialiser les colonnes des tableaux</button></div>';
   const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sCsv">' + icon('download') + 'Exporter en CSV (tableur)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Restaurer une sauvegarde</button>' +
-    '<button class="btn" type="button" data-do="import">Importer un relevé de portefeuille</button><button class="btn" type="button" data-do="import-tx">Importer des transactions</button></div>' +
+    '<button class="btn" type="button" data-do="import">Importer un relevé de portefeuille</button><button class="btn" type="button" data-do="import-tx">Importer des transactions</button><button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>' +
+    (state.undo ? '<button class="btn" type="button" id="sUndo">Annuler le dernier import (' + esc(fmtDate(state.undo.at.slice(0, 10))) + ')</button>' : '') + '</div>' +
     '<div class="hint" style="margin-top:8px">Le fichier exporté n\'est pas chiffré (il contient vos positions et versements) : gardez-le en lieu sûr.<br>Stockage durable sur cet appareil : ' + (Vault.isPersisted() ? 'activé ✓' : 'non garanti — installez l\'app sur l\'écran d\'accueil') + '.</div>';
   const security = '<p class="muted" style="margin:0 0 10px">' + (Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'application sur cet appareil (données locales chiffrées).' : '🔓 Aucun code de verrouillage sur cet appareil.') + '</p><button class="btn" type="button" id="sPin">Code de verrouillage…</button>';
   const notif = '<p class="muted" style="margin:0 0 10px" id="nStatus">' + esc(notifStatusText()) + '</p><div class="btn-row"><button class="btn" type="button" id="nEnable">Activer les rappels</button><button class="btn" type="button" id="nIcs">Ajouter à l\'agenda (.ics)</button></div>';
@@ -58,6 +59,7 @@ function renderSettings(host) {
   on('sCols', () => { state.settings.columns = {}; saveState(); toast('Colonnes réinitialisées.'); });
   on('sExport', exportData);
   on('sCsv', openCsvExport);
+  on('sUndo', undoLastImport);
   on('sImport', async () => { const f = await pickFile('application/json,.json'); if (f) importBackup(f); });
   on('sPin', openSecurityModal);
   on('nEnable', async () => { await enableNotifications(); const st = $('#nStatus', host); if (st) st.textContent = notifStatusText(); });

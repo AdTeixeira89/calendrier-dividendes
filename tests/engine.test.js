@@ -163,3 +163,78 @@ console.log(n + ' tests passed');
     assert.strictEqual(E.allocation({ holdings: hs }, (h) => h.sector || 'Non renseigné', 'dividend', cvA, null, 5).excluded, 0 + 2 - 2 + (hs.filter((h) => !E.isPayer(h)).length));
   });
 })();
+
+/* ---------- historique reconstitué : opérations × cours historiques ---------- */
+(function () {
+  const cvAt = (a, c) => (c === 'EUR' ? a : c === 'USD' ? a / 1.25 : null);       // 1 EUR = 1,25 USD
+  const td = new Date(2026, 9, 14);                                                // 14 oct 2026
+  const monthly = (from, c) => ({ from, c });
+  const daily = (days, start) => { const t = [], c = []; const d0 = new Date(2026, 6, 1); for (let i = 0; i < days; i++) { const d = new Date(d0.getTime() + i * 86400000); if (d.getDay() === 0 || d.getDay() === 6) continue; t.push(d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()); c.push(start + t.length); } return { t, c }; };
+  const hh = (id, o) => Object.assign({ id, ticker: id, displayTicker: id, name: id.toUpperCase(), type: 'stock', currency: 'EUR', quantity: 0, avgCost: null, account: 'a', dividend: {} }, o);
+  const tx = (id, h, date, type, qty, price, amt) => ({ id, holdingId: h, date, type, qty, price, fees: 0, currency: 'EUR', amountAcct: amt === undefined ? qty * price : amt, acctCur: 'EUR', source: 'degiro' });
+  // A : achetée en janvier 2026, 10 × 100 ; B : achetée puis soldée (archive) ; cours mensuels 2025-12 → 2026-10
+  const mA = monthly('2025-12', [100, 100, 110, 120, 130, 120, 140, 150, 160, 170]);
+  const A = hh('a', { quantity: 10, avgCost: 100, price: 175, hist: Object.assign(monthly('2025-12', mA.c), {}) });
+  const B = hh('b', { hist: monthly('2025-12', [50, 50, 55, 60, 65, 60, 70, 75, 80, 85]) });
+  const s = { holdings: [A], archive: [B], payments: [], transactions: [tx('1', 'a', '2026-01-15', 'buy', 10, 100), tx('2', 'b', '2026-01-20', 'buy', 20, 50), tx('3', 'b', '2026-05-10', 'sell', 20, 65, 1300)] };
+  t('historique : quantités par date issues des opérations, positions soldées incluses, valeur réelle (pas la somme des achats)', () => {
+    const h = E.portfolioHistory(s, cvAt, { months: 0, today: td });
+    const at = (d) => h.points.find((p) => p.date === d);
+    assert.strictEqual(h.empty, false); assert.strictEqual(h.points[0].value, 0, 'part de zéro avant la première opération');
+    assert.strictEqual(at('2026-01-31').value, 10 * 100 + 20 * 50);          // A + B au cours de fin janvier (A = 100, B = 50)
+    assert.strictEqual(at('2026-04-30').value, 10 * 130 + 20 * 65);            // B encore détenue
+    assert.strictEqual(at('2026-05-31').value, 10 * 120, 'B vendue le 10/05 : plus comptée'); assert.strictEqual(at('2026-10-14').value, 10 * 175, 'aujourd\'hui : dernier cours de l\'actif');
+    assert.ok(h.points.every((p) => !p.partial), 'tous les cours connus'); assert.strictEqual(h.retro, false);
+  });
+  t('historique : coût de revient restant et flux nets (achats = apports, ventes = retraits)', () => {
+    const h = E.portfolioHistory(s, cvAt, { months: 0, today: td }), at = (d) => h.points.find((p) => p.date === d);
+    assert.strictEqual(at('2026-01-31').cost, 1000 + 1000); assert.strictEqual(at('2026-06-30').cost, 1000, 'B vendue : son coût sort du capital investi');
+    assert.strictEqual(h.summary.netFlows, 1000 + 1000 - 1300, 'apports nets = achats − ventes'); assert.strictEqual(h.summary.startValue, 0);
+  });
+  t('historique : performance pondérée dans le temps neutralise les apports (un achat ne crée pas de performance)', () => {
+    // un actif à cours constant 100 ; achat de 10 puis de 10 de plus : performance nulle
+    const C = hh('c', { quantity: 20, price: 100, hist: monthly('2026-01', [100, 100, 100, 100, 100, 100, 100, 100, 100, 100]) });
+    const s2 = { holdings: [C], archive: [], payments: [], transactions: [tx('1', 'c', '2026-01-10', 'buy', 10, 100), tx('2', 'c', '2026-06-10', 'buy', 10, 100)] };
+    const h = E.portfolioHistory(s2, cvAt, { months: 0, today: td });
+    assert.ok(Math.abs(h.perf.pct) < 1e-9, 'performance nulle malgré le doublement du capital : ' + h.perf.pct); assert.ok(h.points[h.points.length - 1].value === 2000);
+    // cours +10 % sur la période avec un apport au milieu : la performance reflète le marché, pas l'apport
+    const D = hh('d', { quantity: 20, price: 110, hist: monthly('2026-01', [100, 100, 100, 100, 100, 100, 100, 105, 108, 110]) });
+    const s3 = { holdings: [D], archive: [], payments: [], transactions: [tx('1', 'd', '2026-01-10', 'buy', 10, 100), tx('2', 'd', '2026-06-10', 'buy', 10, 100)] };
+    const h3 = E.portfolioHistory(s3, cvAt, { months: 0, today: td }); assert.ok(h3.perf.pct > 0.09 && h3.perf.pct < 0.111, 'environ +10 % : ' + h3.perf.pct);
+  });
+  t('historique : cours manquant = point partiel signalé, jamais de cours inventé ni de valeur « au prix d\'achat »', () => {
+    const X = hh('x', { quantity: 5, price: 20, hist: monthly('2026-06', [10, 11, 12, 13, 14]) });        // cours seulement depuis juin 2026
+    const s2 = { holdings: [X], archive: [], payments: [], transactions: [tx('1', 'x', '2026-02-01', 'buy', 5, 9)] };
+    const h = E.portfolioHistory(s2, cvAt, { months: 0, today: td }), p = h.points.find((q) => q.date === '2026-03-31');
+    assert.strictEqual(p.partial, true); assert.strictEqual(p.value, 0); assert.deepStrictEqual(p.missing, ['X']); assert.strictEqual(h.coverage.missing[0].name, 'X');
+    assert.strictEqual(h.points.find((q) => q.date === '2026-07-31').partial, false); assert.strictEqual(h.perf.from >= '2026-06-30', true, 'performance seulement sur la partie entièrement valorisée');
+    const noHist = hh('n', { quantity: 5, price: 20, hist: null }); const h2 = E.portfolioHistory({ holdings: [noHist], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td });
+    assert.ok(h2.points.every((q) => q.partial || q.value === 100)); assert.ok(h2.coverage.missing.length === 1);
+  });
+  t('historique : devises converties au taux de la date (jamais au taux du jour pour le passé)', () => {
+    const U = hh('u', { currency: 'USD', quantity: 10, price: 125, hist: monthly('2026-01', [100, 100, 100, 100, 100, 100, 100, 100, 100, 125]) });
+    const cvHist = (a, c, ymm) => (c === 'EUR' ? a : c === 'USD' ? a / (ymm < '2026-06' ? 1 : 1.25) : null);        // EUR/USD 1,00 jusqu'en mai puis 1,25
+    const s2 = { holdings: [U], archive: [], payments: [], transactions: [tx('1', 'u', '2026-01-10', 'buy', 10, 100, 1000)] };
+    const h = E.portfolioHistory(s2, cvHist, { months: 0, today: td }), at = (d) => h.points.find((p) => p.date === d);
+    assert.strictEqual(at('2026-03-31').value, 1000); assert.strictEqual(at('2026-07-31').value, 800);
+  });
+  t('historique : actif sans opérations cohérentes = quantité actuelle appliquée au passé (rétrospectif signalé)', () => {
+    const R = hh('r', { quantity: 10, price: 50, hist: monthly('2026-01', [40, 40, 40, 40, 40, 40, 40, 40, 40, 50]) });
+    const h = E.portfolioHistory({ holdings: [R], archive: [], payments: [], transactions: [] }, cvAt, { months: 6, today: td });
+    assert.strictEqual(h.retro, true); assert.deepStrictEqual(h.coverage.retro, ['R']); assert.strictEqual(h.points[0].value, 400); assert.strictEqual(h.points[0].cost, null);
+  });
+  t('historique : séances quotidiennes sur les derniers mois, fins de mois avant', () => {
+    const Dd = hh('dd', { quantity: 10, price: 200, hist: Object.assign(monthly('2026-01', [100, 110, 120, 130, 140, 150, 160, 170, 180, 190]), { d: daily(90, 150) }) });
+    const h1 = E.portfolioHistory({ holdings: [Dd], archive: [], payments: [], transactions: [] }, cvAt, { months: 1, today: td });
+    assert.ok(h1.points.length >= 10, 'au moins ~10 séances sur 1 mois : ' + h1.points.length); assert.strictEqual(h1.coverage.noDaily, false);
+    const hAll = E.portfolioHistory({ holdings: [Dd], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td }); assert.ok(hAll.points.length > h1.points.length);
+    const noD = hh('nd', { quantity: 10, price: 200, hist: monthly('2026-01', [100, 110, 120, 130, 140, 150, 160, 170, 180, 190]) });
+    const h2 = E.portfolioHistory({ holdings: [noD], archive: [], payments: [], transactions: [] }, cvAt, { months: 3, today: td }); assert.strictEqual(h2.coverage.noDaily, true);
+  });
+  t('historique : fractionnement (10 pour 1) — les anciennes quantités sont ramenées à la base actuelle', () => {
+    const S = hh('s', { quantity: 50, price: 100, splits: [{ date: '2026-06-10', ratio: 10 }], hist: monthly('2026-01', [40, 40, 40, 40, 40, 100, 100, 100, 100, 100]) });  // cours déjà ajustés (÷10 avant le split)
+    const s2 = { holdings: [S], archive: [], payments: [], transactions: [tx('1', 's', '2026-02-01', 'buy', 5, 400)] };
+    const h = E.portfolioHistory(s2, cvAt, { months: 0, today: td }), at = (d) => h.points.find((p) => p.date === d);
+    assert.strictEqual(h.retro, false, '5 × 10 = 50 : opérations cohérentes avec la position actuelle'); assert.strictEqual(at('2026-03-31').value, 50 * 40, 'valeur avant split = 2 000 (5 titres × 400), pas 200');
+  });
+})();

@@ -399,20 +399,33 @@ function simpleBars(items, cur, label) {
 function lineChart(o) {
   const W = 640, H = 220, L = 52, R = 10, T = 12, B = 26, pts = o.points, n = pts.length, mask = !!o.mask;
   if (n < 2) return '<div class="muted" style="padding:24px 0;text-align:center">' + esc(o.empty || 'Pas assez de données pour tracer la courbe.') + '</div>';
-  const vals = pts.map((p) => p.value).concat(o.ref ? [o.ref.value] : []);
+  const vals = pts.map((p) => p.value).concat(o.ref ? [o.ref.value] : [], o.costLine ? pts.map((p) => p.cost) : [], o.zero ? [0] : []);
   let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
   if (hi === lo) { hi += 1; lo -= 1; }
-  const pad = (hi - lo) * 0.12; lo = Math.max(0, lo - pad); hi += pad;
-  const X = (i) => L + (W - L - R) * i / (n - 1), Y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const pad = (hi - lo) * 0.12; lo = o.pct || o.zero ? lo - pad : Math.max(0, lo - pad); hi += pad;
+  const fmtAx = o.pct ? (v) => fmtNum(v, Math.abs(hi - lo) < 10 ? 1 : 0) + ' %' : axisFmt;
+  const timed = pts.every((p) => p.t !== undefined), t0 = timed ? pts[0].t : 0, t1 = timed ? pts[n - 1].t : n - 1;     // axe des abscisses proportionnel au temps (fins de mois puis séances ne sont pas équidistantes)
+  const X = (i) => L + (W - L - R) * (timed ? (pts[i].t - t0) / Math.max(1, t1 - t0) : i / (n - 1)), Y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
   let svg = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(o.title || 'Évolution') + '"><defs><linearGradient id="lcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--chart-1)" stop-opacity=".30"/><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0"/></linearGradient></defs>';
-  for (let g = 0; g <= 4; g++) { const v = lo + (hi - lo) * g / 4, y = Y(v); svg += '<line class="grid-l" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + axisFmt(v) + '</text>'; }
-  const step = Math.max(1, Math.ceil(n / 7));
-  pts.forEach((p, i) => { if ((i % step === 0 && i < n - 1 - Math.floor(step / 2)) || i === n - 1) svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="' + (i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle') + '">' + esc(p.label) + '</text>'; });
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p.value).toFixed(1)).join(' ');
-  svg += '<path d="' + line + ' L' + X(n - 1).toFixed(1) + ' ' + (H - B) + ' L' + L + ' ' + (H - B) + ' Z" fill="url(#lcg)"/><path d="' + line + '" fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
-  if (o.ref) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(o.ref.value) + '" y2="' + Y(o.ref.value) + '" stroke="var(--chart-3)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="' + (W - R) + '" y="' + (Y(o.ref.value) - 5) + '" text-anchor="end" style="fill:var(--chart-3)">' + esc(o.ref.label) + '</text>';
+  for (let g = 0; g <= 4; g++) { const v = lo + (hi - lo) * g / 4, y = Y(v); svg += '<line class="grid-l" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (L - 6) + '" y="' + (y + 4) + '" text-anchor="end">' + fmtAx(v) + '</text>'; }
+  if (timed && o.tLabel) { for (let k = 0; k <= 4; k++) svg += '<text x="' + (L + (W - L - R) * k / 4) + '" y="' + (H - 8) + '" text-anchor="' + (k === 0 ? 'start' : k === 4 ? 'end' : 'middle') + '">' + esc(o.tLabel(Math.round(t0 + (t1 - t0) * k / 4))) + '</text>'; }
+  else { const step = Math.max(1, Math.ceil(n / 7));
+    pts.forEach((p, i) => { if ((i % step === 0 && i < n - 1 - Math.floor(step / 2)) || i === n - 1) svg += '<text x="' + X(i) + '" y="' + (H - 8) + '" text-anchor="' + (i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle') + '">' + esc(p.label) + '</text>'; }); }
+  if (o.zero) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(0) + '" y2="' + Y(0) + '" stroke="var(--border-strong)" stroke-width="1.2"/>';
+  const area = pts.map((p, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p.value).toFixed(1)).join(' ');
+  svg += '<path d="' + area + ' L' + X(n - 1).toFixed(1) + ' ' + (H - B) + ' L' + L + ' ' + (H - B) + ' Z" fill="url(#lcg)"/>';
+  // courbe : trait plein ; segments touchant un point « partiel » (cours manquants) en pointillés
+  let run = '', runPartial = null;
+  const flush = () => { if (run) svg += '<path d="' + run + '" fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"' + (runPartial ? ' stroke-dasharray="3 4" opacity=".55"' : '') + '/>'; run = ''; };
+  for (let i = 1; i < n; i++) {
+    const part = !!(pts[i].partial || pts[i - 1].partial);
+    if (part !== runPartial) { flush(); runPartial = part; run = 'M' + X(i - 1).toFixed(1) + ' ' + Y(pts[i - 1].value).toFixed(1); }
+    run += ' L' + X(i).toFixed(1) + ' ' + Y(pts[i].value).toFixed(1);
+  }
+  flush();
+  if (o.costLine) svg += '<path d="' + pts.map((p, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p.cost).toFixed(1)).join(' ') + '" fill="none" stroke="var(--chart-3)" stroke-width="1.6" stroke-dasharray="5 4"/>';
+  if (o.ref) svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(o.ref.value) + '" y2="' + Y(o.ref.value) + '" stroke="var(--chart-3)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="' + (W - R) + '" y="' + (Y(o.ref.value) - 5) + '" text-anchor="end" style="fill:var(--chart-3)">' + esc(o.ref.label || '') + '</text>';
   svg += '<circle cx="' + X(n - 1) + '" cy="' + Y(pts[n - 1].value) + '" r="4" fill="var(--chart-1)" stroke="var(--surface)" stroke-width="2"/>';
-  const bw = (W - L - R) / (n - 1);
-  pts.forEach((p, i) => { svg += '<rect class="hit" x="' + (X(i) - bw / 2) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B + 18) + '" fill="transparent" data-tip="' + esc(p.tip || (p.label + (mask ? '\nMontants masqués' : '\n' + fmtMoney(p.value, o.cur)))) + '"/>'; });
+  pts.forEach((p, i) => { const xa = i === 0 ? X(0) : (X(i - 1) + X(i)) / 2, xb = i === n - 1 ? X(n - 1) : (X(i) + X(i + 1)) / 2, bw = Math.max(1.5, xb - xa), bx = i === 0 || i === n - 1 ? (i === 0 ? xa : xa) : xa; svg += '<rect class="hit" x="' + bx + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B + 18) + '" fill="transparent" data-tip="' + esc(p.tip || (p.label + (mask ? '\nMontants masqués' : '\n' + fmtMoney(p.value, o.cur)))) + '"/>'; });
   return svg + '</svg>';
 }

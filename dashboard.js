@@ -2,7 +2,7 @@
    dashboard.js — Accueil (tableau de bord), Répartition, Dividendes (onglets).
    ================================================================== */
 
-const HOME_PERIODS = [[12, '1 an'], [36, '3 ans'], [60, '5 ans']];
+const HOME_PERIODS = [[1, '1 M'], [3, '3 M'], [6, '6 M'], [12, '1 an'], [60, '5 ans'], [0, 'Tout']];
 const sens = (h) => '<span class="sens">' + h + '</span>';
 
 /* Groupes de répartition : une fonction de clé par axe d'analyse. */
@@ -29,7 +29,7 @@ function dataGaps(hs) {
    ACCUEIL
    =============================================================== */
 function renderHome(host) {
-  if (!state.holdings.length) { host.innerHTML = pageHead('Accueil', 'Votre portefeuille en un coup d\'œil') + emptyPortfolio(); wireDo(host); return; }
+  if (!state.holdings.length && !state.transactions.length) { host.innerHTML = pageHead('Accueil', 'Votre portefeuille en un coup d\'œil') + emptyPortfolio(); wireDo(host); return; }
   const today = new Date(), mode = incomeMode(), ids = visibleIds(), y = today.getFullYear(), mask = !!state.settings.hideNumbers, hs = visibleHoldings();
   const next = Engine.nextEvents(state, today, 120, ids);
   const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), inv = Engine.investedTotal(state, convert, ids);
@@ -40,21 +40,57 @@ function renderHome(host) {
   const yRec = Engine.sumEvents(yEvs.filter((e) => e.status === 'received'), mode, convert);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const series = Engine.monthlySeries(state, y, mode, convert, today, ids);
-  const vs = Engine.valueSeries(state, convertAt, { months: view.home.period, today, ids });
+  const nowYM = Engine.ymOf(today), cvAt = (a_, c_, y_) => (y_ === nowYM ? convert(a_, c_) : convertAt(a_, c_, y_));      // mois en cours : taux du jour (comme la valeur affichée en haut)
+  const hist = Engine.portfolioHistory(state, cvAt, { months: view.home.period, today, ids });
   const gaps = dataGaps(hs), first = next[0];
 
-  /* --- carte « Valeur du portefeuille » --- */
-  const pts = vs.points.map((p) => ({ label: fmtDate(p.ym + '-01', { month: 'short', year: '2-digit' }), value: p.value, tip: fmtDate(p.ym + '-01', { month: 'long', year: 'numeric' }) + (mask ? '\nMontants masqués' : '\n' + fmtMoney(p.value, baseCur(), { d: 0 })) }));
-  const change = pts.length > 1 && pts[0].value > 0 ? pts[pts.length - 1].value / pts[0].value - 1 : null;
-  const refOk = inv.count > 0 && inv.count === pv.count && pv.count > 0;
-  const chart = pv.count && pts.length > 1
-    ? lineChart({ points: pts, cur: baseCur(), mask, title: 'Évolution de la valeur du portefeuille', ref: refOk ? { value: inv.cost, label: 'Investi (PRU)' } : null })
-    : '<div class="empty" style="padding:28px 8px"><h3>Pas encore d\'historique de cours</h3><p>Actualisez les données de marché pour tracer l\'évolution de la valeur.</p><button class="btn primary" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>';
-  const note = !pv.count ? '' : '<div class="chart-note">' + (vs.retro ? 'Cours passés × quantités <b>actuelles</b> (positions détenues aujourd\'hui, rétrospectif)' : 'Valeur réelle reconstituée à partir de vos opérations') +
-    (vs.coverage.missing.length ? ' · <span class="warn-t">' + vs.coverage.missing.length + ' actif(s) sans historique non inclus</span>' : '') + (change !== null ? ' · variation sur la période : <b class="' + (change >= 0 ? 'pos' : 'neg') + ' sens">' + fmtPct(change, 1, true) + '</b>' : '') + '</div>';
+  /* --- carte « Valeur du portefeuille » : historique reconstitué (opérations × cours historiques) --- */
+  const hs_ = hist.summary, perfMode = view.home.mode === 'perf' && hist.perf.points.length > 1;
+  const dn = (iso_) => Math.round(Date.UTC(+iso_.slice(0, 4), +iso_.slice(5, 7) - 1, +iso_.slice(8, 10)) / 86400000), tLabel = (n_) => lbl(new Date(n_ * 86400000).toISOString().slice(0, 10));
+  const lbl = (dt) => fmtDate(dt, { day: 'numeric', month: 'short', year: view.home.period === 0 || view.home.period >= 12 ? '2-digit' : undefined });
+  const tipOf = (p) => {
+    if (mask) return fmtDate(p.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nMontants masqués';
+    let s = fmtDate(p.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nValeur : ' + fmtMoney(p.value, baseCur(), { d: 0 });
+    if (p.cost != null && p.cost > 0) s += '\nCapital investi : ' + fmtMoney(p.cost, baseCur(), { d: 0 });
+    p.parts.forEach((x) => { s += '\n· ' + String(x[0]).slice(0, 22) + ' ' + fmtMoney(x[1], baseCur(), { d: 0 }); });
+    if (p.rest > 0.5) s += '\n· autres ' + fmtMoney(p.rest, baseCur(), { d: 0 });
+    if (p.partial) s += '\n⚠ Valeur partielle : cours manquants (' + p.missing.slice(0, 3).join(', ') + (p.nMissing > 3 ? '…' : '') + ')';
+    return s;
+  };
+  const hasValue = hist.points.length > 1 && hist.points.some((p) => !p.partial && p.value > 0);
+  let pts;
+  if (perfMode) {
+    const byDate = {}; hist.perf.points.forEach((q) => { byDate[q.date] = q.pct; });
+    pts = hist.points.filter((p) => byDate[p.date] !== undefined).map((p) => ({ label: lbl(p.date), t: dn(p.date), value: byDate[p.date] * 100, partial: false,
+      tip: fmtDate(p.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nPerformance : ' + (mask ? 'masquée' : fmtPct(byDate[p.date], 1, true)) }));
+  } else pts = hist.points.map((p) => ({ label: lbl(p.date), t: dn(p.date), value: p.value, cost: p.cost, partial: p.partial, tip: tipOf(p) }));
+  const costLine = !perfMode && pts.length > 1 && pts.every((p) => p.cost != null && !p.partial) && hist.allTx;
+  const refOk = !costLine && !perfMode && inv.count > 0 && inv.count === pv.count && pv.count > 0 && hist.retro;
+  const chart = hasValue
+    ? lineChart({ points: pts, cur: baseCur(), mask, title: 'Évolution de la valeur du portefeuille', ref: refOk ? { value: inv.cost, label: 'Investi (PRU)' } : null, costLine, pct: perfMode, zero: perfMode, tLabel })
+    : '<div class="empty" style="padding:28px 8px"><h3>Pas encore d\'historique de cours</h3><p>Actualisez les données de marché pour tracer l\'évolution de la valeur' + (state.transactions.length ? ' à partir de vos opérations importées' : '') + '.</p><button class="btn primary" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>';
+  /* synthèse : valeur de départ → valeur actuelle = apports nets + gain des marchés */
+  const sumRow = hasValue && hs_ && !perfMode ? '<div class="chart-sum' + (mask ? ' hide-nums' : '') + '"><div><span>Au ' + esc(fmtDate(hs_.startDate, { day: 'numeric', month: 'short', year: 'numeric' })) + '</span>' + sens('<b>' + money(hs_.startValue, 0) + '</b>') + '</div>' +
+    '<div><span>Valeur actuelle</span>' + sens('<b>' + money(hs_.endValue, 0) + '</b>') + '</div>' +
+    (hist.allTx || hs_.netFlows ? '<div><span>Apports nets <small>(achats − ventes)</small></span>' + sens('<b>' + (hs_.netFlows >= 0 ? '+' : '') + money(hs_.netFlows, 0) + '</b>') + '</div><div><span>Gain des marchés</span>' + sens('<b class="' + (hs_.marketGain >= 0 ? 'pos' : 'neg') + '">' + (hs_.marketGain >= 0 ? '+' : '') + money(hs_.marketGain, 0) + '</b>') + '</div>' : '') +
+    (hs_.perfPct != null ? '<div><span>Performance <small>(hors apports)</small></span>' + sens('<b class="' + (hs_.perfPct >= 0 ? 'pos' : 'neg') + '">' + fmtPct(hs_.perfPct, 1, true) + '</b>') + '</div>' : '') + '</div>' : '';
+  const notes = [];
+  if (hasValue) {
+    if (hist.allTx && state.transactions.length) notes.push('Valeur reconstituée : <b>opérations importées × cours historiques</b>' + (costLine ? ' · pointillés ocre : capital investi' : ''));
+    else if (hist.retro) notes.push('Cours passés × quantités <b>actuelles</b> pour ' + (hist.coverage.retro.length > 3 ? hist.coverage.retro.length + ' actifs' : esc(hist.coverage.retro.join(', '))) + ' (pas d\'historique d\'opérations complet : rétrospectif)');
+    const miss = hist.coverage.missing;
+    if (miss.length) notes.push('<span class="warn-t">⚠ Cours historiques indisponibles pour ' + miss.slice(0, 3).map((m) => esc(m.name)).join(', ') + (miss.length > 3 ? ' et ' + (miss.length - 3) + ' autre(s)' : '') + ' (' + esc(miss[0].reason) + ' dès le ' + esc(fmtDate(miss[0].first)) + ') : les portions en <b>pointillés</b> sont partielles, ces actifs n\'y sont pas valorisés.</span>');
+    const curs = new Set(state.holdings.concat(state.archive || []).map((x) => x.currency || 'EUR').concat(state.transactions.map((t) => t.acctCur || 'EUR'))); curs.delete(baseCur());
+    if (curs.size && !(typeof fxHist !== 'undefined' && fxHist && Object.keys(fxHist).length)) notes.push('<span class="warn-t">⚠ Taux de change historiques indisponibles : le taux actuel est utilisé pour valoriser le passé (devises : ' + esc(Array.from(curs).join(', ')) + ').</span>');
+    if (hist.coverage.noDaily && view.home.period > 0 && view.home.period <= 6) notes.push('Cours quotidiens indisponibles (mettre à jour le relais Cloudflare) : points mensuels.');
+    if (perfMode) notes.push('Performance pondérée dans le temps : les achats comptent comme des apports et les ventes comme des retraits, ils ne créent pas de performance.' + (hist.perf.from && hist.points.length && hist.perf.from > hist.points[0].date ? ' Calculée depuis le ' + esc(fmtDate(hist.perf.from)) + ' (avant : valorisation partielle).' : ''));
+    if (view.home.mode === 'perf' && !perfMode) notes.push('Performance non calculable sur cette période (valorisation partielle ou trop peu de points).');
+  }
+  const note = notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '';
   const hero = '<section class="card card-pad hero"><div class="hero-top"><div><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count ? money(pv.total, 0) : '—') + '</div>' +
     '<div class="hero-sub">' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + (un.gain >= 0 ? '+' : '') + money(un.gain, 0) + ' (' + fmtPct(un.pct, 1, true) + ')</b>') + ' <span class="muted">depuis l\'achat (PRU)</span>' : '<span class="muted">' + (pv.count ? 'Renseignez le PRU pour suivre la performance' : 'Cours non disponibles') + '</span>') + (pv.latest ? ' <span class="muted">· cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) + '</span>' : '') + '</div></div>' +
-    '<div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map((p) => '<button type="button" data-per="' + p[0] + '" class="' + (view.home.period === p[0] ? 'on' : '') + '">' + p[1] + '</button>').join('') + '</div></div>' + chart + note + '</section>';
+    '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map((p) => '<button type="button" data-per="' + p[0] + '" class="' + (view.home.period === p[0] ? 'on' : '') + '">' + p[1] + '</button>').join('') + '</div>' +
+    (hist.perf.points.length > 1 || view.home.mode === 'perf' ? '<div class="seg" id="modeSeg" role="group" aria-label="Affichage"><button type="button" data-mode="value" class="' + (!perfMode ? 'on' : '') + '">Valeur</button><button type="button" data-mode="perf" class="' + (perfMode ? 'on' : '') + '">Performance</button></div>' : '') + '</div></div>' + chart + sumRow + note + '</section>';
 
   /* --- carte « Dividendes » --- */
   const divCard = '<section class="card card-pad"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
@@ -92,6 +128,7 @@ function renderHome(host) {
   wireMode(host); wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
+  $$('#modeSeg [data-mode]', host).forEach((b) => b.onclick = () => { view.home.mode = b.dataset.mode; renderHome(host); });
   $$('[data-goto]', host).forEach((b) => b.onclick = () => { view.divTab = b.dataset.goto; go('dividends'); });
   $$('[data-goto-page]', host).forEach((b) => b.onclick = () => go(b.dataset.gotoPage));
   const tr = $('#tickerTrack', host);

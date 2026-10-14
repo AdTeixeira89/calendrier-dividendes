@@ -13,6 +13,8 @@
   const P = (typeof require === 'function' && typeof module !== 'undefined' && !root.Payouts)
     ? require('./payouts.js').Payouts : root.Payouts;
 
+  const Ledger = (typeof require === 'function' && typeof module !== 'undefined' && !root.Ledger) ? require('./ledger.js') : root.Ledger;
+
   const pad2 = (n) => String(n).padStart(2, '0');
   const iso = (y, m, d) => y + '-' + pad2(m) + '-' + pad2(d);
   const parse = (s) => { if (!s) return null; const a = s.split('-').map(Number); return new Date(a[0], a[1] - 1, a[2]); };
@@ -385,6 +387,142 @@
     return { points, coverage: { have: withHist.length, total: hs.length, missing }, retro };
   }
 
+
+  /* ---------- historique reconstitué du portefeuille (opérations × cours historiques) ----------
+     Pour chaque date : quantités détenues (opérations appliquées dans l'ordre, ramenées à la base actuelle des
+     fractionnements) × cours de clôture à cette date × taux de change du mois. Jamais de cours inventé :
+     un actif sans cours à une date est listé comme manquant et le point est marqué « partiel ».
+     Actifs sans opérations cohérentes : quantité ACTUELLE appliquée au passé (rétrospectif, signalé).
+     Performance : méthode pondérée dans le temps (Dietz modifié par intervalle) ; achats = apports, ventes = retraits. */
+  const dayNum = (iso_) => { const a = iso_.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]) / 86400000; };
+  const isoOfNum = (n) => iso(Math.floor(n / 10000), Math.floor(n / 100) % 100, n % 100);
+  const numOfIso = (s) => Number(s.slice(0, 4)) * 10000 + Number(s.slice(5, 7)) * 100 + Number(s.slice(8, 10));
+  const dateAddMonths = (d, n) => { const t = new Date(d.getFullYear(), d.getMonth() + n, 1); const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); return new Date(t.getFullYear(), t.getMonth(), Math.min(d.getDate(), last)); };
+
+  function priceLookup(inst) {
+    const hs = inst.hist, d = hs && hs.d && hs.d.t && hs.d.t.length ? hs.d : null, mo = hs && hs.c && hs.c.length && hs.from ? hs : null;
+    const d0 = d ? d.t[0] : null;
+    return function (dateISO, live) {
+      if (live && inst.price > 0) return inst.price;
+      if (d && numOfIso(dateISO) >= d0) {
+        const key = numOfIso(dateISO); let lo = 0, hi = d.t.length - 1, best = -1;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (d.t[mid] <= key) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+        return best >= 0 && d.c[best] > 0 ? d.c[best] : null;
+      }
+      if (mo) {
+        const y = dateISO.slice(0, 7), i = (Number(y.slice(0, 4)) - Number(mo.from.slice(0, 4))) * 12 + Number(y.slice(5)) - Number(mo.from.slice(5));
+        if (i < 0) return null;                                   // avant le début des données : aucun cours (rien n'est inventé)
+        for (let k = Math.min(i, mo.c.length - 1); k >= Math.max(0, i - 2); k--) if (mo.c[k] > 0) return mo.c[k];
+      }
+      return null;
+    };
+  }
+
+  function portfolioHistory(state, convertAt, o) {
+    o = o || {};
+    const today = o.today || new Date(), todayS = toISO(today), ids = o.ids || null, months = o.months === undefined ? 12 : o.months;
+    const insts = (state.holdings || []).filter((h) => !ids || ids.has(h.id)).map((h) => ({ kind: 'holding', h }))
+      .concat((state.archive || []).filter((a) => !ids || ids.has(a.id)).map((a) => ({ kind: 'archive', h: a })));
+    const txAll = (state.transactions || []).filter((t) => (t.type === 'buy' || t.type === 'sell') && t.date);
+    const byInst = {}; txAll.forEach((t) => { (byInst[t.holdingId] = byInst[t.holdingId] || []).push(t); });
+    const sortTx = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0);
+
+    const list = []; const coverage = { total: 0, missing: [], retro: [], noDaily: false };
+    insts.forEach((it) => {
+      const h = it.h, txs = (byInst[h.id] || []).slice().sort(sortTx), splits = h.splits || [];
+      const sign = (t) => (t.type === 'buy' ? 1 : -1);
+      const adjTotal = txs.reduce((s, t) => s + sign(t) * num(t.qty) * (Ledger ? Ledger.splitFactor(splits, t.date) : 1), 0), rawTotal = txs.reduce((s, t) => s + sign(t) * num(t.qty), 0);
+      const cq = it.kind === 'holding' ? num(h.quantity) : 0, tol = 1e-6 * Math.max(1, cq);
+      const txMode = txs.length > 0 && (it.kind === 'archive' || Math.abs(adjTotal - cq) <= tol || Math.abs(rawTotal - cq) <= tol);
+      if (!txMode && !(it.kind === 'holding' && cq > 0)) return;               // ni opérations exploitables ni position actuelle
+      const name = h.name || h.displayTicker || h.ticker || '—';
+      let ledgerRows = null;
+      if (txMode && Ledger) {
+        const entries = txs.map((t) => {
+          const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees));
+          const c = convertAt(raw, cur, t.date.slice(0, 7));
+          return { date: t.date, time: t.time || '', type: t.type, qty: num(t.qty), amt: c === null ? null : c, fees: num(t.fees) };
+        });
+        ledgerRows = Ledger.run(entries).rows;
+      }
+      const cumul = []; let run_ = 0;
+      if (txMode) txs.forEach((t) => { run_ += sign(t) * num(t.qty) * (Ledger ? Ledger.splitFactor(splits, t.date) : 1); cumul.push({ date: t.date, q: run_ }); });
+      coverage.total++;
+      if (!txMode) coverage.retro.push(name);
+      list.push({ id: h.id, name, cur: h.currency || 'EUR', kind: it.kind, txMode, cumul, ledgerRows, price: priceLookup(h), live: it.kind === 'holding', hasHist: !!(h.hist && ((h.hist.c && h.hist.c.length) || (h.hist.d && h.hist.d.t.length))), hasDaily: !!(h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length),
+        dailyStart: h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length ? h.hist.d.t[0] : null, q0: cq, firstTx: txs.length ? txs[0].date : null, histFrom: h.hist && h.hist.from ? h.hist.from + '-01' : null,
+        rowsAt: ledgerRows });
+    });
+    if (!list.length) return { points: [], coverage, perf: { points: [], from: null }, summary: null, retro: true, empty: true };
+
+    // fenêtre
+    const firstTxAll = list.reduce((m, x) => (x.firstTx && x.firstTx < m ? x.firstTx : m), '9999-99-99');
+    const histMin = list.reduce((m, x) => (x.histFrom && x.histFrom < m ? x.histFrom : m), '9999-99-99');
+    // « Tout l'historique » : on part de la fin du mois précédant la première opération (valeur nulle), pour que les apports initiaux comptent comme flux
+    let startD = months > 0 ? toISO(dateAddMonths(today, -months)) : (firstTxAll !== '9999-99-99' ? lastDayOf(addYM(firstTxAll.slice(0, 7), -1)) : histMin);
+    if (startD === '9999-99-99') startD = toISO(dateAddMonths(today, -12));
+    // dates d'échantillonnage : fins de mois, puis séances quotidiennes si TOUS les actifs utiles ont des cours quotidiens
+    const useful = list.filter((x) => x.hasHist), allDaily = useful.length > 0 && useful.every((x) => x.hasDaily);
+    coverage.noDaily = !allDaily && useful.length > 0;
+    const dailyStart = allDaily ? Math.max.apply(null, useful.map((x) => x.dailyStart)) : null;
+    const dates = {};
+    const startYM = startD.slice(0, 7), endYM = ymOf(today);
+    for (let y = startYM; y < endYM; y = addYM(y, 1)) { const e = lastDayOf(y); if (e >= startD && (!allDaily || numOfIso(e) < dailyStart)) dates[e] = 1; }
+    if (allDaily) {
+      const set = {};
+      // séances : union des dates quotidiennes (≥ début de la fenêtre)
+      insts.forEach((it) => { const d = it.h.hist && it.h.hist.d; if (d) d.t.forEach((t) => { if (t >= dailyStart) set[isoOfNum(t)] = 1; }); });
+      Object.keys(set).forEach((k) => { if (k >= startD && k <= todayS) dates[k] = 1; });
+    }
+    dates[todayS] = 1;
+    const sample = Object.keys(dates).sort();
+    // quantité à une date (pointeurs croissants)
+    const ptr = list.map(() => 0);
+    const qtyAt = (x, i, d) => { if (!x.txMode) return x.q0; while (ptr[i] < x.cumul.length && x.cumul[ptr[i]].date <= d) ptr[i]++; return ptr[i] ? Math.max(0, x.cumul[ptr[i] - 1].q) : 0; };
+    const costAt = (x, d) => { if (!x.txMode || !x.rowsAt) return null; let c = 0; for (let k = 0; k < x.rowsAt.length; k++) { if (x.rowsAt[k].date <= d) c = x.rowsAt[k].costAfter; else break; } return c; };
+    const missingEver = {};
+    const points = sample.map((d) => {
+      const live = d === todayS, ymm = d.slice(0, 7);
+      let value = 0, cost = 0, costKnown = true, partial = false; const miss = [], parts = [];
+      list.forEach((x, i) => {
+        const q = qtyAt(x, i, d); if (!(q > 1e-9)) return;
+        const p = x.price(d, live && x.live), cv = p > 0 ? convertAt(q * p, x.cur, ymm) : null;
+        if (cv === null) { partial = true; miss.push(x.name); missingEver[x.name] = missingEver[x.name] || { name: x.name, first: d, reason: p > 0 ? 'taux de change indisponible' : (x.hasHist ? 'cours indisponible à cette date' : 'aucun cours historique') }; return; }
+        value += cv; parts.push([x.name, cv]);
+        const c = costAt(x, d); if (c === null) costKnown = false; else cost += c;
+      });
+      parts.sort((a, b) => b[1] - a[1]);
+      return { date: d, ym: ymm, value, cost: costKnown ? cost : null, partial, missing: miss.slice(0, 6), nMissing: miss.length, parts: parts.slice(0, 4), rest: parts.slice(4).reduce((s, x) => s + x[1], 0) };
+    });
+    coverage.missing = Object.keys(missingEver).map((k) => missingEver[k]);
+
+    // flux (achats = apports, ventes = retraits), en devise de base au taux du mois d'exécution
+    const flows = [];
+    list.forEach((x) => { if (!x.txMode || !x.rowsAt) return; x.rowsAt.forEach((r) => { if (r.amt != null) flows.push({ date: r.date, f: (r.type === 'buy' ? 1 : -1) * r.amt }); }); });
+    flows.sort((a, b) => (a.date < b.date ? -1 : 1));
+    // performance pondérée dans le temps
+    const perf = { points: [], from: null, pct: null };
+    let lastPartial = -1; points.forEach((p, i) => { if (p.partial) lastPartial = i; });
+    const s0 = lastPartial + 1;
+    if (s0 < points.length - 1) {
+      let idx = 1; perf.from = points[s0].date; perf.points.push({ date: points[s0].date, pct: 0 });
+      for (let k = s0 + 1; k < points.length; k++) {
+        const d0 = points[k - 1].date, d1 = points[k].date, span = Math.max(1, dayNum(d1) - dayNum(d0));
+        let F = 0, W = 0; flows.forEach((f) => { if (f.date > d0 && f.date <= d1) { F += f.f; W += f.f * ((dayNum(d1) - dayNum(f.date)) / span); } });
+        const V0 = points[k - 1].value, V1 = points[k].value, den = V0 + W;
+        if (den > 1e-9) idx *= 1 + (V1 - V0 - F) / den;
+        perf.points.push({ date: d1, pct: idx - 1 });
+      }
+      perf.pct = perf.points[perf.points.length - 1].pct;
+    }
+    const first = points[0], last = points[points.length - 1];
+    const netFlows = flows.filter((f) => f.date > first.date && f.date <= last.date).reduce((s, f) => s + f.f, 0);
+    const summary = { startDate: first.date, endDate: last.date, startValue: first.value, endValue: last.value, netFlows, marketGain: last.value - first.value - netFlows, perfPct: perf.pct, partialStart: first.partial, partialEnd: last.partial,
+      investedEnd: last.cost, firstTx: firstTxAll === '9999-99-99' ? null : firstTxAll };
+    const retro = list.some((x) => !x.txMode);
+    return { points, coverage, perf, summary, retro, empty: false, allTx: list.every((x) => x.txMode) };
+  }
+
   /* ---------- performance par actif et globale (PRU) ---------- */
   function performance(state, convert, ids) {
     const rows = []; let value = 0, cost = 0, gain = 0, valAll = 0;
@@ -456,7 +594,7 @@
   }
 
   root.Engine = {
-    valueSeries, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
   };

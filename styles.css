@@ -387,9 +387,11 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 #eyeBtn[aria-pressed="true"]{color:var(--accent)}
 
 /* ================= Tableau de bord, répartition ================= */
-.grid.three{grid-template-columns:1fr}
-.dash-main{grid-template-columns:1fr}
-@media (min-width:900px){ .grid.three{grid-template-columns:repeat(3,1fr)} .dash-main{grid-template-columns:1.7fr 1fr} }
+.grid.three{grid-template-columns:minmax(0,1fr)}
+.dash-main{grid-template-columns:minmax(0,1fr)}
+.grid.three>*,.dash-main>*{min-width:0}
+@media (min-width:900px){ .grid.three{grid-template-columns:repeat(3,minmax(0,1fr))} .dash-main{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)} }
+.perf-row .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .page-head-sub{margin-bottom:12px}
 .hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:6px}
 .hero .lbl{font-size:12.5px;color:var(--muted);font-weight:600}
@@ -438,3 +440,20 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .exp-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;margin-bottom:8px;padding:12px 14px;height:auto}
 .exp-item small{color:var(--muted);font-weight:400;white-space:normal}
 .exp-item:disabled{opacity:.5}
+
+/* import DEGIRO / opérations */
+.dg-summary ul,.dg-conf{margin:6px 0 0;padding-left:18px;display:grid;gap:2px}
+.dg-summary{margin:8px 0 4px}
+.dg-note{font-size:11.5px;color:var(--muted);margin-top:2px;white-space:normal}
+.dg-tbl td{vertical-align:top}.dg-align{margin-top:4px}.dg-align small{color:var(--muted)}
+.dg-cols{margin:8px 0;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;background:var(--surface-2)}
+.dg-cols>summary{cursor:pointer;font-weight:600;font-size:13px}
+.dg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 12px;margin-top:8px}
+.inline-f{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}.inline-f input{width:auto}
+.badge.info{background:var(--info-soft);color:var(--info)}
+
+.hero-ctrl{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.chart-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 14px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.chart-sum>div{display:flex;flex-direction:column;gap:1px;font-size:13px}.chart-sum span{color:var(--muted);font-size:11.5px}.chart-sum small{font-size:10.5px}
+
+@media (max-width:640px){ .perf-cols{grid-template-columns:minmax(0,1fr)} }

@@ -13,7 +13,7 @@ function defaultState() {
   return {
     v: 2,
     meta: { uid: null, remoteBase: 0, dirty: false, lastMarketUpdate: null },
-    holdings: [], payments: [], transactions: [],
+    holdings: [], payments: [], transactions: [], archive: [],
     accounts: [{ id: 'main', name: 'Mon portefeuille' }],
     settings: { relayUrl: '', baseCurrency: 'EUR', incomeMode: 'gross', theme: 'auto', bg: 'aurore', autoLogos: true, tickerAuto: true, autoRefresh: true, notify: false, columns: {} },
     sent: { days: {}, months: {} }
@@ -25,14 +25,14 @@ let view = {
   divTab: 'calendar', alloc: { basis: 'value' },
   cal: { mode: 'month', cursor: new Date(), asset: 'all', status: 'all' },
   hist: { tab: 'payments', year: 'all', month: 'all', asset: 'all', status: 'all' },
-  port: { q: '', type: 'all', div: 'all' },
+  port: { q: '', type: 'all', div: 'all', tab: 'positions' }, ops: { asset: 'all', type: 'all', from: '', to: '' },
   stats: { year: new Date().getFullYear() },
   home: { year: new Date().getFullYear(), period: 12 },
   sync: { state: 'local', msg: '', at: 0 }
 };
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
-function hasData(s) { return !!(s.holdings.length || s.payments.length || s.transactions.length); }
+function hasData(s) { return !!(s.holdings.length || s.payments.length || s.transactions.length || (s.archive && s.archive.length)); }
 
 /* Migration de l'ancien format (v1) : aucune donnée n'est supprimée, sauf les
    résultats trimestriels (fonction abandonnée) et l'ancienne clé de l'API FMP. */
@@ -67,6 +67,8 @@ function hydrateState(parsed) {
     s.holdings = Array.isArray(s.holdings) ? s.holdings : [];
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
+    s.archive = Array.isArray(s.archive) ? s.archive : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
+    if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;
     s.holdings.forEach((h) => { if (!h.account || !s.accounts.some((a) => a.id === h.account)) h.account = s.accounts[0].id; migrateHolding(h); });
     s.sent = s.sent || { days: {}, months: {} };
@@ -111,9 +113,12 @@ async function ensureFx() {
 let fxHist = null;
 async function ensureFxHistory() {
   try {
-    const curs = Array.from(new Set(state.holdings.flatMap((h) => [h.currency, Engine.costCur(h)]).concat([baseCur()]))).filter((c) => c && c !== 'EUR').sort();
+    const arch = state.archive || [];
+    const curs = Array.from(new Set(state.holdings.flatMap((h) => [h.currency, Engine.costCur(h)]).concat(arch.map((x) => x.currency), state.transactions.map((t) => t.acctCur), [baseCur()]))).filter((c) => c && c !== 'EUR').sort();
     if (!curs.length) { fxHist = {}; return; }
-    const from = state.holdings.reduce((m, h) => (h.hist && h.hist.from < m ? h.hist.from : m), Engine.addYM(Engine.ymOf(new Date()), -60)) + '-01';
+    let from = state.holdings.concat(arch).reduce((m, h) => (h.hist && h.hist.from < m ? h.hist.from : m), Engine.addYM(Engine.ymOf(new Date()), -60));
+    const firstTx = state.transactions.reduce((m, t) => (t.date && t.date.slice(0, 7) < m ? t.date.slice(0, 7) : m), '9999-99'); if (firstTx < from) from = firstTx;
+    from += '-01';
     const raw = localStorage.getItem('fxHist_v1');
     if (raw) { const c = JSON.parse(raw); if (c.day === todayISO() && c.from <= from && curs.every((x) => c.curs.indexOf(x) >= 0)) { fxHist = c.rates; return; } }
     const r = await fetch('https://api.frankfurter.dev/v1/' + from + '..' + todayISO() + '?base=EUR&symbols=' + curs.join(','));
@@ -155,7 +160,7 @@ function convert(amount, cur) {
    FILTRES GLOBAUX
    --------------------------------------------------------------- */
 function visibleHoldings() { return view.account === 'all' ? state.holdings : state.holdings.filter((h) => h.account === view.account); }
-function visibleIds() { return view.account === 'all' ? null : new Set(visibleHoldings().map((h) => h.id)); }
+function visibleIds() { return view.account === 'all' ? null : new Set(visibleHoldings().map((h) => h.id).concat((state.archive || []).filter((x) => x.account === view.account).map((x) => x.id))); }
 function accountName(id) { const a = state.accounts.find((x) => x.id === id); return a ? a.name : '—'; }
 const incomeMode = () => state.settings.incomeMode === 'net' ? 'net' : 'gross';
 
@@ -183,16 +188,33 @@ async function refreshMarket(list, o) {
     cancelled: () => refreshCancel,
     progress: (i, n, h) => { if (modal) { const m = $('#rfMsg'), b = $('#rfBar'); if (m) m.textContent = i + ' / ' + n + ' — ' + (h.displayTicker || h.ticker); if (b) b.style.width = (100 * i / n) + '%'; } }
   });
+  // positions entièrement vendues : leurs cours passés servent à reconstituer la courbe de valeur
+  let ares = null;
+  if (!refreshCancel && !res.stopped && (list === state.holdings || list.length === visibleHoldings().length)) {
+    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && (!x.hist || x.marketAt !== nowISO));
+    if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
+  }
   refreshing = false;
-  if (res.ok) { state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
+  if (res.ok || (ares && ares.ok)) { state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
   if (!o.silent) renderPage(); else if (res.ok) renderPageSoft();
   if (!o.silent) {
     const parts = [res.ok + ' actif(s) mis à jour'];
+    if (ares && (ares.ok || ares.fail)) parts.push(ares.ok + ' position(s) clôturée(s)' + (ares.fail ? ' (' + ares.fail + ' sans cours)' : ''));
     if (res.fail) parts.push(res.fail + ' échec(s)' + (res.errors[0] ? ' — ' + res.errors[0].message : ''));
     toast(parts.join(', ') + '.', { error: !!res.fail && !res.ok, ms: 6000 });
   }
   return res;
+}
+async function refreshArchive(entries, nowISO) {
+  const out = { ok: 0, fail: 0 };
+  for (let i = 0; i < entries.length; i++) {
+    const a = entries[i];
+    try { const f = await market.fetchAsset(a.ticker || a.isin, a.name, { needSector: false }); Market.applyToArchive(a, f, nowISO); out.ok++; }
+    catch (e) { a.marketError = e.message; out.fail++; if (e.rate || e.fatal) break; }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return out;
 }
 function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Date.now() - t > 24 * 3600 * 1000; }
 
@@ -556,7 +578,7 @@ function downloadICS() {
    --------------------------------------------------------------- */
 async function exportData() {
   const name = 'suivi-dividendes-' + todayISO() + '.json';
-  const out = clone(state); delete out.settings.apiKey;
+  const out = clone(state); delete out.settings.apiKey; delete out.undo;
   const file = new File([JSON.stringify(out, null, 2)], name, { type: 'application/json' });
   try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sauvegarde Suivi des dividendes' }); return; } }
   catch (e) { if (e && e.name === 'AbortError') return; }
@@ -640,6 +662,17 @@ function openCsvExport() {
     } catch (e) { toast('Export impossible : ' + e.message, { error: true }); return; }
     if (await saveFile(name, text, 'text/csv;charset=utf-8')) toast(name + ' exporté' + note + '.');
   });
+}
+/* Retour arrière d'un import d'historique : photographie des données juste avant la modification (chiffrée avec le reste si un code est défini). */
+function snapshotForUndo(label) {
+  state.undo = { at: new Date().toISOString(), label: label, holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []), accounts: clone(state.accounts) };
+}
+async function undoLastImport() {
+  const u = state.undo; if (!u) return;
+  const c = await confirmDialog({ title: 'Annuler le dernier import ?', body: 'Les positions, opérations et versements reviennent à leur état d\'avant « ' + esc(u.label) + ' » (' + esc(fmtDate(u.at.slice(0, 10))) + '). <b>Les modifications faites depuis cet import seront perdues.</b>', confirmLabel: 'Annuler l\'import', danger: true });
+  if (!c.ok) return;
+  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
+  saveState(); renderPage(); toast('Import annulé : données restaurées.');
 }
 function importBackup(file) {
   const reader = new FileReader();

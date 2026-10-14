@@ -74,7 +74,8 @@ Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protég
 
 ```
 index.html  styles.css  config.js          page, style, configuration publique
-engine.js   fonctions pures : statuts, prévisions, valeur / performance / répartition (testé sous Node)
+ledger.js   import d'historique (DEGIRO…) : lecture, grand livre / PRU, plan d'import idempotent (module pur, testé sous Node)
+engine.js   fonctions pures : statuts, prévisions, valeur / performance / répartition / historique du portefeuille (testé sous Node)
 market.js   données de marché (relais Yahoo), conversion ISIN, détection de fréquence
 cloud.js    Firebase Auth + Firestore (comptes, synchronisation transactionnelle)
 vault.js    stockage durable local (localStorage + IndexedDB) et code de verrouillage
@@ -82,6 +83,7 @@ payouts.js  calcul mensuel, rappels, export agenda (partagé avec le service wor
 ui.js       composants : formats, fenêtres, tableau configurable, graphiques SVG
 pages.js    Portefeuille, Calendrier, Historique, Statistiques
 dashboard.js Accueil, Répartition, rubrique Dividendes (onglets)
+history.js  import DEGIRO (aperçu, confirmation, retour arrière), opérations par actif, positions clôturées
 forms.js    actif, versement, suppressions, comptes, imports CSV
 settings.js Paramètres
 app.js      état, migration, synchronisation, navigation, démarrage
@@ -93,9 +95,22 @@ tests/      tests unitaires (Node) et de bout en bout (Playwright)
 ## Tests
 
 ```bash
-node tests/engine.test.js && node tests/market.test.js        # calculs et données de marché
+node tests/engine.test.js && node tests/market.test.js && node tests/ledger.test.js   # calculs, données de marché, import d'historique
 NODE_PATH=$(npm root -g) LIBDIR=<dossier papaparse+xlsx> node tests/e2e.js   # parcours complets (faux Firebase, faux relais)
 ```
+
+## Import intelligent de l'historique DEGIRO
+
+**Paramètres → Sauvegarde → « Importer l'historique DEGIRO »**, ou onglet **Opérations** de « Mon portefeuille ». Téléchargez dans DEGIRO l'export CSV de vos *Transactions* (ou le *Relevé de compte*), puis choisissez-le : l'application affiche un récapitulatif **avant toute modification**.
+
+- **Lecture** : colonnes reconnues d'après leur *sens* (français, anglais, néerlandais, allemand, espagnol…), y compris les colonnes de devise sans titre de DEGIRO ; séparateurs, encodage (UTF-8 puis Windows-1252), nombres à l'européenne (`1 234,56`) ou à l'anglaise (`1,234.56`), dates `jj-mm-aaaa`. Les colonnes restent modifiables à la main. Les lignes illisibles ou ambiguës sont listées (avec leur numéro) sans bloquer les autres.
+- **Aucun doublon, rien d'écrasé** : chaque opération a un identifiant stable (empreinte du contenu : ISIN, date, heure, sens, quantité, prix, montant, n° d'ordre + rang d'occurrence). Deux opérations légitimes le même jour restent deux opérations ; une opération déjà saisie autrement (même date, sens, quantité, prix) est reconnue. **Réimporter le même fichier ne change rien** (même trié à l'envers).
+- **Positions** : détenue et absente → créée avec quantité et **PRU calculé** (coût moyen pondéré, frais d'achat inclus, montants en EUR au taux réel de l'exécution) ; vendue en partie → conservée ; **vendue en totalité → non ajoutée au portefeuille actuel** (archivée, opérations et résultat réalisé conservés) ; déjà présente → **conservée telle quelle** (PRU, quantité, nom, logo…). Seules les informations *manquantes* (PRU vide, ISIN absent) sont complétées, et c'est décochable. Les divergences de quantité sont signalées ; « Aligner sur l'historique » (quantité et PRU) n'a lieu que si vous cochez la case de l'actif. Un historique incohérent (vente supérieure aux achats connus) n'est pas importé et reste signalé.
+- **Retour arrière** : une copie des données est conservée juste avant l'import (chiffrée avec le reste si un code est défini) ; bouton « Annuler l'import » juste après, ou dans Paramètres.
+- **Opérations** (Mon portefeuille → Opérations) : par actif, date et type ; quantité, coût cumulé et PRU **après chaque opération**, résultat réalisé de chaque vente ; onglet **Clôturées** pour les positions entièrement vendues.
+- **Courbe de l'accueil** : valeur reconstituée = quantités issues des opérations (ramenées à la base actuelle des fractionnements) × cours historiques × taux de change du mois, périodes 1 M / 3 M / 6 M / 1 an / 5 ans / Tout, infobulle détaillée (date, valeur, capital investi, principales positions), synthèse « valeur de départ → actuelle = apports nets + gain des marchés » et courbe de **performance pondérée dans le temps** (achats = apports, ventes = retraits : ils ne créent pas de performance). Aucun cours n'est inventé : un actif sans cours à une date rend le point *partiel* (pointillés + message).
+
+Limites à connaître : l'export *Transactions* de DEGIRO ne contient ni dépôts/retraits d'espèces ni dividendes ni opérations sur titres (le relevé de compte contient des achats/ventes dans sa description, sans frais séparés ; dividendes, dépôts et frais y sont comptés mais non importés) ; la performance « hors apports » considère donc les achats et ventes de titres comme flux. Un **fractionnement** n'apparaît pas dans l'export : pour les positions créées par l'import, la quantité et le PRU sont ramenés à la base actuelle après « Actualiser » (Yahoo fournit les splits) ; pour une position existante, la divergence est signalée. Cours quotidiens : 10 ans (nécessite la mise à jour du relais, voir `relay/LISEZMOI.md`) ; sans elle, 5 ans de cours mensuels.
 
 ## Export CSV (tableur)
 

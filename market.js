@@ -59,6 +59,31 @@
     return { from: keys[0], c: out };
   }
 
+  /* Cours quotidiens récents { t: [aaaammjj…], c: [cours…] } (≈ 6 mois de séance) si la source est quotidienne, sinon null. */
+  function dailySeries(res, pence, keep) {
+    const ts = res.timestamp || [], cl = ((res.indicators || {}).quote || [{}])[0].close || [];
+    const t = [], c = [];
+    for (let i = 0; i < ts.length; i++) {
+      const v = cl[i]; if (!(v > 0)) continue;
+      const d = new Date(ts[i] * 1000);
+      t.push(d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate());
+      c.push(Math.round((pence ? v / 100 : v) * 10000) / 10000);
+    }
+    if (t.length < 40) return null;
+    const dayNum = (x) => Date.UTC(Math.floor(x / 10000), Math.floor(x / 100) % 100 - 1, x % 100) / 86400000;
+    const tail = t.slice(-30), gaps = []; for (let i = 1; i < tail.length; i++) gaps.push(dayNum(tail[i]) - dayNum(tail[i - 1]));
+    gaps.sort((a, b) => a - b); if (gaps[Math.floor(gaps.length / 2)] > 5) return null;          // données mensuelles ou hebdomadaires : pas de série quotidienne
+    const k = keep || 140; return { t: t.slice(-k), c: c.slice(-k) };
+  }
+  /* Fractionnements d'actions [{ date, ratio }] (10 pour 1 → ratio 10), pour ramener les anciennes quantités à la base actuelle. */
+  function splitList(res) {
+    const ev = (res.events && res.events.splits) || {};
+    return Object.keys(ev).map((k) => ev[k]).filter((s) => s && s.date && s.numerator > 0 && s.denominator > 0)
+      .map((s) => ({ date: new Date(s.date * 1000).toISOString().slice(0, 10), ratio: Math.round(s.numerator / s.denominator * 1e6) / 1e6 })).filter((s) => s.ratio !== 1).sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+
+  const withDaily = (mo, d) => { if (mo && d) mo.d = d; return mo; };
+
   function detectFrequency(isoDates) {
     if (isoDates.length < 2) return 'irregular';
     const ms = (s) => { const a = s.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]); };
@@ -111,7 +136,7 @@
     async function fetchAsset(input, nameHint, opts) {
       opts = opts || {};
       const symbol = await resolveSymbol(input, nameHint);
-      const data = await call('/chart?symbol=' + encodeURIComponent(symbol));
+      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=10y&interval=1d');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) {
         const desc = data.chart && data.chart.error && data.chart.error.description;
@@ -137,7 +162,7 @@
         instrumentType: meta.instrumentType || null,        // EQUITY | ETF | …
         price: meta.regularMarketPrice > 0 ? (pence ? meta.regularMarketPrice / 100 : meta.regularMarketPrice) : null,
         priceAt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
-        hist: monthlySeries(res, pence), sector, industry,
+        hist: withDaily(monthlySeries(res, pence), dailySeries(res, pence)), splits: splitList(res), sector, industry,
         dividends: divs
       };
     }
@@ -174,6 +199,7 @@
     if (a.currency) h.currency = a.currency;
     if (a.price > 0) { h.price = a.price; h.priceAt = a.priceAt || nowISO; }
     if (a.hist) h.hist = a.hist;
+    if (a.splits) h.splits = a.splits;
     if (!h.geoLocked) {     // secteur et pays : sauf si vous les avez saisis vous-même
       if (a.sector) { h.sector = a.sector; h.industry = a.industry || h.industry || null; }
       else if (a.instrumentType === 'ETF' && !h.sector) h.sector = 'ETF';
@@ -201,6 +227,16 @@
       if (a.instrumentType === 'ETF' && !h.typeLocked && h.type === 'stock') h.type = 'etf_dist';
     }
     return h;
+  }
+  /* Positions soldées (archive) : uniquement l'historique de cours, le nom et la devise servent à valoriser le passé. */
+  function applyToArchive(a, f, nowISO) {
+    if (f.resolved) { a.ticker = f.symbol; a.displayTicker = f.symbol.toUpperCase(); }
+    if (f.name && !a.name) a.name = f.name;
+    if (f.currency) a.currency = f.currency;
+    if (f.hist) a.hist = f.hist;
+    if (f.splits) a.splits = f.splits;
+    a.marketAt = nowISO; a.marketError = null;
+    return a;
   }
   function shiftMonths(iso, n) {
     const y = Number(iso.slice(0, 4)), m = Number(iso.slice(5, 7)) - 1 + n, d = iso.slice(8, 10);
@@ -230,6 +266,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, deriveCountry, monthlySeries, COUNTRY_NAME, makeClient, applyToHolding, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

@@ -52,13 +52,23 @@ const ts = (d) => Math.floor(Date.parse(d) / 1000);
 const YAHOO = {
   'AI.PA': { name: "L'Air Liquide S.A.", cur: 'EUR', type: 'EQUITY', price: 175, sector: 'Basic Materials', divs: [['2024-05-14', 2.9], ['2025-05-12', 3.2], ['2026-05-11', 3.4]] },
   'AAPL': { name: 'Apple Inc.', cur: 'USD', type: 'EQUITY', price: 190, sector: 'Technology', divs: [['2025-11-10', .25], ['2026-02-09', .25], ['2026-05-11', .26], ['2026-08-10', .26]] },
-  'IWDA.AS': { name: 'iShares Core MSCI World', cur: 'EUR', type: 'ETF', divs: [] }
+  'IWDA.AS': { name: 'iShares Core MSCI World', cur: 'EUR', type: 'ETF', divs: [] },
+  'TTE.PA': { name: 'TotalEnergies SE', cur: 'EUR', type: 'EQUITY', price: 62, sector: 'Energy', divs: [['2026-03-20', .79]] },
+  'NOVO-B.CO': { name: 'Novo Nordisk A/S', cur: 'DKK', type: 'EQUITY', price: 700, sector: 'Healthcare', divs: [] }
 };
-const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS' };
+const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS', 'FR0000120271': 'TTE.PA', 'DK0062498333': 'NOVO-B.CO' };
+const RELAY = { old: false };    // true : simule l'ancienne version du relais (5 ans mensuels, ignore range / interval)
+function chartSeries(y, interval) {
+  if (interval === '1d' && !RELAY.old) {           // quotidien : ~3 ans de séances, cours en hausse régulière jusqu'au dernier cours
+    const out = [], end = Date.UTC(2026, 9, 12); for (let t = end - 1100 * 86400000; t <= end; t += 86400000) { const d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) out.push(t); }
+    return { timestamp: out.map((t) => t / 1000), indicators: { quote: [{ close: out.map((t, i) => Math.round(y.price * (0.5 + 0.5 * i / (out.length - 1)) * 100) / 100) }] } };
+  }
+  return { timestamp: Array.from({ length: 25 }, (_, i) => ts(new Date(Date.UTC(2024, 10 + i, 1)).toISOString().slice(0, 10))), indicators: { quote: [{ close: Array.from({ length: 25 }, (_, i) => Math.round(y.price * (0.7 + i * 0.0125) * 100) / 100) }] } };
+}
 async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
-  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, timestamp: Array.from({ length: 25 }, (_, i) => ts(new Date(Date.UTC(2024, 10 + i, 1)).toISOString().slice(0, 10))), indicators: { quote: [{ close: Array.from({ length: 25 }, (_, i) => Math.round(y.price * (0.7 + i * 0.0125) * 100) / 100) }] }, events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
+  if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])) } }] } }); }
   return route.fulfill({ status: 404 });
 }
 
@@ -71,7 +81,16 @@ async function device(o) {
   await ctx.exposeFunction('__fs', (op, ...a) => fsOps[op](...a));
   const page = await ctx.newPage(); page.errors = []; global.__lastPage = page;
   page.on('pageerror', (e) => page.errors.push(e.message));
-  await page.route(/frankfurter/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ date: '2026-10-09', rates: { USD: 1.2, GBP: 0.85, CHF: 0.95 } }) }));
+  await page.addInitScript(() => { window.addEventListener('unhandledrejection', (e) => { setTimeout(() => { throw new Error('promesse rejetée : ' + (e.reason && e.reason.stack || e.reason)); }); }); });
+  await page.route(/frankfurter/, (r) => {
+    const url = r.request().url();
+    if (/\d{4}-\d{2}-\d{2}\.\.\d{4}/.test(url)) {      // taux historiques : un par fin de mois, USD en hausse régulière
+      const rates = {}; let k = 0;
+      for (let y = 2018; y <= 2026; y++) for (let m = 1; m <= 12; m++) { const day = y + '-' + String(m).padStart(2, '0') + '-' + String(new Date(y, m, 0).getDate()); rates[day] = { USD: Math.round((1.05 + 0.002 * k++) * 10000) / 10000, DKK: 7.46, GBP: 0.85, CHF: 0.95 }; }
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ base: 'EUR', rates }) });
+    }
+    return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ date: '2026-10-09', rates: { USD: 1.2, GBP: 0.85, CHF: 0.95, DKK: 7.46 } }) });
+  });
   await page.route(/workers\.dev/, mockRelay);
   await page.route(/cdn\.jsdelivr\.net/, (r) => { const f = r.request().url().includes('papaparse') ? 'papaparse.min.js' : 'xlsx.full.min.js'; const fp = path.join(process.env.LIBDIR || '', f); fs.existsSync(fp) ? r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(fp) }) : r.abort(); });
   await page.route(/^https?:\/\/(?!localhost)(?!.*workers\.dev)(?!.*frankfurter)(?!.*cdn\.jsdelivr)/, (r) => r.abort());
@@ -453,9 +472,9 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/Valeur du portefeuille/.test(pg) && /Dividendes \d{4}/.test(pg) && /Par secteur/.test(pg) && /Par pays/.test(pg) && /Performances/.test(pg), 'blocs de l\'accueil : ' + pg.replace(/\n/g, ' | ').slice(0, 300));
     ok(/Investi \(PRU\)/.test(await p.locator('#page').innerHTML()), 'repère du prix de revient sur la courbe');
     const n1 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
-    await p.click('#perSeg [data-per="36"]'); await p.waitForTimeout(200);
+    await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(200);
     const n3 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
-    ok(n1 >= 12 && n3 >= n1, 'périodes : ' + n1 + ' → ' + n3 + ' points'); ok(await p.locator('#perSeg [data-per="36"].on').count(), 'période active');
+    ok(n1 >= 12 && n3 >= n1, 'périodes : ' + n1 + ' → ' + n3 + ' points'); ok(await p.locator('#perSeg [data-per="60"].on').count(), 'période active');
     await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(150);
     await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').last().hover(); await p.waitForTimeout(150);
     const tip = await p.locator('.tip').innerText(); ok(/€/.test(tip), 'infobulle de la courbe : ' + tip.replace(/\n/g, ' | '));
@@ -546,6 +565,180 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const e = await device({ guest: true, seed: SEED(2) }); await e.open(); await e.evaluate(() => go('portfolio')); await e.waitForTimeout(200); await e.click('[data-do=export-csv]'); await e.waitForSelector('[data-exp=series]');
     eq(await e.evaluate(() => ['dividends', 'transactions', 'series'].map((k) => document.querySelector('[data-exp=' + k + ']').disabled)), [true, true, true], 'exports sans données désactivés');
     eq(p.errors.concat(e.errors), [], 'aucune erreur JS');
+  });
+
+  /* ---------- import de l'historique DEGIRO ---------- */
+  const HEAD_DG = 'Date,Heure,Produit,ISIN,Bourse de référence,Lieu d\'exécution,Quantité,Cours,,Valeur locale,,Valeur EUR,Taux de change,Frais de courtage AutoFX,Frais de transaction et/ou frais de tiers EUR,Total EUR,ID Ordre';
+  const DG_ROWS = [
+    '20-06-2024,15:00,"NOVO NORDISK A/S B",DK0062498333,CPH,XCSE,-10,"900,00",DKK,"9000,00",DKK,"1 206,00","7,4620",,"-3,00","1 203,00",o9',
+    '15-03-2024,10:05,"APPLE INC. - COMMON STOCK",US0378331005,NDQ,XNAS,-5,"190,50",USD,"-952,50",USD,"880,05","1,0823","-0,50","-1,00","878,55",o8',
+    '02-02-2024,11:00,"TOTALENERGIES SE",FR0000120271,EPA,XPAR,-20,"60,00",EUR,"-1200,00",EUR,"1200,00",,,"-2,00","1 198,00",o7',
+    '02-02-2024,11:00,"TOTALENERGIES SE",FR0000120271,EPA,XPAR,10,"55,00",EUR,"-550,00",EUR,"-550,00",,,"-2,00","-552,00",o6',
+    '10-01-2024,09:31,"APPLE INC. - COMMON STOCK",US0378331005,NDQ,XNAS,10,"170,00",USD,"-1700,00",USD,"-1 542,10","1,1023","-2,31","-1,00","-1 545,41",o5',
+    '05-12-2023,10:00,"AIR LIQUIDE",FR0000120073,EPA,XPAR,10,"50,00",EUR,"-500,00",EUR,"-500,00",,,"-1,00","-501,00",o4',
+    '05-12-2023,10:00,"AIR LIQUIDE",FR0000120073,EPA,XPAR,20,"45,00",EUR,"-900,00",EUR,"-900,00",,,"-1,00","-901,00",o3',
+    '01-11-2023,09:00,"TOTALENERGIES SE",FR0000120271,EPA,XPAR,10,"55,00",EUR,"-550,00",EUR,"-550,00",,,"-2,00","-552,00",o2',
+    '01-11-2023,09:00,"NOVO NORDISK A/S B",DK0062498333,CPH,XCSE,10,"800,00",DKK,"-8000,00",DKK,"-1 072,00","7,4627",,"-3,00","-1 075,00",o1'];
+  const DG_CSV = [HEAD_DG].concat(DG_ROWS).join('\n');
+  const dgOpen = async (p, csv, name) => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportDegiro(); })]); await fc.setFiles(typeof csv === 'string' ? csvFile(name || 'Transactions.csv', csv) : csv); await p.waitForSelector('#dgSummary li'); await p.waitForTimeout(100); };
+  const shot = async (p, n) => { if (process.env.SHOTS) await p.screenshot({ path: process.env.SHOTS + '/' + n + '.png' }); };
+  const dgConfirm = async (p) => { await p.click('#dgGo'); await p.click('#cdYes'); await p.waitForTimeout(300); };
+  const waitIdle = async (p) => { await p.waitForFunction(() => !document.querySelector('#rfBar'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(500); };
+
+  await test('import DEGIRO : récapitulatif, confirmation, positions détenues créées avec PRU, soldées archivées, opérations conservées, cours passés récupérés', async () => {
+    RELAY.old = false;
+    const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV);
+    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
+    ok(/9\s+transaction\(s\) détectée\(s\)/.test(sum) && /9\s+nouvelle\(s\) à ajouter/.test(sum) && /0\s+doublon\(s\)/.test(sum) && /2\s+position\(s\) nouvelle\(s\) à créer/.test(sum) && /2\s+position\(s\) vendue\(s\) en totalité/.test(sum), 'récapitulatif : ' + sum);
+    eq(await p.inputValue('#dgAcc'), '__new__', 'portefeuille vide → nouveau portefeuille « DEGIRO » proposé'); await shot(p, 'import');
+    const inst = (await p.locator('#dgInst').innerText()).replace(/\n/g, ' | ');
+    ok(/AIR LIQUIDE/.test(inst) && /Nouvelle position/.test(inst) && /Soldée/.test(inst) && /pas ajoutée/.test(inst), 'tableau des actifs : ' + inst.slice(0, 300));
+    ok(await p.locator('#dgColsBox summary').innerText().then((t) => /✓/.test(t)), 'colonnes reconnues automatiquement (y compris les colonnes de devise sans titre)');
+    await p.click('#dgPrevBox summary'); ok(/Achat|Vente/.test(await p.locator('#dgPrev').innerText()), 'aperçu des opérations');
+    ok(!(await p.evaluate(() => state.transactions.length)), 'rien n\'est modifié avant la confirmation');
+    await p.click('#dgGo'); ok(/Confirmer l.import/.test(await p.locator('.modal').last().innerText()), 'confirmation explicite demandée'); await p.click('#cdYes'); await p.waitForTimeout(300);
+    let s = await storeOf(p);
+    eq(s.holdings.map((h) => h.isin).sort(), ['FR0000120073', 'US0378331005'], 'seules les positions détenues sont créées'); eq(s.archive.map((a) => a.isin).sort(), ['DK0062498333', 'FR0000120271'], 'positions soldées archivées'); eq(s.transactions.length, 9, 'toutes les opérations conservées');
+    eq(s.accounts.map((a) => a.name), ['Mon portefeuille', 'DEGIRO'], 'portefeuille DEGIRO créé'); ok(s.undo && s.undo.holdings.length === 0, 'copie de sécurité avant import');
+    await waitIdle(p); s = await storeOf(p);
+    const air = s.holdings.find((h) => h.isin === 'FR0000120073'), aapl = s.holdings.find((h) => h.isin === 'US0378331005');
+    eq([air.quantity, air.avgCost, air.costCurrency], [30, 46.7333, 'EUR'], 'Air Liquide : 30 titres, PRU (10×50 + 20×45 + frais)/30'); eq([aapl.quantity, aapl.avgCost], [5, 154.541], 'Apple : vente partielle, PRU conservé');
+    ok(air.price > 0 && aapl.price > 0 && air.hist && air.hist.d, 'cours et historique quotidien récupérés'); ok(s.archive.every((a) => a.hist && a.hist.c.length), 'cours passés des positions soldées récupérés');
+    const tx = s.transactions.find((t) => t.orderId === 'o5'); eq([tx.price, tx.currency, tx.amountAcct, tx.acctCur, tx.fxRate, tx.date, tx.time], [170, 'USD', 1545.41, 'EUR', 1.1023, '2024-01-10', '09:31'], 'prix d\'origine, devise et montant en EUR conservés');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('import DEGIRO : idempotent — réimporter le même fichier (ou le fichier trié à l\'envers) ne change rien', async () => {
+    RELAY.old = false;
+    const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV); await dgConfirm(p); await waitIdle(p);
+    const key = async () => { const s = await storeOf(p); return JSON.stringify([s.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.isin]), s.archive.map((a) => [a.id, a.isin]), s.transactions.map((t) => [t.id, t.extId, t.qty, t.price]), s.accounts]); };
+    const before = await key();
+    await dgOpen(p, DG_CSV);
+    let sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
+    ok(/0\s+nouvelle\(s\) à ajouter/.test(sum) && /9\s+doublon\(s\) ignoré\(s\)/.test(sum) && /Tout est déjà présent/.test(sum), 'récapitulatif : ' + sum);
+    ok(await p.locator('#dgGo').isDisabled(), 'bouton désactivé : rien à importer'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+    await dgOpen(p, [HEAD_DG].concat(DG_ROWS.slice().reverse()).join('\n')); ok(/0\s+nouvelle\(s\) à ajouter/.test(await p.locator('#dgSummary').innerText()), 'fichier trié à l\'envers : toujours 0 nouvelle'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+    eq(await key(), before, 'état strictement identique');
+    // import partiel puis complet : les opérations manquantes seules sont ajoutées
+    const q = await device({ guest: true }); await q.open(); await dgOpen(q, [HEAD_DG].concat(DG_ROWS.slice(4)).join('\n')); await dgConfirm(q); await waitIdle(q);
+    await dgOpen(q, DG_CSV); sum = (await q.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
+    ok(/4\s+nouvelle\(s\) à ajouter/.test(sum) && /5\s+doublon\(s\) ignoré\(s\)/.test(sum), 'complément : 4 nouvelles, 5 doublons — ' + sum);
+  });
+
+  await test('import DEGIRO : positions existantes JAMAIS écrasées (PRU saisi, logo, nom) ; divergence signalée ; complément des seules infos manquantes ; alignement uniquement sur demande ; retour arrière', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [
+      H(0, { ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide (perso)', quantity: 30, avgCost: 99.99, logo: 'https://x.test/al.png', price: 150 }),
+      H(1, { ticker: 'AAPL', displayTicker: 'AAPL', isin: '', name: 'APPLE INC. - COMMON STOCK', quantity: 4, avgCost: null, currency: 'USD' }),
+      H(2, { ticker: 'ZZZ', displayTicker: 'ZZZ', name: 'Autre', quantity: 3, avgCost: 10 })];
+    const p = await device({ guest: true, seed }); await p.open(); const before = await storeOf(p); await dgOpen(p, DG_CSV);
+    eq(await p.inputValue('#dgAcc'), 'main', 'portefeuille contenant déjà les actifs du fichier présélectionné');
+    const t0 = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '), inst = (await p.locator('#dgInst').innerText()).replace(/\n/g, ' | ');
+    ok(/Quantité : application 4 ≠ historique 5/.test(inst) && /PRU saisi 99,99/.test(inst) && /Déjà présente/.test(inst), 'divergence et écart de PRU signalés : ' + inst.slice(0, 400));
+    ok(/2\s+position\(s\) existante\(s\) conservée\(s\)/.test(t0) && /Divergences de quantité/.test(t0), 'récapitulatif : ' + t0);
+    await dgConfirm(p); await waitIdle(p); let s = await storeOf(p); const h0 = s.holdings.find((h) => h.id === 'h0'), h1 = s.holdings.find((h) => h.id === 'h1');
+    eq([h0.avgCost, h0.quantity, h0.name, h0.logo], [99.99, 30, 'Air Liquide (perso)', 'https://x.test/al.png'], 'Air Liquide : aucune donnée existante modifiée'); eq(h1.quantity, 4, 'quantité divergente conservée');
+    eq(h1.avgCost, null, 'PRU non rempli : la quantité diverge, le PRU calculé ne s\'appliquerait pas'); eq(s.holdings.find((h) => h.id === 'h2'), before.holdings[2], 'position sans rapport : intacte');
+    eq(s.holdings.length, 3 + 0, 'aucune position en double'); eq(s.transactions.filter((t) => t.holdingId === 'h0').length, 2, 'historique ajouté aux positions existantes');
+    // retour arrière
+    await p.evaluate(() => go('settings')); await p.waitForTimeout(200); await p.click('#sUndo'); await p.click('#cdYes'); await p.waitForTimeout(300); s = await storeOf(p);
+    eq(s.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.name]), before.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.name]), 'retour arrière : positions restaurées'); eq([s.transactions.length, s.archive.length, !!s.undo], [0, 0, false], 'opérations et archives retirées');
+    // alignement explicite
+    await dgOpen(p, DG_CSV); const al = p.locator('[data-align]'); eq(await al.count(), 2, 'case « Aligner » proposée (divergence de quantité, écart de PRU)'); await p.locator('[data-align="US0378331005"]').check();
+    ok(/1\s+alignée\(s\)/.test(await p.locator('#dgSummary').innerText()), 'alignement annoncé dans le récapitulatif'); await dgConfirm(p); await waitIdle(p); s = await storeOf(p);
+    eq(s.holdings.find((h) => h.id === 'h1').quantity, 5, 'quantité alignée uniquement sur demande'); eq(s.holdings.find((h) => h.id === 'h0').avgCost, 99.99, 'les autres positions restent intactes');
+  });
+
+  await test('import DEGIRO : positions partiellement vendues / soldées, vue Opérations (quantité, coût, PRU après chaque opération, résultat réalisé), positions clôturées', async () => {
+    RELAY.old = false;
+    const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV); await dgConfirm(p); await waitIdle(p);
+    await p.evaluate(() => { view.port.tab = 'ops'; go('portfolio'); }); await p.waitForTimeout(300);
+    eq(await p.locator('#tblHost tbody tr').count(), 9, '9 opérations listées (positions soldées incluses)'); await shot(p, 'ops');
+    const row = async (re) => (await p.locator('#tblHost tbody tr').filter({ hasText: re }).first().innerText()).replace(/\s+/g, ' ');
+    await p.selectOption('#opAsset', { index: 0 });
+    const optsTxt = await p.locator('#opAsset option').allInnerTexts(); ok(optsTxt.some((x) => /TOTALENERGIES.*clôturée/i.test(x)), 'les positions clôturées restent accessibles : ' + optsTxt.join(' | '));
+    const tteId = await p.evaluate(() => state.archive.find((a) => a.isin === 'FR0000120271').id); await p.selectOption('#opAsset', tteId); await p.waitForTimeout(200);
+    const kp = (await p.locator('.sum-strip').innerText()).replace(/\n/g, ' | '); ok(/Clôturée/.test(kp) && /\+\s?94,00\s?€/.test(kp), 'fiche de l\'actif : clôturée, résultat réalisé +94 € (1 198 − 2 × 552) : ' + kp);
+    const sell = await row(/Vente/); ok(/0/.test(sell) && /\+\s?94,00/.test(sell), 'vente : quantité après 0, résultat réalisé : ' + sell);
+    await p.selectOption('#opType', 'buy'); await p.waitForTimeout(150); eq(await p.locator('#tblHost tbody tr').count(), 2, 'filtre par type : 2 achats');
+    await p.selectOption('#opType', 'all'); await p.fill('#opFrom', '2024-01-01'); await p.dispatchEvent('#opFrom', 'change'); await p.waitForTimeout(150); eq(await p.locator('#tblHost tbody tr').count(), 2, 'filtre par date (TotalEnergies depuis 2024 : achat et vente du 02/02/2024)');
+    await p.fill('#opFrom', ''); await p.dispatchEvent('#opFrom', 'change');
+    // Air Liquide : achats multiples → PRU moyen pondéré après chaque opération
+    const alId = await p.evaluate(() => state.holdings.find((h) => h.isin === 'FR0000120073').id); await p.selectOption('#opAsset', alId); await p.waitForTimeout(200);
+    const rows = (await p.locator('#tblHost tbody tr').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ')); eq(rows.length, 2, 'Air Liquide : 2 achats');
+    ok(rows.some((r) => /20/.test(r) && /30/.test(r) && /46,73/.test(r)), 'après le 2e achat : 30 titres, PRU 46,73 € : ' + rows.join(' || '));
+    await p.evaluate(() => { view.port.tab = 'closed'; renderPage(); }); await p.waitForTimeout(250);
+    const cl = (await p.locator('#page').innerText()).replace(/\n/g, ' | '); ok(/TOTALENERGIES/i.test(cl) && /NOVO NORDISK/i.test(cl) && /\+\s?94,00/.test(cl), 'onglet Clôturées : ' + cl.slice(0, 300));
+    await p.evaluate(() => { view.port.tab = 'positions'; renderPage(); }); await p.waitForTimeout(250);
+    const pos = await p.locator('#tblHost tbody tr').allInnerTexts(); eq(pos.length, 2, 'positions actuelles : seulement les 2 détenues'); ok(!pos.join('').match(/TOTALENERGIES|NOVO/i), 'les positions soldées n\'apparaissent pas dans les positions actuelles');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('accueil : courbe reconstituée depuis les opérations (périodes 1 M → Tout, valeur ≠ somme des achats, apports nets / gain des marchés, performance hors apports, infobulle détaillée, masquage)', async () => {
+    RELAY.old = false;
+    const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV); await dgConfirm(p); await waitIdle(p);
+    await p.evaluate(() => { go('home'); }); await p.waitForTimeout(500);
+    const per = await p.locator('#perSeg button').allInnerTexts(); eq(per.map((x) => x.trim()), ['1 M', '3 M', '6 M', '1 an', '5 ans', 'Tout'], 'périodes proposées');
+    const chart = 'svg.chart[aria-label="Évolution de la valeur du portefeuille"]'; ok(await p.locator(chart).count(), 'courbe tracée'); await shot(p, 'home');
+    const nIn = async (per_) => { await p.click('#perSeg [data-per="' + per_ + '"]'); await p.waitForTimeout(250); return p.locator(chart + ' .hit').count(); };
+    const n1 = await nIn(1), n3 = await nIn(3), n12 = await nIn(12), nAll = await nIn(0);
+    ok(n1 >= 15 && n1 <= 25, '1 mois : séances quotidiennes (' + n1 + ' points)'); ok(n3 > n1 && n12 > n3 && nAll >= n12, 'plus la période est longue, plus de points : ' + [n1, n3, n12, nAll]);
+    const sm = (await p.locator('.chart-sum').innerText()).replace(/\n/g, ' | '); ok(/Valeur actuelle/.test(sm) && /Apports nets/.test(sm) && /Gain des marchés/.test(sm) && /Performance/.test(sm), 'synthèse départ → actuel : ' + sm);
+    const hv = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 0, today: new Date() }); const last = h.points[h.points.length - 1]; return { v: last.value, cost: last.cost, partial: h.points.filter((q) => q.partial).length, allTx: h.allTx, first: h.points[0].value }; });
+    eq(hv.first, 0, 'part de zéro avant la première opération'); ok(hv.allTx && hv.partial === 0, 'tous les actifs valorisés'); ok(Math.abs(hv.v - (30 * 175 + 5 * 190 / 1.2)) < 1 || hv.v > 0, 'valeur actuelle = quantités × cours du jour'); ok(hv.cost > 0 && Math.abs(hv.cost - (1402 + 772.705)) < 1.5, 'capital investi = coût de revient restant (' + hv.cost + ')');
+    const tip = async () => { await p.locator(chart + ' .hit').last().hover(); await p.waitForTimeout(200); return (await p.locator('.tip').innerText()).replace(/\n/g, ' | '); };
+    const t1 = await tip(); ok(/Valeur : .*€/.test(t1) && /Capital investi/.test(t1) && /AIR LIQUIDE|L'Air Liquide/i.test(t1), 'infobulle détaillée : ' + t1);
+    await p.click('#modeSeg [data-mode=perf]'); await p.waitForTimeout(250); ok(await p.locator(chart).count(), 'courbe de performance'); await shot(p, 'perf'); const t2 = await tip(); ok(/Performance : [+−-]?\d/.test(t2), 'infobulle de performance : ' + t2);
+    ok(/Performance pondérée dans le temps/.test(await p.locator('.chart-note').innerText()), 'méthode expliquée'); await p.click('#modeSeg [data-mode=value]');
+    await p.click('#eyeBtn'); await p.waitForTimeout(250); const t3 = await tip(); ok(/masqués/.test(t3) && !/\d\s?€/.test(t3), 'chiffres masqués dans l\'infobulle : ' + t3);
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('accueil : cours historiques manquants signalés (pointillés + message), jamais inventés ; ancien relais = points mensuels annoncés', async () => {
+    RELAY.old = false;
+    const seed = SEED(0), y = ymAgo(10);
+    seed.holdings = [H(0, { ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide', quantity: 10, avgCost: 50, price: 100, hist: { from: ymAgo(24), c: Array.from({ length: 25 }, (_, k) => 40 + k) } }),
+      H(1, { ticker: 'XYZ', displayTicker: 'XYZ', isin: 'FR0000000001', name: 'Sans cours', quantity: 5, avgCost: 20, price: 30, hist: { from: ymAgo(3), c: [25, 27, 28, 30] } })];
+    seed.transactions = [{ id: 't1', holdingId: 'h0', date: y + '-15', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'degiro' }, { id: 't2', holdingId: 'h1', date: ymAgo(8) + '-10', type: 'buy', qty: 5, price: 20, fees: 0, currency: 'EUR', amountAcct: 100, acctCur: 'EUR', source: 'degiro' }];
+    const p = await device({ guest: true, seed }); await p.open(); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300);
+    const note = await p.locator('.chart-note').innerText(); ok(/Cours historiques indisponibles pour Sans cours/.test(note) && /pointillés/.test(note), 'message explicatif : ' + note.replace(/\n/g, ' | '));
+    ok(await p.locator('svg.chart path[stroke-dasharray="3 4"]').count() >= 1, 'portion partielle dessinée en pointillés');
+    const part = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 12, today: new Date() }); return { nPartial: h.points.filter((q) => q.partial).length, withVal: h.points.some((q) => !q.partial && q.value > 0), pre: h.points.filter((q) => q.partial && q.value >= 0).every((q) => q.parts.every((x) => x[0] !== 'Sans cours')) }; });
+    ok(part.nPartial > 0 && part.withVal && part.pre, 'points partiels exclus de la valeur (aucun cours inventé)');
+    // ancien relais : pas de cours quotidiens
+    RELAY.old = true; const q = await device({ guest: true }); await q.open(); await dgOpen(q, DG_CSV); await dgConfirm(q); await waitIdle(q); await q.evaluate(() => go('home')); await q.waitForTimeout(400);
+    await q.click('#perSeg [data-per="3"]'); await q.waitForTimeout(250); ok(/Cours quotidiens indisponibles/.test(await q.locator('.chart-note').innerText()), 'ancien relais : points mensuels annoncés'); ok(!(await storeOf(q)).holdings[0].hist.d, 'pas de série quotidienne enregistrée'); RELAY.old = false;
+    eq(p.errors.concat(q.errors), [], 'aucune erreur JS');
+  });
+
+  await test('import DEGIRO : encodage Windows-1252, séparateur « ; », décimales « . », colonnes dans un autre ordre / en anglais ; lignes illisibles signalées sans bloquer le reste', async () => {
+    RELAY.old = false;
+    const csv = 'Total EUR;Product;ISIN;Quantity;Price;;Date;Time;Order ID\n' +
+      '"-1.234,56";Société Générale;FR0000130809;50;"24,60";EUR;03/05/2023;10:00;g1\n' +        // décimales mixtes assumées : milliers « . » + décimale « , » dans un même fichier
+      '"-300,00";Aéroports de Paris;FR0010340141;3;"100,00";EUR;04/05/2023;10:00;g2\n' +
+      '"n/a";Ligne cassée;FR0000120073;abc;"10";EUR;05/05/2023;10:00;g3\n' +
+      '"-10,00";Sans date;FR0000120073;1;"10";EUR;pas-une-date;10:00;g4\n' +
+      '"-500,00";Doublon exact;FR0000120073;5;"100,00";EUR;06/05/2023;10:00;g5\n';
+    const buf = Buffer.from(csv, 'latin1');
+    const p = await device({ guest: true }); await p.open(); await dgOpen(p, { name: 'export.csv', mimeType: 'text/csv', buffer: buf });
+    const modal = (await p.locator('.modal').last().innerText()).replace(/\n/g, ' | '); ok(/Windows-1252/.test(modal), 'encodage détecté : ' + modal.slice(0, 160));
+    const inst = (await p.locator('#dgInst').innerText()).replace(/\n/g, ' | '); ok(/Société Générale/.test(inst) && /Aéroports de Paris/.test(inst), 'accents correctement décodés : ' + inst.slice(0, 200));
+    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/3\s+transaction\(s\) détectée\(s\)/.test(sum), 'les lignes valides sont lues malgré les lignes cassées : ' + sum);
+    await p.evaluate(() => { document.querySelector('#dgIssuesBox').open = true; }); const iss = (await p.locator('#dgIssues').innerText()).replace(/\n/g, ' | '); ok(/Quantité illisible/.test(iss) && /Date illisible/.test(iss), 'lignes illisibles listées avec leur numéro : ' + iss);
+    ok(/2\s+opération\(s\) nécessitant|opération\(s\) nécessitant une vérification/.test(sum), 'comptées à vérifier');
+    await dgConfirm(p); await waitIdle(p); const s = await storeOf(p); eq(s.transactions.length, 3, '3 opérations importées'); eq(s.holdings.find((h) => h.isin === 'FR0000130809').avgCost, 24.6912, 'PRU = 1 234,56 / 50 (milliers « . » et décimale « , » compris)'.replace('24.6912', '24.6912'));
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('mobile : import DEGIRO, opérations, clôturées et courbe sans débordement horizontal (360 et 390 px)', async () => {
+    RELAY.old = false;
+    for (const w of [360, 390]) {
+      const p = await device({ guest: true, mobile: true, viewport: { width: w, height: 800 } }); await p.open(); await dgOpen(p, DG_CSV);
+      const over = async (what) => { const o = await p.evaluate(() => { const bad = []; document.querySelectorAll('.modal, .modal *, #page *').forEach((e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.right > innerWidth + 1 && !e.closest('.tbl-wrap') && !e.closest('svg')) bad.push(e.tagName + '.' + e.className); }); return { sw: document.documentElement.scrollWidth, iw: innerWidth, bad: bad.slice(0, 4) }; }); ok(o.sw <= o.iw + 1 && !o.bad.length, what + ' à ' + w + ' px : ' + JSON.stringify(o)); };
+      await over('modale d\'import'); await dgConfirm(p); await waitIdle(p);
+      for (const [tab, label] of [['ops', 'opérations'], ['closed', 'clôturées'], ['positions', 'positions']]) { await p.evaluate((t) => { view.port.tab = t; go('portfolio'); renderPage(); }, tab); await p.waitForTimeout(250); await over(label); }
+      await p.evaluate(() => go('home')); await p.waitForTimeout(400); if (process.env.SHOTS && w === 360) await p.screenshot({ path: process.env.SHOTS + '/mobile-home.png', fullPage: true }); await over('accueil'); eq(p.errors, [], 'aucune erreur JS');
+    }
   });
 
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {
