@@ -664,19 +664,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     RELAY.old = false;
     const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV); await dgConfirm(p); await waitIdle(p);
     await p.evaluate(() => { go('home'); }); await p.waitForTimeout(500);
-    const per = await p.locator('#perSeg button').allInnerTexts(); eq(per.map((x) => x.trim()), ['1 M', '3 M', '6 M', '1 an', '5 ans', 'Tout'], 'périodes proposées'); eq((await p.locator('#perfSeg button').allInnerTexts()).map((x) => x.trim()), ['1 M', '3 M', '6 M', '1 an', 'Tout'], 'périodes de la performance');
+    const per = await p.locator('#perSeg button').allInnerTexts(); eq(per.map((x) => x.trim()), ['1 M', '3 M', '6 M', '1 an', '5 ans', 'Tout'], 'périodes proposées');
     const chart = 'svg.chart[aria-label="Évolution de la valeur du portefeuille"]'; ok(await p.locator(chart).count(), 'courbe tracée'); await shot(p, 'home');
     const nIn = async (per_) => { await p.click('#perSeg [data-per="' + per_ + '"]'); await p.waitForTimeout(250); return p.locator(chart + ' .hit').count(); };
     const n1 = await nIn(1), n3 = await nIn(3), n12 = await nIn(12), nAll = await nIn(0);
     ok(n1 >= 15 && n1 <= 25, '1 mois : séances quotidiennes (' + n1 + ' points)'); ok(n3 > n1 && n12 > n3 && nAll >= n12, 'plus la période est longue, plus de points : ' + [n1, n3, n12, nAll]);
-    const sm = (await p.locator('.chart-sum').innerText()).replace(/\n/g, ' | '); ok(/Performance sur la période/.test(sm) && /Apports nets/.test(sm) && /Gain de marché/.test(sm), 'carte PERFORMANCES : décomposition marché / apports : ' + sm);
     const hv = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 0, today: new Date() }); const last = h.points[h.points.length - 1]; return { v: last.value, cost: last.cost, partial: h.points.filter((q) => q.partial).length, allTx: h.allTx, first: h.points[0].value }; });
     eq(hv.first, 0, 'part de zéro avant la première opération'); ok(hv.allTx && hv.partial === 0, 'tous les actifs valorisés'); ok(Math.abs(hv.v - (30 * 175 + 5 * 190 / 1.2)) < 1 || hv.v > 0, 'valeur actuelle = quantités × cours du jour'); ok(hv.cost > 0 && Math.abs(hv.cost - (1402 + 772.705)) < 1.5, 'capital investi = coût de revient restant (' + hv.cost + ')');
     const tip = async () => { await p.locator(chart + ' .hit').last().hover(); await p.waitForTimeout(200); return (await p.locator('.tip').innerText()).replace(/\n/g, ' | '); };
     const t1 = await tip(); ok(/Valeur : .*€/.test(t1) && /Capital investi/.test(t1) && /AIR LIQUIDE|L'Air Liquide/i.test(t1), 'infobulle détaillée : ' + t1);
-    const pchart = 'svg.chart[aria-label="Performance du portefeuille"]'; await p.click('#perfSeg [data-pper="0"]'); await p.waitForTimeout(250); ok(await p.locator(pchart).count(), 'courbe de performance'); await shot(p, 'perf');
-    await p.locator(pchart + ' .hit').last().hover(); await p.waitForTimeout(200); const t2 = (await p.locator('.tip').innerText()).replace(/\n/g, ' | '); ok(/Performance : [+−-]?\d/.test(t2), 'infobulle de performance : ' + t2);
-    ok(/Performance pondérée dans le temps/.test(await p.locator('.card:has(#perfSeg) .chart-note').innerText()), 'méthode expliquée');
     ok(!/vs PRU/i.test(await p.locator('#page').innerText()), 'aucune mention « vs PRU » sur l\'accueil');
     await p.click('#eyeBtn'); await p.waitForTimeout(250); const t3 = await tip(); ok(/masqués/.test(t3) && !/\d\s?€/.test(t3), 'chiffres masqués dans l\'infobulle : ' + t3);
     eq(p.errors, [], 'aucune erreur JS');
@@ -853,10 +849,10 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(xi.rate > 0.05 && xi.rate < 0.2, 'TRI calculé : ' + JSON.stringify(xi)); const chip = (await p.locator('.xirr-chip').innerText()).replace(/\n/g, ' ');
     ok(/Rendement annuel moyen/.test(chip) && new RegExp('\\+' + (xi.rate * 100).toFixed(1).replace('.', ',') + '\\s?%').test(chip), 'encart discret du rendement annuel moyen : ' + chip);
     const ttl = await p.getAttribute('.xirr-chip', 'data-tip'); ok(/XIRR/.test(ttl) && /dividendes exclus/.test(ttl), 'méthode précisée : ' + ttl);
-    const tops = await p.evaluate(() => ['.hero', '.card:has(h3:text("Dividendes"))', '.card:has(#perfSeg)'].map((q) => { const e = Array.from(document.querySelectorAll('#page .card')).find((c) => (q === '.hero' ? c.classList.contains('hero') : q.includes('Dividendes') ? /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '') : !!c.querySelector('#perfSeg'))); return e ? e.getBoundingClientRect().top : -1; }));
-    ok(tops[0] >= 0 && tops[0] < tops[1] && tops[1] < tops[2], 'ordre : valeur, dividendes, PERFORMANCES : ' + tops);
-    const h = await p.evaluate(() => { const c = Array.from(document.querySelectorAll('#page .card')).find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')); return c.querySelector('svg.chart').getBoundingClientRect().height; }); ok(h > 40 && h < 140, 'graphique des dividendes réduit : ' + h + ' px'); if (process.env.SHOTS) await p.screenshot({ path: process.env.SHOTS + '/home2.png', fullPage: true });
-    ok(/PERFORMANCES/.test(pg) && !/vs PRU/i.test(pg), 'carte PERFORMANCES sans « vs PRU »');
+    const geo = await p.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), hero = cs.find((c) => c.classList.contains('hero')), div = cs.find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')), perf = cs.find((c) => /^PERFORMANCES/.test((c.querySelector('h3') || {}).textContent || '')); const r = (e) => e.getBoundingClientRect(); return { hero: r(hero), div: r(div), perf: r(perf) }; });
+    ok(geo.hero.right <= geo.div.left + 1 && Math.abs(geo.hero.top - geo.div.top) < 4, 'ordinateur : valeur et dividendes côte à côte : ' + JSON.stringify([geo.hero.left, geo.hero.right, geo.div.left, geo.hero.top, geo.div.top]));
+    ok(geo.perf.top >= Math.max(geo.hero.bottom, geo.div.bottom) - 1, 'PERFORMANCES en dessous des deux');
+    ok(/PERFORMANCES/.test(pg) && /Les plus rentables/i.test(pg) && /Les plus négatives/i.test(pg) && !/vs PRU/i.test(pg), 'carte PERFORMANCES : listes, sans « vs PRU » : ' + pg.slice(pg.indexOf('PERFORMANCES')));
     // historique < 1 an : données insuffisantes, jamais un chiffre trompeur
     const seed2 = SEED(0); seed2.holdings = [H(0, { name: 'Alpha', quantity: 10, avgCost: 100, price: 120, priceAt: iso(T), hist: { from: ymAgo(6), c: [100, 102, 104, 108, 112, 116, 120] } })];
     seed2.transactions = [{ id: 't1', holdingId: 'h0', date: ymAgo(5) + '-15', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }];
@@ -866,6 +862,27 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const m = await device({ guest: true, seed, mobile: true, viewport: { width: 360, height: 800 } }); await m.open(); await m.waitForSelector('.hero');
     const o = await m.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth })); ok(o.sw <= o.iw + 1, 'mobile sans débordement : ' + JSON.stringify(o));
     eq(p.errors.concat(q.errors, m.errors), [], 'aucune erreur JS');
+  });
+
+  await test('accueil : PERFORMANCES = les 5 positions les plus rentables et les 5 plus négatives (pas un graphique), triées, sans chevauchement, sans « vs PRU » ; valeur et dividendes côte à côte sur ordinateur, empilés sur téléphone', async () => {
+    const seed = SEED(0); seed.holdings = Array.from({ length: 12 }, (_, i) => H(i, { name: 'Titre ' + i, quantity: 10, avgCost: 100, price: 100 + (i - 5) * 10, priceAt: '2026-10-09' }));
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.waitForSelector('.perf-cols');
+    const col = async (n) => (await p.locator('.perf-cols > div').nth(n).locator('.perf-row').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+    const best = await col(0), worst = await col(1);
+    eq(best.map((t) => t.match(/Titre (\d+)/)[1]), ['11', '10', '9', '8', '7'], 'top 5 des plus rentables, du meilleur au moins bon'); ok(/\+60,0\s?%/.test(best[0]) && /\+20,0\s?%/.test(best[4]), 'pourcentages : ' + best.join(' | '));
+    eq(worst.map((t) => t.match(/Titre (\d+)/)[1]), ['0', '1', '2', '3', '4'], 'top 5 des plus négatives, de la pire à la moins mauvaise'); ok(/−50,0\s?%|-50,0\s?%/.test(worst[0]) && /(−|-)10,0\s?%/.test(worst[4]), 'pourcentages négatifs : ' + worst.join(' | '));
+    ok(/\+600\s?€/.test(best[0]) && /(−|-)500\s?€/.test(worst[0]), 'gain en euros affiché : ' + best[0] + ' // ' + worst[0]);
+    eq(await p.locator('.card:has(h3:text("PERFORMANCES")) svg').count() - await p.locator('.card:has(h3:text("PERFORMANCES")) .avatar svg').count(), 0, 'aucun graphique dans PERFORMANCES'); ok(!/vs PRU/i.test(await p.locator('#page').innerText()), 'aucune mention « vs PRU »');
+    const g = await p.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), f = (re) => cs.find((c) => re.test((c.querySelector('h3') || {}).textContent || '') || (re.source === 'hero' && c.classList.contains('hero'))); const r = (e) => e.getBoundingClientRect(); return { hero: r(cs.find((c) => c.classList.contains('hero'))), div: r(f(/^Dividendes/)), perf: r(f(/^PERFORMANCES/)) }; });
+    ok(g.hero.right <= g.div.left + 1 && Math.abs(g.hero.top - g.div.top) < 4, 'ordinateur : côte à côte'); ok(g.perf.top >= Math.max(g.hero.bottom, g.div.bottom) - 1, 'PERFORMANCES dessous');
+    // peu de positions : aucune position négative dans « rentables », aucune positive dans « négatives »
+    const s2 = SEED(0); s2.holdings = [H(0, { name: 'Gagnant', avgCost: 100, price: 120 }), H(1, { name: 'Perdant', avgCost: 100, price: 80 })];
+    const q = await device({ guest: true, seed: s2 }); await q.open(); await q.waitForSelector('.perf-cols'); const qt = (n) => q.locator('.perf-cols > div').nth(n).innerText();
+    ok(/Gagnant/.test(await qt(0)) && !/Perdant/.test(await qt(0)) && /Perdant/.test(await qt(1)) && !/Gagnant/.test(await qt(1)), 'séparation positifs / négatifs');
+    if (process.env.SHOTS) await p.screenshot({ path: process.env.SHOTS + '/home3.png', fullPage: true });
+    const m = await device({ guest: true, seed, mobile: true, viewport: { width: 390, height: 900 } }); await m.open(); await m.waitForSelector('.perf-cols');
+    const gm = await m.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), r = (e) => e.getBoundingClientRect(), hero = cs.find((c) => c.classList.contains('hero')), div = cs.find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')); return { hb: r(hero).bottom, dt: r(div).top, sw: document.documentElement.scrollWidth, iw: innerWidth }; });
+    ok(gm.dt >= gm.hb - 1 && gm.sw <= gm.iw + 1, 'téléphone : dividendes sous la valeur, sans débordement : ' + JSON.stringify(gm)); eq(p.errors.concat(q.errors, m.errors), [], 'aucune erreur JS');
   });
 
   await test('sécurité : code de verrouillage (chiffrement) toujours fonctionnel avec la nouvelle app', async () => {

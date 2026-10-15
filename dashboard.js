@@ -3,7 +3,6 @@
    ================================================================== */
 
 const HOME_PERIODS = [[1, '1 M'], [3, '3 M'], [6, '6 M'], [12, '1 an'], [60, '5 ans'], [0, 'Tout']];
-const PERF_PERIODS = [[1, '1 M'], [3, '3 M'], [6, '6 M'], [12, '1 an'], [0, 'Tout']];
 const sens = (h) => '<span class="sens">' + h + '</span>';
 
 /* Groupes de répartition : une fonction de clé par axe d'analyse. */
@@ -86,34 +85,22 @@ function renderHome(host) {
   const divCard = '<section class="card card-pad"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
     '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
     '<div><span>À venir</span>' + sens('<b>' + money(yUp.total, 0) + '</b>') + '</div><div><span>Prochain</span><b>' + (first ? esc(first.ticker) + '</b><small>' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '</small>' : '—</b>') + '</div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: 82, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>';
+    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: 150, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>';
 
-  /* --- 3. « PERFORMANCES » : évolution de la performance, apports de capitaux neutralisés (rendement pondéré dans le temps) --- */
-  const pper = view.home.perfPeriod, hp = histFor(pper), pp = hp.perf, hsum = hp.summary;
-  const okPerf = pp.points.length > 1;
-  const pdate = {}; hp.points.forEach((p) => { pdate[p.date] = p; });
-  const ppts = pp.points.map((q) => ({ label: lbl(q.date, pper), t: dn(q.date), value: q.pct * 100, tip: fmtDate(q.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nPerformance : ' + (mask ? 'masquée' : fmtPct(q.pct, 1, true)) }));
-  let perfBody;
-  if (okPerf) {
-    perfBody = lineChart({ points: ppts, cur: baseCur(), mask, title: 'Performance du portefeuille', pct: true, zero: true, h: 170, tLabel: tLabel(pper) }) +
-      '<div class="chart-sum' + (mask ? ' hide-nums' : '') + '"><div><span>Performance sur la période</span>' + sens('<b class="' + (pp.pct >= 0 ? 'pos' : 'neg') + '">' + fmtPct(pp.pct, 1, true) + '</b>') + '</div>' +
-      (hsum && !hsum.partialStart && !hsum.partialEnd ? '<div><span>Gain de marché</span>' + sens('<b class="' + (hsum.marketGain >= 0 ? 'pos' : 'neg') + '">' + signed(hsum.marketGain) + '</b>') + '</div><div><span>Apports nets <small>(achats − ventes)</small></span>' + sens('<b>' + signed(hsum.netFlows) + '</b>') + '</div>' : '') + '</div>';
-  } else perfBody = '<div class="empty" style="padding:22px 8px"><h3>Données insuffisantes</h3><p>' + (hp.empty ? 'Aucune position avec cours.' : 'Pas assez de cours historiques pour une performance fiable sur cette période' + (hp.coverage.missing.length ? ' (cours manquants : ' + hp.coverage.missing.slice(0, 3).map((m) => esc(m.name)).join(', ') + ')' : '') + '. Actualisez les données de marché' + (state.transactions.length ? '' : ' et importez l\'historique de vos transactions (Paramètres → Importer l\'historique DEGIRO) pour la reconstruire') + '.') + '</p></div>';
-  const pnotes = [];
-  if (okPerf) {
-    pnotes.push('Performance pondérée dans le temps : les achats et les versements comptent comme des apports, les ventes comme des retraits — ils ne créent ni gain ni perte' + (hp.allTx && state.transactions.length ? ' (reconstituée à partir de vos opérations et des cours historiques).' : '. <span class="warn-t">Sans historique d\'opérations complet, elle reflète les positions actuelles uniquement (rétrospectif).</span>'));
-    if (pp.from && hp.points.length && pp.from > hp.points[0].date) pnotes.push('Calculée depuis le ' + esc(fmtDate(pp.from)) + ' : avant, la valorisation est partielle (cours manquants).');
-  }
-  const perfCard = '<section class="card card-pad section-gap"><div class="card-head"><h3>PERFORMANCES</h3><div class="seg" id="perfSeg" role="group" aria-label="Période de performance">' + PERF_PERIODS.map((p) => '<button type="button" data-pper="' + p[0] + '" class="' + (pper === p[0] ? 'on' : '') + '">' + p[1] + '</button>').join('') + '</div></div>' +
-    perfBody + (pnotes.length ? '<div class="chart-note">' + pnotes.join('<br>') + '</div>' : '') + '</section>';
+  /* --- 3. « PERFORMANCES » : les 5 positions les plus rentables et les 5 plus négatives (plus-value latente / montant investi) --- */
+  const perfAll = Engine.performance(state, convert, ids), ranked = perfAll.rows.filter((r) => r.pct !== null).sort((x, y2) => y2.pct - x.pct);
+  const best = ranked.filter((r) => r.pct >= 0).slice(0, 5), worst = ranked.filter((r) => r.pct < 0).slice(-5).reverse();
+  const prow = (r) => { const h = holdingById(r.id) || {}; return '<div class="perf-row">' + avatar(r.ticker, h.logo, 'xs', h.isin) + '<span class="nm" title="' + esc(r.name || r.ticker) + '">' + esc(r.name || r.ticker) + '</span><span class="perf-gain sens">' + (r.gain >= 0 ? '+' : '') + money(r.gain, 0) + '</span>' + sens('<b class="' + (r.pct >= 0 ? 'pos' : 'neg') + '">' + fmtPct(r.pct, 1, true) + '</b>') + '</div>'; };
+  const perfCard = '<section class="card card-pad section-gap"><div class="card-head"><h3>PERFORMANCES</h3><span class="muted" style="font-size:12px">' + perfAll.count + ' position(s) avec PRU et cours</span></div>' + (perfAll.count
+    ? '<div class="perf-cols"><div><h4>Les plus rentables</h4>' + (best.length ? best.map(prow).join('') : '<div class="muted" style="font-size:13px;padding:6px 0">Aucune position en plus-value.</div>') + '</div><div><h4>Les plus négatives</h4>' + (worst.length ? worst.map(prow).join('') : '<div class="muted" style="font-size:13px;padding:6px 0">Aucune position en moins-value.</div>') + '</div></div>'
+    : '<div class="empty" style="padding:18px 8px"><h3>Données insuffisantes</h3><p>Renseignez le prix de revient de vos positions et actualisez les cours pour voir leurs performances.</p></div>') + '</section>';
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>') +
-    '<div class="home-body' + (mask ? ' hide-nums' : '') + '">' + hero + '<div class="section-gap">' + divCard + '</div>' + perfCard + '</div>';
+    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>';
 
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
-  $$('#perfSeg [data-pper]', host).forEach((b) => b.onclick = () => { view.home.perfPeriod = Number(b.dataset.pper); renderHome(host); });
   $$('[data-goto]', host).forEach((b) => b.onclick = () => { view.divTab = b.dataset.goto; go('dividends'); });
 }
 
