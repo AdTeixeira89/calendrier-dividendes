@@ -238,3 +238,29 @@ console.log(n + ' tests passed');
     assert.strictEqual(h.retro, false, '5 × 10 = 50 : opérations cohérentes avec la position actuelle'); assert.strictEqual(at('2026-03-31').value, 50 * 40, 'valeur avant split = 2 000 (5 titres × 400), pas 200');
   });
 })();
+
+/* ---------- catégorie, variation journalière, TRI ---------- */
+(function () {
+  const hh = (o) => Object.assign({ id: 'h', ticker: 'T', name: 'T', type: 'stock', currency: 'EUR', quantity: 10, avgCost: 50, dividend: {} }, o);
+  t('catégorie : ETF / action / à classer — jamais « action » par défaut sans indice ; choix manuel prioritaire', () => {
+    assert.strictEqual(E.category(hh({})), 'unknown'); assert.strictEqual(E.category(hh({ instrumentType: 'EQUITY' })), 'stock'); assert.strictEqual(E.category(hh({ instrumentType: 'ETF' })), 'etf');
+    assert.strictEqual(E.category(hh({ name: 'iShares Core MSCI World UCITS ETF' })), 'etf'); assert.strictEqual(E.category(hh({ name: 'MSCI Inc' })), 'unknown', 'une société nommée MSCI n\'est pas un ETF');
+    assert.strictEqual(E.category(hh({ type: 'etf_acc' })), 'etf'); assert.strictEqual(E.category(hh({ instrumentType: 'ETF', type: 'stock', typeLocked: true })), 'stock', 'choix manuel prioritaire');
+    assert.strictEqual(E.category(hh({ typeSource: 'user', type: 'etf_dist', instrumentType: 'EQUITY' })), 'etf');
+  });
+  t('variation journalière : quantités détenues à la clôture précédente ; l\'achat du jour et les actifs sans clôture ne comptent pas', () => {
+    const a = hh({ id: 'a', quantity: 10, price: 120, prevClose: 118, prevCloseAt: '2026-10-13' }), b = hh({ id: 'b', quantity: 5, price: 50, prevClose: 40, prevCloseAt: '2026-10-13' }), c = hh({ id: 'c', price: 10, prevClose: null });
+    const tx = [{ id: '1', holdingId: 'b', date: '2026-10-14', type: 'buy', qty: 5, price: 50, fees: 0, currency: 'EUR' }, { id: '2', holdingId: 'a', date: '2020-01-01', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR' }];
+    const d = E.dailyChange({ holdings: [a, b, c], transactions: tx }, (x) => x, null, '2026-10-14');
+    assert.strictEqual(d.amount, 20); assert.strictEqual(d.count, 2); assert.deepStrictEqual(d.missing, ['T']); assert.ok(Math.abs(d.pct - 20 / 1180) < 1e-12, 'achat du jour de b : quantité à la clôture précédente = 0');
+  });
+  t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
+    const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
+    const ref = new Date(2026, 0, 1);
+    const r = E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }], 1210), ref); assert.ok(Math.abs(r.rate - 0.1) < 2e-3, '1 000 € → 1 210 € en 2 ans = 10 %/an (pas 21 %/2) : ' + r.rate);
+    const r2 = E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }, { date: '2025-01-01', f: 1000 }], 2310), ref); assert.ok(Math.abs(r2.rate - 0.1) < 3e-3, 'apport en cours de route : ' + r2.rate);
+    const r3 = E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }, { date: '2025-01-01', f: -500 }], 600), ref); assert.ok(r3.rate !== null && r3.rate > 0 && r3.rate < 0.2, 'retrait : ' + r3.rate);
+    assert.strictEqual(E.xirr(mkHist([{ date: '2025-09-01', f: 1000 }], 1100), ref).rate, null); assert.ok(/un an/.test(E.xirr(mkHist([{ date: '2025-09-01', f: 1000 }], 1100), ref).reason));
+    assert.strictEqual(E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }], 1100, true), ref).rate, null); assert.strictEqual(E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }], 1100, false, false), ref).rate, null);
+  });
+})();

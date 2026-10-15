@@ -418,6 +418,7 @@
     };
   }
 
+  const splitAfter = (sp, d) => { let f = 1; (sp || []).forEach((s) => { if (s.date > d) f *= s.ratio; }); return f; };
   function portfolioHistory(state, convertAt, o) {
     o = o || {};
     const today = o.today || new Date(), todayS = toISO(today), ids = o.ids || null, months = o.months === undefined ? 12 : o.months;
@@ -429,29 +430,33 @@
 
     const list = []; const coverage = { total: 0, missing: [], retro: [], noDaily: false };
     insts.forEach((it) => {
-      const h = it.h, txs = (byInst[h.id] || []).slice().sort(sortTx), splits = h.splits || [];
+      const h = it.h, txs = (byInst[h.id] || []).slice().sort(sortTx), isin = Ledger ? Ledger.holdingIsin(h) : '';
       const sign = (t) => (t.type === 'buy' ? 1 : -1);
-      const adjTotal = txs.reduce((s, t) => s + sign(t) * num(t.qty) * (Ledger ? Ledger.splitFactor(splits, t.date) : 1), 0), rawTotal = txs.reduce((s, t) => s + sign(t) * num(t.qty), 0);
+      // opérations sur titres VALIDÉES (state.corp) + fractionnements du marché non encore validés : le nombre de titres réellement détenus à chaque date.
+      // Les cours Yahoo sont ajustés des splits du MARCHÉ : on ramène donc la quantité à la base actuelle avec ces seuls splits (h.splits).
+      const corp = (state.corp || []).filter((c) => c.validated !== false && isin && c.isin === isin), mkt = (h.splits || []).filter((s) => s && s.date && s.ratio > 0);
+      const corpSplits = corp.filter((c) => c.kind === 'split'), near = (d1, d2) => Math.abs(Date.parse(d1) - Date.parse(d2)) < 5 * 86400000;
+      const mktOnly = mkt.filter((s) => !corpSplits.some((c) => near(c.date, s.date)));
+      const toEntries = (withMkt) => txs.map((t) => {
+        const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees));
+        const c = convertAt(raw, cur, t.date.slice(0, 7));
+        return { date: t.date, time: t.time || '', type: t.type, qty: num(t.qty), amt: c === null ? null : c, fees: num(t.fees) };
+      }).concat(corp.map((c) => ({ date: c.date, time: '', type: c.kind, qty: 0, ratio: c.ratio, amt: null })), withMkt ? mktOnly.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null })) : []);
       const cq = it.kind === 'holding' ? num(h.quantity) : 0, tol = 1e-6 * Math.max(1, cq);
-      const txMode = txs.length > 0 && (it.kind === 'archive' || Math.abs(adjTotal - cq) <= tol || Math.abs(rawTotal - cq) <= tol);
+      let ledgerRows = null, txMode = false;
+      if (txs.length && Ledger) {
+        const withM = Ledger.run(toEntries(true)), noM = Ledger.run(toEntries(false));
+        txMode = it.kind === 'archive' || Math.abs(withM.qty - cq) <= tol || Math.abs(noM.qty - cq) <= tol;
+        if (txMode) ledgerRows = Math.abs(withM.qty - cq) <= tol || it.kind === 'archive' ? withM.rows : noM.rows;
+      }
       if (!txMode && !(it.kind === 'holding' && cq > 0)) return;               // ni opérations exploitables ni position actuelle
       const name = h.name || h.displayTicker || h.ticker || '—';
-      let ledgerRows = null;
-      if (txMode && Ledger) {
-        const entries = txs.map((t) => {
-          const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees));
-          const c = convertAt(raw, cur, t.date.slice(0, 7));
-          return { date: t.date, time: t.time || '', type: t.type, qty: num(t.qty), amt: c === null ? null : c, fees: num(t.fees) };
-        });
-        ledgerRows = Ledger.run(entries).rows;
-      }
-      const cumul = []; let run_ = 0;
-      if (txMode) txs.forEach((t) => { run_ += sign(t) * num(t.qty) * (Ledger ? Ledger.splitFactor(splits, t.date) : 1); cumul.push({ date: t.date, q: run_ }); });
+      const cumul = ledgerRows ? ledgerRows.map((r) => ({ date: r.date, q: r.qtyAfter })) : [];
       coverage.total++;
       if (!txMode) coverage.retro.push(name);
       list.push({ id: h.id, name, cur: h.currency || 'EUR', kind: it.kind, txMode, cumul, ledgerRows, price: priceLookup(h), live: it.kind === 'holding', hasHist: !!(h.hist && ((h.hist.c && h.hist.c.length) || (h.hist.d && h.hist.d.t.length))), hasDaily: !!(h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length),
         dailyStart: h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length ? h.hist.d.t[0] : null, q0: cq, firstTx: txs.length ? txs[0].date : null, histFrom: h.hist && h.hist.from ? h.hist.from + '-01' : null,
-        rowsAt: ledgerRows });
+        rowsAt: ledgerRows, adjSplits: mkt });
     });
     if (!list.length) return { points: [], coverage, perf: { points: [], from: null }, summary: null, retro: true, empty: true };
 
@@ -485,7 +490,8 @@
       const live = d === todayS, ymm = d.slice(0, 7);
       let value = 0, cost = 0, costKnown = true, partial = false; const miss = [], parts = [];
       list.forEach((x, i) => {
-        const q = qtyAt(x, i, d); if (!(q > 1e-9)) return;
+        const q0 = qtyAt(x, i, d); if (!(q0 > 1e-9)) return;
+        const q = q0 * (x.txMode ? splitAfter(x.adjSplits, d) : 1);                // base actuelle des fractionnements du marché (cours ajustés)
         const p = x.price(d, live && x.live), cv = p > 0 ? convertAt(q * p, x.cur, ymm) : null;
         if (cv === null) { partial = true; miss.push(x.name); missingEver[x.name] = missingEver[x.name] || { name: x.name, first: d, reason: p > 0 ? 'taux de change indisponible' : (x.hasHist ? 'cours indisponible à cette date' : 'aucun cours historique') }; return; }
         value += cv; parts.push([x.name, cv]);
@@ -520,7 +526,55 @@
     const summary = { startDate: first.date, endDate: last.date, startValue: first.value, endValue: last.value, netFlows, marketGain: last.value - first.value - netFlows, perfPct: perf.pct, partialStart: first.partial, partialEnd: last.partial,
       investedEnd: last.cost, firstTx: firstTxAll === '9999-99-99' ? null : firstTxAll };
     const retro = list.some((x) => !x.txMode);
-    return { points, coverage, perf, summary, retro, empty: false, allTx: list.every((x) => x.txMode) };
+    return { points, coverage, perf, summary, retro, empty: false, allTx: list.every((x) => x.txMode), flows };
+  }
+
+
+  /* ---------- catégorie d'un actif : ETF / action / à classer (jamais « action » par défaut sans indice) ---------- */
+  const ETF_NAME = /\b(etf|ucits|ishares|lyxor|xtrackers|spdr|wisdomtree|vaneck|etn|amundi (msci|s&p|stoxx|ftse|euro|index|pea|prime)|vanguard (s&p|ftse|msci|total|all-world|funds|global|ftse))\b/i;
+  function category(h) {
+    if (h.typeLocked || h.typeSource === 'user') return h.type === 'etf_dist' || h.type === 'etf_acc' ? 'etf' : 'stock';
+    if (h.type === 'etf_dist' || h.type === 'etf_acc') return 'etf';
+    const it = String(h.instrumentType || '').toUpperCase();
+    if (it === 'ETF' || it === 'MUTUALFUND') return 'etf';
+    if (it === 'EQUITY') return 'stock';
+    if (ETF_NAME.test(h.name || '')) return 'etf';
+    return 'unknown';
+  }
+
+  /* ---------- variation journalière : mouvement de marché de la dernière séance sur les quantités détenues à la clôture précédente
+     (un achat ou une vente du jour, un dépôt ou un retrait n'y comptent pas) ---------- */
+  function dailyChange(state, convert, ids, todayISO) {
+    let amount = 0, base = 0, cnt = 0, total = 0, asOf = null; const missing = [];
+    (state.holdings || []).forEach((h) => {
+      if (ids && !ids.has(h.id)) return;
+      if (!(num(h.quantity) > 0) || !(h.price > 0)) return;
+      total++;
+      if (!(h.prevClose > 0) || !h.prevCloseAt) { missing.push(h.name || h.displayTicker || h.ticker); return; }
+      const q = quantityAt(state, h, h.prevCloseAt), a = convert(q * (h.price - h.prevClose), h.currency || 'EUR'), b = convert(q * h.prevClose, h.currency || 'EUR');
+      if (a === null || b === null) { missing.push(h.name || h.displayTicker || h.ticker); return; }
+      amount += a; base += b; cnt++; if (!asOf || h.prevCloseAt > asOf) asOf = h.prevCloseAt;
+    });
+    return { amount, pct: base > 0 ? amount / base : null, count: cnt, total, missing, prevDate: asOf };
+  }
+
+  /* ---------- rendement annualisé pondéré par les flux (TRI / XIRR) ----------
+     Flux : chaque achat (−) et chaque vente (+) daté, en devise de base au taux du mois ; valeur terminale = valeur actuelle des positions détenues.
+     Dividendes exclus. Calculé seulement si TOUTES les positions détenues ont un historique d'opérations cohérent, sont valorisées, et si l'historique couvre ≥ 1 an. */
+  function xirr(hist, today) {
+    const fail = (reason) => ({ rate: null, reason });
+    if (!hist || hist.empty || !hist.flows || !hist.flows.length) return fail('aucune opération');
+    if (!hist.allTx) return fail('historique d\'opérations incomplet pour ' + hist.coverage.retro.length + ' position(s)');
+    const last = hist.points[hist.points.length - 1]; if (!last || last.partial) return fail('cours manquants');
+    const flows = hist.flows.slice().sort((a, b) => (a.date < b.date ? -1 : 1)), t0 = flows[0].date, tN = toISO(today || new Date());
+    const day = (d) => { const a = d.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]) / 86400000; };
+    const span = day(tN) - day(t0); if (span < 365) return fail('moins d\'un an d\'historique');
+    const cfs = flows.map((f) => ({ t: (day(f.date) - day(t0)) / 365, v: -f.f })).concat([{ t: span / 365, v: last.value }]);
+    const f = (r) => cfs.reduce((s, c) => s + c.v / Math.pow(1 + r, c.t), 0);
+    let lo = -0.95, hi = 10, flo = f(lo), fhi = f(hi);
+    if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return fail('calcul impossible');
+    for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2, fm = f(mid); if (Math.abs(fm) < 1e-9) { lo = hi = mid; break; } if (flo * fm <= 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; } }
+    return { rate: (lo + hi) / 2, from: t0, years: span / 365, flows: flows.length };
   }
 
   /* ---------- performance par actif et globale (PRU) ---------- */
@@ -594,7 +648,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
   };

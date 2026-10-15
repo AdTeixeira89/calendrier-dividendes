@@ -27,7 +27,7 @@ let view = {
   hist: { tab: 'payments', year: 'all', month: 'all', asset: 'all', status: 'all' },
   port: { q: '', type: 'all', div: 'all', tab: 'positions' }, ops: { asset: 'all', type: 'all', from: '', to: '' },
   stats: { year: new Date().getFullYear() },
-  home: { year: new Date().getFullYear(), period: 12 },
+  home: { year: new Date().getFullYear(), period: 12, perfPeriod: 12 },
   sync: { state: 'local', msg: '', at: 0 }
 };
 
@@ -67,10 +67,11 @@ function hydrateState(parsed) {
     s.holdings = Array.isArray(s.holdings) ? s.holdings : [];
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
+    s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {};
     s.archive = Array.isArray(s.archive) ? s.archive : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
     if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;
-    s.holdings.forEach((h) => { if (!h.account || !s.accounts.some((a) => a.id === h.account)) h.account = s.accounts[0].id; migrateHolding(h); });
+    s.holdings.forEach((h) => { if (!h.account || !s.accounts.some((a) => a.id === h.account)) h.account = s.accounts[0].id; migrateHolding(h); if (h.source === 'degiro' && h.derived === undefined) h.derived = true; });   // positions calculées par l'import d'historique
     s.sent = s.sent || { days: {}, months: {} };
     return s;
   } catch (e) { return defaultState(); }
@@ -665,13 +666,14 @@ function openCsvExport() {
 }
 /* Retour arrière d'un import d'historique : photographie des données juste avant la modification (chiffrée avec le reste si un code est défini). */
 function snapshotForUndo(label) {
-  state.undo = { at: new Date().toISOString(), label: label, holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []), accounts: clone(state.accounts) };
+  state.undo = { at: new Date().toISOString(), label: label, holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []), accounts: clone(state.accounts),
+    corp: clone(state.corp || []), isinAlias: clone(state.isinAlias || {}), imports: clone(state.imports || []).map((x) => { delete x.raw; return x; }), reference: state.reference ? clone(state.reference) : null };
 }
 async function undoLastImport() {
   const u = state.undo; if (!u) return;
-  const c = await confirmDialog({ title: 'Annuler le dernier import ?', body: 'Les positions, opérations et versements reviennent à leur état d\'avant « ' + esc(u.label) + ' » (' + esc(fmtDate(u.at.slice(0, 10))) + '). <b>Les modifications faites depuis cet import seront perdues.</b>', confirmLabel: 'Annuler l\'import', danger: true });
+  const c = await confirmDialog({ title: 'Annuler la dernière modification ?', body: 'Les positions, opérations, opérations sur titres et versements reviennent à leur état d\'avant « ' + esc(u.label) + ' » (' + esc(fmtDate(u.at.slice(0, 10))) + '). <b>Les modifications faites depuis seront perdues.</b>', confirmLabel: 'Annuler', danger: true });
   if (!c.ok) return;
-  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
+  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; state.corp = u.corp || []; state.isinAlias = u.isinAlias || {}; if (u.imports) { const rawById = {}; (state.imports || []).forEach((x) => { if (x.raw) rawById[x.id] = x.raw; }); state.imports = u.imports.map((x) => Object.assign(x, rawById[x.id] ? { raw: rawById[x.id] } : {})); } if (u.reference) state.reference = u.reference; else delete state.reference; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
   saveState(); renderPage(); toast('Import annulé : données restaurées.');
 }
 function importBackup(file) {

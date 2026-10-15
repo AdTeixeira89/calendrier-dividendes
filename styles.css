@@ -457,3 +457,24 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .chart-sum>div{display:flex;flex-direction:column;gap:1px;font-size:13px}.chart-sum span{color:var(--muted);font-size:11.5px}.chart-sum small{font-size:10.5px}
 
 @media (max-width:640px){ .perf-cols{grid-template-columns:minmax(0,1fr)} }
+
+/* contrôle de l'historique */
+.diag-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;background:var(--surface)}
+.diag-item.lvl-error{border-left:4px solid var(--danger)}.diag-item.lvl-warn{border-left:4px solid var(--warn)}.diag-item.lvl-info{border-left:4px solid var(--info)}
+.diag-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}.diag-line{font-size:13px;margin-top:3px;white-space:normal}
+.diag-report{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:6px 0}.diag-report>div{display:flex;flex-direction:column;font-size:12px;color:var(--muted)}.diag-report b{font-size:18px;color:var(--text)}
+
+.port-sec{margin-top:16px}.port-sec-h{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}.port-sec-h h2{font-size:17px;margin:0}
+.cat-sel{width:auto;max-width:150px;padding:4px 6px;font-size:12.5px}
+
+/* accueil refondu */
+.hero-top{display:flex;gap:18px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+.hero-ind{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:12px 22px;flex:1;min-width:min(100%,320px);max-width:620px}
+.ind{display:flex;flex-direction:column;gap:2px}.ind>span{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}.ind b{font-size:22px;font-variant-numeric:tabular-nums}.ind small b{font-size:inherit}.ind>small{font-size:11.5px;color:var(--muted)}
+.hero-ctrl{display:flex;justify-content:flex-end;margin:6px 0 4px}
+.chart-wrap{position:relative}
+.xirr-chip{position:absolute;top:2px;right:6px;display:flex;flex-direction:column;align-items:flex-end;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:10.5px;color:var(--muted);line-height:1.25;cursor:help}
+.xirr-chip b{font-size:12.5px;font-variant-numeric:tabular-nums}
+@media (max-width:640px){ .hero-ind{grid-template-columns:minmax(0,1fr)} .xirr-chip{position:static;align-items:flex-start;margin-top:6px} .hero-ctrl{justify-content:flex-start} }
+
+.modal .btn.sm{white-space:normal;text-align:left;height:auto}

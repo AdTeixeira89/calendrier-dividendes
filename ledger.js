@@ -92,6 +92,8 @@
     ['type', /^(type|sens|side|buy sell|achat vente|b s|type d operation|operation type|transaction type|soort)$/],
     ['description', /^(description|omschrijving|beschreibung|descripcion|descrizione|operation|libelle)$/],
     ['currency', /^(devise|currency|munt|wahrung|waehrung|moneda|valuta|divisa)( .*)?$/],
+    ['venue', /^(lieu d execution|lieu execution|venue|execution venue|ausfuhrungsort|ausfuehrungsort|uitvoeringsplaats|lugar de ejecucion|sede di esecuzione)$/],
+    ['exchange', /^(bourse de reference|bourse|reference exchange|exchange|referenzborse|referenzboerse|referentiebeurs|beurs|bolsa de referencia|borsa)$/],
     ['product', /^(produit|product|produkt|producto|prodotto|nom|name|titel|security|instrument|titre|naam|nom du produit|asset)$/]
   ];
   function roleOf(header) {
@@ -156,13 +158,14 @@
   const BUY_WORDS = /^(achat|buy|bought|koop|kauf|compra|acquisto|b|a|c)$/i, SELL_WORDS = /^(vente|sell|sold|verkoop|verkauf|venta|vendita|s|v)$/i;
   function otherKind(desc) {
     const d = norm(desc);
+    if (/change de devise|currency (debit|credit)|conversion de devise|wisselkoers|devisen|cambio de divisa|fx (debit|credit)|operation de change/.test(d)) return 'conversion de devise';
     if (/dividend|dividende|dividendo/.test(d)) return 'dividende';
     if (/retenue|withholding|quellensteuer|impot|tax\b/.test(d)) return 'retenue';
     if (/depot|deposit|storting|einzahlung|ingreso|versement|virement|ideal|sofort|flatex/.test(d) && !/frais|fee|kosten/.test(d)) return 'dépôt / virement';
     if (/retrait|withdraw|opname|auszahlung|reembolso|retirada/.test(d)) return 'retrait';
     if (/frais|fee|kosten|gebuhr|commission|courtage|connectivity|connexion|costi/.test(d)) return 'frais';
     if (/interet|interest|rente|zins|interes/.test(d)) return 'intérêts';
-    if (/fractionnement|split|regroupement|opera?tion sur titre|corporate|spin|fusion|merger|changement de produit|product change|isin/.test(d)) return 'opération sur titres';
+    if (/fractionnement|split|regroupement|reverse split|opera?tion sur titre|corporate|spin|fusion|merger|changement de produit|product change|changement d isin|isin change|echange de titres|offre publique|radiation|delisting|conversion/.test(d)) return 'opération sur titres';
     return 'autre';
   }
 
@@ -175,7 +178,7 @@
 
   function parseOps(rows, det, opt) {
     opt = opt || {};
-    const out = { ops: [], bad: [], ambiguous: [], other: [], meta: { decimal: ',', dateOrder: 'dmy', acctCur: det.acctCur || 'EUR', rows: 0, signedQty: true } };
+    const out = { ops: [], bad: [], ambiguous: [], other: [], corp: [], meta: { decimal: ',', dateOrder: 'dmy', acctCur: det.acctCur || 'EUR', rows: 0, signedQty: true } };
     if (det.headerIdx < 0 && det.cols.date === undefined) return out;
     const cols = det.cols, body = rows.slice(det.headerIdx + 1), base = det.headerIdx + 1;
     const numCols = [cols.qty, cols.price, cols.localValue, cols.valueAcct, cols.total, cols.change, cols.fx].concat(cols.fees).filter((c) => c !== undefined);
@@ -203,7 +206,11 @@
 
       if (det.statement || (cols.qty === undefined && desc)) {
         const m = desc.match(TRADE_DESC);
-        if (!m) { out.other.push({ line, kind: otherKind(desc), desc, date, raw }); return; }
+        if (!m) {
+          const kind0 = otherKind(desc); out.other.push({ line, kind: kind0, desc, date, raw });
+          if (kind0 === 'opération sur titres') { const rm = desc.match(/(\d+(?:[.,]\d+)?)\s*(?:pour|for|:|\/|contre|voor|zu)\s*(\d+(?:[.,]\d+)?)/i); out.corp.push({ line, date, isin, name, desc, ratio: rm ? parseNumber(rm[1], dec) / parseNumber(rm[2], dec) : null, source: 'csv' }); }
+          return;
+        }
         kind = BUY_WORDS.test(m[1]) ? 'buy' : 'sell';
         qty = Math.abs(num(m[2])); price = Math.abs(num(m[4])); priceCur = m[5].toUpperCase() === 'GBX' ? 'GBX' : m[5].toUpperCase();
         if (!isin && m[6]) isin = m[6].toUpperCase();
@@ -220,6 +227,10 @@
         priceCur = priceCur === 'GBp' ? 'GBX' : priceCur.toUpperCase();
         const t = num(g(r, 'total')), v = num(g(r, 'valueAcct'));
         total = isNaN(t) ? null : Math.abs(t); valueAcct = isNaN(v) ? null : Math.abs(v);
+        if (price === 0 || (total !== null && total === 0)) {      // aucun flux d'argent : livraison gratuite, split, échange… jamais un achat à coût nul sans validation
+          out.ambiguous.push({ line, reason: 'Montant nul : opération sur titres probable (split, échange, livraison gratuite) — non importée, à vérifier', raw });
+          out.corp.push({ line, date, isin, name, desc: 'Montant nul (quantité ' + qty + ')', ratio: null, source: 'csv', zero: true }); return;
+        }
         if (typeCell) { if (BUY_WORDS.test(typeCell) || /achat|buy|koop|kauf|compra/i.test(typeCell)) kind = 'buy'; else if (SELL_WORDS.test(typeCell) || /vente|sell|verkoop|verkauf|venta/i.test(typeCell)) kind = 'sell'; }
         const signTotal = isNaN(t) || t === 0 ? 0 : (t < 0 ? 1 : -1);        // total négatif = argent sorti = achat
         if (!kind) {
@@ -251,9 +262,11 @@
         if (Math.abs(exp - total) > tol(total)) warn.push('Total ≠ valeur ± frais');
       }
       if (valueAcct !== null && priceCur === accCur && Math.abs(qty * price - valueAcct) > tol(valueAcct)) warn.push('Quantité × cours ≠ valeur');
-      out.ops.push({ line, date, time, name, isin, type: kind, qty: r8(qty), price: price, priceCur, valueAcct, acctCur: accCur, fees, total, amt: amt === null ? null : r4(amt), fxRate: isNaN(fxv) ? null : fxv, orderId, warn, raw, seq: out.ops.length });
+      out.ops.push({ line, date, time, name, isin, type: kind, qty: r8(qty), price: price, priceCur, valueAcct, acctCur: accCur, fees, total, amt: amt === null ? null : r4(amt), fxRate: isNaN(fxv) ? null : fxv, orderId, venue: g(r, 'venue'), exchange: g(r, 'exchange'), warn, raw, seq: out.ops.length });
     });
     assignIds(out.ops);
+    const oc = {}; out.other.forEach((x) => { oc[x.kind] = (oc[x.kind] || 0) + 1; });
+    out.report = { read: out.ops.length + out.bad.length + out.ambiguous.length + out.other.length, recognized: out.ops.length, bad: out.bad.length, ambiguous: out.ambiguous.length, other: oc, corp: out.corp.length };
     return out;
   }
   /* Identifiant stable : empreinte du contenu + rang d'occurrence (deux lignes strictement identiques
@@ -266,20 +279,35 @@
 
   /* ---------------------------------------------------------------
      GRAND LIVRE (coût moyen pondéré)
-     entrées : { date, time, type 'buy'|'sell', qty, amt (coût frais compris / produit net), fees }
+     entrées : { date, time, type, qty, amt, fees }
+       buy     achat  : quantité +, coût + amt (frais d'achat INCLUS)
+       sell    vente  : quantité −, coût − (PRU moyen × quantité vendue) ; résultat réalisé = produit net des frais − coût sorti
+                        (les frais de vente restent dans le résultat réalisé, jamais retirés une seconde fois du PRU)
+       split   opération sur titres explicite : quantité × ratio, coût inchangé (PRU ÷ ratio) — jamais un achat
+       removal sortie hors transaction (radiation, offre, échange) : quantité et coût ramenés à zéro, sans résultat réalisé
+     Une nouvelle acquisition après une vente totale ouvre un nouveau cycle (position économique distincte).
      --------------------------------------------------------------- */
-  const orderKey = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : (a.type === b.type ? 0 : a.type === 'buy' ? -1 : 1));
+  const RANK = { split: 0, buy: 1, sell: 2, removal: 3 };
+  const orderKey = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : (RANK[a.type] || 0) - (RANK[b.type] || 0));
   function run(entries) {
     const sorted = entries.map((e, i) => ({ e, i })).sort((a, b) => orderKey(a.e, b.e) || a.i - b.i).map((x) => x.e);
-    let qty = 0, cost = 0, realized = 0, realizedKnown = true, costUnknown = 0, negative = false, hasSell = false;
+    let qty = 0, cost = 0, realized = 0, realizedKnown = true, costUnknown = 0, negative = false, hasSell = false, cycle = 0, splits = 0, removed = 0;
     const issues = [], rows = [];
     sorted.forEach((e) => {
       const q = Number(e.qty) || 0, row = Object.assign({}, e);
       if (e.type === 'buy') {
+        if (qty <= EPS) cycle++;
         qty += q;
         if (e.amt == null) { costUnknown++; row.issue = 'Montant inconnu : prix de revient non calculable'; }
         else cost += e.amt;
         row.realized = null;
+      } else if (e.type === 'split') {
+        const r = Number(e.ratio);
+        if (!(r > 0) || r === 1) row.issue = 'Ratio de split invalide';
+        else { qty *= r; splits++; row.qtyBefore = r8(qty / r); }
+        row.realized = null;
+      } else if (e.type === 'removal') {
+        row.removedQty = r8(qty); row.costOut = r2(cost); removed++; qty = 0; cost = 0; row.realized = null;
       } else {
         hasSell = true;
         const avg = qty > EPS ? cost / qty : 0, sold = Math.min(q, Math.max(qty, 0));
@@ -294,44 +322,93 @@
         if (qty < EPS) { qty = 0; cost = 0; }
       }
       qty = r8(qty);
-      row.qtyAfter = qty; row.costAfter = r2(cost); row.pruAfter = qty > EPS && costUnknown === 0 ? cost / qty : null;
+      row.cycle = cycle || 1; row.qtyAfter = qty; row.costAfter = r2(cost); row.pruAfter = qty > EPS && costUnknown === 0 ? cost / qty : null;
       rows.push(row);
     });
-    return { rows, qty, cost: r2(cost), pru: qty > EPS && costUnknown === 0 ? cost / qty : null, realized: r2(realized), realizedKnown: hasSell ? realizedKnown : true, costUnknown, negative, issues, first: sorted.length ? sorted[0].date : null, last: sorted.length ? sorted[sorted.length - 1].date : null };
+    return { rows, qty, cost: r2(cost), pru: qty > EPS && costUnknown === 0 ? cost / qty : null, realized: r2(realized), realizedKnown: hasSell ? realizedKnown : true, costUnknown, negative, issues, cycles: cycle, splits, removed,
+      first: sorted.length ? sorted[0].date : null, last: sorted.length ? sorted[sorted.length - 1].date : null };
   }
 
   /* Facteur de fractionnement : produit des splits postérieurs à une date (ex. 10:1 → 10). */
   function splitFactor(splits, dateISO) { let f = 1; (splits || []).forEach((s) => { if (s && s.date > dateISO && s.ratio > 0) f *= s.ratio; }); return f; }
 
   /* ---------------------------------------------------------------
-     PLAN D'IMPORT
+     INSTRUMENTS : clé, rapprochement, entrées du grand livre
      --------------------------------------------------------------- */
-  const instKey = (o) => (o.isin ? o.isin : 'N:' + norm(o.name));
   const isNameKey = (k) => k.slice(0, 2) === 'N:';          // (un ISIN néerlandais commence aussi par « N »)
   function holdingIsin(h) { return String(h.isin || (isISIN(h.ticker) ? h.ticker : '') || '').toUpperCase(); }
+  /* ISIN → ISIN canonique (changement d'ISIN / fusion validés par l'utilisateur). */
+  function canon(alias, isin) { let k = isin, n = 0; while (alias && alias[k] && n++ < 10) k = alias[k]; return k; }
+  const instKey = (o, alias) => (o.isin ? canon(alias, o.isin) : 'N:' + norm(o.name));
   function findExisting(state, key, name, account) {
     const nn = norm(name), isIsin = !isNameKey(key);
     const hit = (list, kind) => {
-      const l = (list || []).filter((x) => !account || x.account === account || kind === 'archive' && !x.account);
-      let f = isIsin ? l.find((x) => holdingIsin(x) === key) : null;
-      if (!f && nn) f = l.find((x) => norm(x.name) === nn && (!isIsin || !holdingIsin(x) || holdingIsin(x) === key));
+      const l = (list || []).filter((x) => !account || x.account === account);
+      let f = isIsin ? l.find((x) => canon(state.isinAlias, holdingIsin(x)) === key) : null;
+      if (!f && nn) f = l.find((x) => norm(x.name) === nn && (!isIsin || !holdingIsin(x) || canon(state.isinAlias, holdingIsin(x)) === key));
       return f ? { kind, ref: f } : null;
     };
     return hit(state.holdings, 'holding') || hit(state.archive, 'archive');
   }
   const priceClose = (a, b) => Math.abs(a - b) <= Math.max(1e-4, Math.abs(b) * 1e-4);
+  const qtyEq = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
 
+  /* Opérations sur titres validées (state.corp) d'un instrument → entrées du grand livre. */
+  function corpEntries(state, isin) {
+    return (state.corp || []).filter((c) => c.validated !== false && isin && c.isin === isin).map((c) => ({ date: c.date, time: '', type: c.kind, qty: 0, ratio: c.ratio, amt: null, corpId: c.id, source: c.source }));
+  }
+  /* Entrées du grand livre d'un actif enregistré : ses transactions + ses opérations sur titres. Montants dans UNE devise (celle de la première opération). */
+  function entriesFor(state, inst) {
+    const txs = (state.transactions || []).filter((t) => t.holdingId === inst.id && (t.type === 'buy' || t.type === 'sell') && t.date);
+    const cc = (t) => t.acctCur || t.currency || 'EUR';
+    const first = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0], cur = first ? cc(first) : 'EUR';
+    const entries = txs.map((t) => {
+      const amt = cc(t) !== cur ? null : (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0)));
+      return { id: t.id, date: t.date, time: t.time || '', type: t.type, qty: Number(t.qty), amt, fees: Number(t.fees || 0), tx: t };
+    }).concat(corpEntries(state, holdingIsin(inst)));
+    return { entries, cur, txs };
+  }
+
+  /* Positions réelles de référence : relevé de portefeuille DEGIRO chargé (mode « file ») ou, à défaut, positions saisies / importées
+     directement (non calculées par l'import d'historique) du même portefeuille (mode « app »). */
+  function referenceOf(state, account, force) {
+    const rf = state.reference;
+    if (force === 'none') return { mode: null, map: new Map() };
+    if (force !== 'app' && rf && rf.positions && rf.positions.length && (!account || !rf.account || rf.account === account)) { const map = new Map(); rf.positions.forEach((p) => map.set(p.isin, p)); return { mode: 'file', map, at: rf.at }; }
+    const hs = (state.holdings || []).filter((h) => h.derived !== true && (!account || h.account === account));
+    if (hs.length) { const map = new Map(); hs.forEach((h) => { const i = holdingIsin(h); if (i) map.set(canon(state.isinAlias, i), { isin: i, name: h.name, qty: Number(h.quantity) || 0 }); }); if (map.size) return { mode: 'app', map }; }
+    return { mode: null, map: new Map() };
+  }
+
+  /* Verdict sur un instrument d'après son grand livre : peut-il être une position actuelle ? Jamais deviné. */
+  function verdict(led, key, ref) {
+    if (led.negative) return { code: 'negative', msg: 'Solde négatif : ventes supérieures aux achats connus. Causes probables : split ou regroupement absent du CSV, changement d\'ISIN, historique incomplet.' };
+    if (led.qty <= EPS) return { code: 'closed' };
+    if (ref && ref.map.size && !isNameKey(key)) {
+      const r = ref.map.get(key);
+      if (!r) return { code: 'unreferenced', msg: 'Quantité calculée ' + led.qty + ' mais cet actif ne figure pas dans vos positions réelles. Causes probables : changement d\'ISIN, fusion, radiation, vente non visible dans le CSV.' };
+      if (ref.mode === 'file' && !qtyEq(r.qty, led.qty)) return { code: 'qty_mismatch', msg: 'Quantité calculée ' + led.qty + ' ≠ position réelle ' + r.qty + '. Cause probable : split ou regroupement absent du CSV.', refQty: r.qty };
+    }
+    return { code: 'open' };
+  }
+
+  /* ---------------------------------------------------------------
+     PLAN D'IMPORT
+     opt : { account, reference (référenceOf), corp (opérations sur titres en attente), alias }
+     --------------------------------------------------------------- */
   function plan(state, ops, opt) {
     opt = opt || {};
     const account = opt.account, txs = state.transactions || [];
+    const alias = Object.assign({}, state.isinAlias || {}, opt.alias || {}), ref = opt.reference || referenceOf(state, account);
+    const st2 = Object.assign({}, state, { isinAlias: alias, corp: (state.corp || []).concat(opt.corp || []) });
     const byExt = new Set(txs.filter((t) => t.extId).map((t) => t.extId));
     const groups = {}, order = [];
-    ops.forEach((o) => { const k = instKey(o); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(o); });
+    ops.forEach((o) => { const k = instKey(o, alias); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(o); });
     const instruments = order.map((key) => {
       const list = groups[key], last = list.slice().sort(orderKey).pop();
       const name = (list.find((o) => o.name) || {}).name || '';
-      const found = findExisting(state, key, name, account), ref = found ? found.ref : null;
-      const existing = ref ? txs.filter((t) => t.holdingId === ref.id) : [];
+      const found = findExisting(st2, key, name, account), refObj = found ? found.ref : null;
+      const existing = refObj ? txs.filter((t) => t.holdingId === refObj.id && (t.type === 'buy' || t.type === 'sell')) : [];
       const used = new Set();
       const dupOps = [], newOps = [];
       list.forEach((o) => {
@@ -340,39 +417,42 @@
         const j = existing.findIndex((t, idx) => !used.has(idx) && t.date === o.date && t.type === o.type && Math.abs(Number(t.qty) - o.qty) < EPS && priceClose(Number(t.price), o.price));
         if (j >= 0) { used.add(j); dupOps.push(o); } else newOps.push(o);
       });
-      const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }));
+      const fileIds = new Set(list.map((o) => o.extId)), cur0 = last.acctCur;
+      // historique connu = opérations du fichier + opérations déjà enregistrées que ce fichier ne contient pas (autre source, ancien export)
+      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0))) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
+      const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
+        .concat(extra, corpEntries(st2, isNameKey(key) ? '' : key));
       const led = run(entries);
-      const inst = { key, isin: isNameKey(key) ? '' : key, name, ops: list, newOps, dupOps, led, include: true, ref: found, currency: last.priceCur, acctCur: last.acctCur,
-        status: 'review', reasons: [], fill: {}, divergence: null, pruDiff: null, first: led.first, last: led.last };
-      const warnOps = list.filter((o) => o.warn && o.warn.length);
-      inst.warnCount = warnOps.length;
-      // 1. Historique incohérent : on ne devine pas
-      if (led.negative) { inst.status = 'review'; inst.include = false; inst.reasons.push('Solde négatif reconstitué : l\'historique commence après vos premiers achats (ou une opération sur titres manque).'); return inst; }
-      const fileQty = led.qty;
+      const inst = { key, isin: isNameKey(key) ? '' : key, name, ops: list, newOps, dupOps, led, include: true, ref: found, currency: last.priceCur, acctCur: last.acctCur, venue: last.venue || '',
+        status: 'check', reasons: [], fill: {}, divergence: null, pruDiff: null, first: led.first, last: led.last, check: null, extraKnown: extra.length };
+      inst.warnCount = list.filter((o) => o.warn && o.warn.length).length;
+      const v = verdict(led, key, ref); inst.verdict = v;
+      if (v.code === 'negative' || v.code === 'unreferenced' || v.code === 'qty_mismatch') { inst.check = { code: v.code, msg: v.msg }; inst.reasons.push(v.msg); }
       if (!found) {
-        if (fileQty > EPS) { inst.status = 'create'; if (led.pru == null) inst.reasons.push('Prix de revient non calculable (montants manquants sur certaines lignes) : la position sera créée sans PRU.'); }
-        else { inst.status = 'closed'; }
+        if (v.code === 'open') { inst.status = 'create'; if (led.pru == null) inst.reasons.push('Prix de revient non calculable (montants manquants sur certaines lignes) : la position sera créée sans PRU.'); }
+        else if (v.code === 'closed') inst.status = 'closed';
+        else inst.status = 'check';                       // rien n'est ajouté au portefeuille actuel ; les opérations sont conservées « à vérifier »
         return inst;
       }
-      if (found.kind === 'archive') {
-        if (fileQty > EPS) { inst.status = 'reopen'; } else inst.status = 'archive';
-        return inst;
-      }
+      if (found.kind === 'archive') { inst.status = v.code === 'open' ? 'reopen' : 'archive'; return inst; }
       // Position déjà dans l'application : jamais modifiée sans choix explicite
       const h = found.ref, hq = Number(h.quantity) || 0;
       inst.status = 'holding';
-      const qtyOk = Math.abs(fileQty - hq) <= EPS * Math.max(1, hq);
-      if (!qtyOk) inst.divergence = { app: hq, file: fileQty, diff: r8(fileQty - hq) };
+      const qtyOk = qtyEq(led.qty, hq);
+      if (h.derived === true && !h.manual && v.code === 'open') {          // position calculée par l'import : recalculée depuis les transactions (jamais une position saisie ou corrigée à la main)
+        inst.recompute = !qtyOk || (led.pru != null && !(Math.abs((Number(h.avgCost) || 0) - led.pru) < 1e-4));
+        if (inst.recompute) inst.update = { from: hq, to: led.qty, pruFrom: Number(h.avgCost) || null, pruTo: led.pru };
+      } else if (!qtyOk) inst.divergence = { app: hq, file: led.qty, diff: r8(led.qty - hq) };
       const hAvg = Number(h.avgCost) > 0 ? Number(h.avgCost) : null, hCostCur = h.costCurrency || h.currency || 'EUR';
-      if (hAvg == null && led.pru != null && qtyOk) inst.fill.avgCost = { value: led.pru, cur: inst.acctCur };
-      if (hAvg != null && led.pru != null && hCostCur === inst.acctCur && qtyOk && Math.abs(hAvg - led.pru) > Math.max(0.005, hAvg * 0.002)) inst.pruDiff = { app: hAvg, file: led.pru, cur: inst.acctCur };
+      if (hAvg == null && led.pru != null && qtyOk && !inst.recompute) inst.fill.avgCost = { value: led.pru, cur: inst.acctCur };
+      if (!inst.recompute && hAvg != null && led.pru != null && hCostCur === inst.acctCur && qtyOk && Math.abs(hAvg - led.pru) > Math.max(0.005, hAvg * 0.002)) inst.pruDiff = { app: hAvg, file: led.pru, cur: inst.acctCur };
       if (!h.isin && inst.isin) inst.fill.isin = inst.isin;
       if (!h.name && name) inst.fill.name = name;
       if (existing.length && existing.reduce((s, t) => s + (t.type === 'buy' ? 1 : -1) * Number(t.qty || 0), 0) !== hq && newOps.length) inst.reasons.push('Historique existant incomplet : les opérations manquantes seront ajoutées.');
       return inst;
     });
     const sum = (f) => instruments.reduce((s, i) => s + f(i), 0);
-    const inc = instruments.filter((i) => i.include && i.status !== 'review');
+    const inc = instruments.filter((i) => i.include);
     const totals = {
       detected: ops.length,
       newTx: inc.reduce((s, i) => s + i.newOps.length, 0),
@@ -381,36 +461,41 @@
       keptPositions: instruments.filter((i) => i.status === 'holding').length,
       closed: inc.filter((i) => i.status === 'closed').length,
       archived: instruments.filter((i) => i.status === 'archive').length,
-      review: sum((i) => (i.status === 'review' ? i.ops.length : i.warnCount)),
-      reviewInstruments: instruments.filter((i) => i.status === 'review').length,
+      check: inc.filter((i) => i.status === 'check' || (i.status === 'archive' && i.check)).length,
+      review: sum((i) => i.warnCount),
       divergences: instruments.filter((i) => i.divergence).length,
-      fills: instruments.filter((i) => i.status === 'holding' && (i.fill.avgCost || i.fill.isin || i.fill.name)).length
+      fills: instruments.filter((i) => i.status === 'holding' && (i.fill.avgCost || i.fill.isin || i.fill.name)).length,
+      recomputed: instruments.filter((i) => i.recompute).length
     };
-    return { instruments, totals };
+    return { instruments, totals, reference: ref };
   }
+
+  const newHoldingFrom = (inst, led, idv, accountId) => ({ id: idv, ticker: inst.isin || inst.name, displayTicker: (inst.isin || inst.name).toUpperCase(), isin: inst.isin, name: inst.name, type: 'stock', quantity: led.qty,
+    avgCost: led.pru != null ? r4(led.pru) : null, costCurrency: inst.acctCur, currency: inst.currency === 'GBX' ? 'GBP' : (inst.currency || inst.acctCur), account: accountId, logo: null, source: 'degiro', derived: true, addedAt: led.first,
+    dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } });
+  const archiveFrom = (inst, led, idv, accountId, check) => ({ id: idv, ticker: inst.isin || inst.name, displayTicker: (inst.isin || inst.name).toUpperCase(), isin: inst.isin, name: inst.name, currency: inst.currency === 'GBX' ? 'GBP' : (inst.currency || inst.acctCur),
+    account: accountId, source: 'degiro', closedAt: led.last, firstAt: led.first, hist: null, check: check || undefined });
 
   /* Applique le plan (le premier argument est modifié). choices : { fill: bool, align: { clé: true }, off: { clé: true } }. */
   function apply(state, pl, choices, deps) {
     choices = choices || {}; const uid = deps.uid;
-    state.holdings = state.holdings || []; state.archive = state.archive || []; state.transactions = state.transactions || [];
-    const res = { tx: 0, created: [], archived: [], filled: 0, aligned: 0, reopened: 0, skipped: 0 };
+    state.holdings = state.holdings || []; state.archive = state.archive || []; state.transactions = state.transactions || []; state.corp = state.corp || [];
+    const res = { tx: 0, created: [], archived: [], checked: [], filled: 0, aligned: 0, reopened: 0, skipped: 0, recomputed: 0 };
     pl.instruments.forEach((inst) => {
-      if (inst.status === 'review' || !inst.include || (choices.off && choices.off[inst.key])) { res.skipped++; return; }
-      const led = inst.led, last = inst.ops.slice().sort(orderKey).pop();
+      if (!inst.include || (choices.off && choices.off[inst.key])) { res.skipped++; return; }
+      const led = inst.led;
       let id, label = inst.name || inst.isin, tickerLabel;
       const accountId = deps.account;
-      const newHolding = (idv) => ({ id: idv, ticker: inst.isin || inst.name, displayTicker: (inst.isin || inst.name).toUpperCase(), isin: inst.isin, name: inst.name, type: 'stock', quantity: led.qty,
-        avgCost: led.pru != null ? r4(led.pru) : null, costCurrency: inst.acctCur, currency: inst.currency === 'GBX' ? 'GBP' : (inst.currency || inst.acctCur), account: accountId, logo: null, source: 'degiro', addedAt: led.first,
-        dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } });
-      if (inst.status === 'create') { const h = newHolding(uid()); state.holdings.push(h); id = h.id; tickerLabel = h.displayTicker; res.created.push(h); }
+      if (inst.status === 'create') { const h = newHoldingFrom(inst, led, uid(), accountId); state.holdings.push(h); id = h.id; tickerLabel = h.displayTicker; res.created.push(h); }
       else if (inst.status === 'reopen') {
-        const a = inst.ref.ref, h = newHolding(a.id); Object.assign(h, { logo: a.logo || null, hist: a.hist, splits: a.splits, ticker: a.ticker || h.ticker, displayTicker: a.displayTicker || h.displayTicker, currency: a.currency || h.currency });
+        const a = inst.ref.ref, h = newHoldingFrom(inst, led, a.id, accountId); Object.assign(h, { logo: a.logo || null, hist: a.hist, splits: a.splits, ticker: a.ticker || h.ticker, displayTicker: a.displayTicker || h.displayTicker, currency: a.currency || h.currency });
         state.archive = state.archive.filter((x) => x.id !== a.id); state.holdings.push(h); id = h.id; tickerLabel = h.displayTicker; res.created.push(h); res.reopened++;
-      } else if (inst.status === 'closed') {
-        const a = { id: uid(), ticker: inst.isin || inst.name, displayTicker: (inst.isin || inst.name).toUpperCase(), isin: inst.isin, name: inst.name, currency: inst.currency === 'GBX' ? 'GBP' : (inst.currency || inst.acctCur), account: accountId, source: 'degiro', closedAt: led.last, firstAt: led.first, hist: null };
-        state.archive.push(a); id = a.id; tickerLabel = a.displayTicker; res.archived.push(a);
-      } else if (inst.status === 'archive') { id = inst.ref.ref.id; tickerLabel = inst.ref.ref.displayTicker; }
-      else {                                                  // position existante : jamais écrasée, sauf compléments / alignement choisis
+      } else if (inst.status === 'closed' || inst.status === 'check') {
+        const a = archiveFrom(inst, led, uid(), accountId, inst.check); state.archive.push(a); id = a.id; tickerLabel = a.displayTicker; (inst.status === 'check' ? res.checked : res.archived).push(a);
+      } else if (inst.status === 'archive') {
+        const a = inst.ref.ref; id = a.id; tickerLabel = a.displayTicker;
+        if (inst.check) a.check = inst.check; else delete a.check; a.closedAt = led.last; a.firstAt = led.first;
+      } else {                                                  // position existante : jamais écrasée, sauf compléments / alignement choisis
         const h = inst.ref.ref; id = h.id; tickerLabel = h.displayTicker || h.ticker;
         if (choices.fill !== false) {
           let n = 0;
@@ -419,17 +504,185 @@
           if (inst.fill.name && !h.name) { h.name = inst.fill.name; n++; }
           if (n) res.filled++;
         }
-        if (choices.align && choices.align[inst.key] && led.qty > EPS) { h.quantity = led.qty; if (led.pru != null) { h.avgCost = r4(led.pru); h.costCurrency = inst.acctCur; } res.aligned++; }
+        if (inst.recompute && led.qty > EPS && !(choices.noRecompute)) { h.quantity = led.qty; if (led.pru != null) { h.avgCost = r4(led.pru); h.costCurrency = inst.acctCur; } res.recomputed = (res.recomputed || 0) + 1; }
+        if (choices.align && choices.align[inst.key] && led.qty > EPS) { h.quantity = led.qty; if (led.pru != null) { h.avgCost = r4(led.pru); h.costCurrency = inst.acctCur; } h.derived = true; delete h.manual; res.aligned++; }
       }
       inst.newOps.forEach((o) => {
         state.transactions.push({ id: uid(), holdingId: id, ticker: tickerLabel, name: inst.name || label, isin: inst.isin || undefined, date: o.date, time: o.time || undefined, type: o.type, qty: o.qty, price: o.price, fees: o.fees == null ? 0 : o.fees, feesCur: o.acctCur,
-          currency: o.priceCur, amountAcct: o.amt, acctCur: o.acctCur, fxRate: o.fxRate == null ? undefined : o.fxRate, orderId: o.orderId || undefined, source: 'degiro', extId: o.extId });
+          currency: o.priceCur, amountAcct: o.amt, acctCur: o.acctCur, fxRate: o.fxRate == null ? undefined : o.fxRate, orderId: o.orderId || undefined, venue: o.venue || undefined, exchange: o.exchange || undefined, warn: o.warn && o.warn.length ? o.warn : undefined, source: 'degiro', extId: o.extId });
         res.tx++;
       });
     });
+    // opérations sur titres validées pendant l'import
+    (deps.corp || []).forEach((c) => { if (!state.corp.some((x) => x.isin === c.isin && x.date === c.date && x.kind === c.kind && x.ratio === c.ratio)) state.corp.push(Object.assign({ id: uid() }, c)); });
     return res;
   }
 
-  root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind };
+  /* ---------------------------------------------------------------
+     RÉÉVALUATION D'UN ACTIF (après validation d'un split, fusion d'ISIN, sortie, nouvelle référence…)
+     Les positions calculées par l'import (derived) sont RECALCULÉES depuis les transactions validées ; une position saisie ou modifiée à la main
+     (derived absent ou manual) n'est jamais touchée. Les identifiants sont conservés : l'historique reste relié.
+     --------------------------------------------------------------- */
+  function reevaluate(state, id, deps) {
+    const h = (state.holdings || []).find((x) => x.id === id), a = (state.archive || []).find((x) => x.id === id), inst = h || a;
+    const out = { id, changed: false, to: null };
+    if (!inst) return out;
+    const key = holdingIsin(inst) ? canon(state.isinAlias, holdingIsin(inst)) : 'N:' + norm(inst.name);
+    const { entries, cur } = entriesFor(state, inst), led = run(entries), ref = referenceOf(state, inst.account), v = verdict(led, key, ref);
+    out.led = led; out.verdict = v;
+    if (h) {
+      if (h.derived !== true || h.manual) return out;
+      if (v.code === 'open') {
+        if (!qtyEq(h.quantity, led.qty) || (led.pru != null && !(Math.abs((h.avgCost || 0) - led.pru) < 1e-4))) { h.quantity = led.qty; if (led.pru != null) { h.avgCost = r4(led.pru); h.costCurrency = cur; } out.changed = true; }
+      } else {
+        const arch = { id: h.id, ticker: h.ticker, displayTicker: h.displayTicker, isin: h.isin, name: h.name, currency: h.currency, account: h.account, source: h.source || 'degiro', closedAt: led.last, firstAt: led.first, hist: h.hist || null, splits: h.splits, logo: h.logo || null, marketAt: h.hist ? deps.today : undefined,
+          check: v.code === 'closed' ? undefined : { code: v.code, msg: v.msg } };
+        state.holdings = state.holdings.filter((x) => x.id !== h.id); state.archive.push(arch); out.changed = true; out.to = 'archive';
+      }
+    } else {
+      if (v.code === 'open') {
+        const nh = newHoldingFrom({ isin: a.isin, name: a.name, acctCur: cur, currency: a.currency }, led, a.id, a.account);
+        Object.assign(nh, { logo: a.logo || null, hist: a.hist, splits: a.splits, ticker: a.ticker || nh.ticker, displayTicker: a.displayTicker || nh.displayTicker, currency: a.currency || nh.currency });
+        state.archive = state.archive.filter((x) => x.id !== a.id); state.holdings.push(nh); out.changed = true; out.to = 'holding';
+      } else {
+        const chk = v.code === 'closed' ? undefined : { code: v.code, msg: v.msg };
+        if (JSON.stringify(a.check || null) !== JSON.stringify(chk || null)) { if (chk) a.check = chk; else delete a.check; out.changed = true; }
+        a.closedAt = led.last; a.firstAt = led.first;
+      }
+    }
+    return out;
+  }
+
+  /* Opération sur titres validée par l'utilisateur : enregistrée explicitement, puis l'actif est réévalué. */
+  function addCorp(state, c, deps) {
+    state.corp = state.corp || [];
+    if (state.corp.some((x) => x.isin === c.isin && x.date === c.date && x.kind === c.kind && x.ratio === c.ratio)) return { added: false };
+    state.corp.push(Object.assign({ id: deps.uid(), validated: true, at: deps.today }, c));
+    const ids = (state.holdings || []).concat(state.archive || []).filter((x) => canon(state.isinAlias, holdingIsin(x)) === canon(state.isinAlias, c.isin)).map((x) => x.id);
+    return { added: true, results: ids.map((id) => reevaluate(state, id, deps)) };
+  }
+  /* Changement d'ISIN / fusion : les transactions de « from » rejoignent « to » ; les imports futurs rattachent l'ancien ISIN au nouveau. */
+  function mergeInstruments(state, fromId, toId, deps) {
+    const from = (state.holdings || []).concat(state.archive || []).find((x) => x.id === fromId), to = (state.holdings || []).concat(state.archive || []).find((x) => x.id === toId);
+    if (!from || !to || from.id === to.id) return { ok: false, error: 'Actifs invalides.' };
+    if ((state.holdings || []).includes(from) && (from.derived !== true || from.manual)) return { ok: false, error: 'Cette position a été saisie ou modifiée à la main : elle n\'est pas fusionnée automatiquement.' };
+    const fi = holdingIsin(from), ti = holdingIsin(to);
+    if (!fi || !ti) return { ok: false, error: 'Les deux actifs doivent avoir un ISIN.' };
+    state.isinAlias = state.isinAlias || {}; state.isinAlias[fi] = ti;
+    (state.transactions || []).forEach((t) => { if (t.holdingId === from.id) { t.holdingId = to.id; t.ticker = to.displayTicker || to.ticker; t.mergedFrom = fi; } });
+    (state.corp || []).forEach((c) => { if (c.isin === fi) c.isin = ti; });
+    state.holdings = (state.holdings || []).filter((x) => x.id !== from.id); state.archive = (state.archive || []).filter((x) => x.id !== from.id);
+    return { ok: true, result: reevaluate(state, to.id, deps) };
+  }
+  /* Position calculée → archive (sans rien supprimer) : uniquement pour une position issue de l'import. */
+  function demote(state, id, code, msg, deps) {
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return { ok: false };
+    if (h.derived !== true) return { ok: false, error: 'Cette position a été saisie à la main : elle n\'est pas archivée automatiquement.' };
+    const led = run(entriesFor(state, h).entries);
+    state.holdings = state.holdings.filter((x) => x.id !== h.id);
+    state.archive.push({ id: h.id, ticker: h.ticker, displayTicker: h.displayTicker, isin: h.isin, name: h.name, currency: h.currency, account: h.account, source: h.source || 'degiro', closedAt: led.last, firstAt: led.first, hist: h.hist || null, splits: h.splits, logo: h.logo || null, marketAt: h.hist ? deps.today : undefined, check: code ? { code, msg } : undefined, userArchived: true });
+    return { ok: true };
+  }
+  /* Archive → position actuelle sur décision de l'utilisateur (quantité et PRU recalculés). */
+  function promote(state, id, deps) {
+    const a = (state.archive || []).find((x) => x.id === id); if (!a) return { ok: false };
+    const { entries, cur } = entriesFor(state, a), led = run(entries);
+    if (led.qty <= EPS) return { ok: false, error: 'La quantité calculée est nulle : rien à ajouter. Corrigez l\'historique d\'abord.' };
+    const nh = newHoldingFrom({ isin: a.isin, name: a.name, acctCur: cur, currency: a.currency }, led, a.id, a.account);
+    Object.assign(nh, { logo: a.logo || null, hist: a.hist, splits: a.splits, ticker: a.ticker || nh.ticker, displayTicker: a.displayTicker || nh.displayTicker, currency: a.currency || nh.currency, userPromoted: true });
+    state.archive = state.archive.filter((x) => x.id !== a.id); state.holdings.push(nh);
+    return { ok: true };
+  }
+
+  /* Relevé de portefeuille DEGIRO (positions réelles) : [{ isin, name, qty, cur }]. */
+  function parsePositions(rows) {
+    const h = findHeaderRow(rows); if (h < 0) return { positions: [], error: 'En-têtes non reconnus (attendus : produit, ISIN, quantité).' };
+    const head = rows[h], c = {}; head.forEach((cell, i) => { const r = roleOf(cell); if (r && c[r] === undefined) c[r] = i; });
+    if (c.isin === undefined || c.qty === undefined) return { positions: [], error: 'Colonnes ISIN et quantité introuvables.' };
+    const body = rows.slice(h + 1), dec = inferDecimal([].concat.apply([], body.slice(0, 300).map((r) => [r[c.qty]])));
+    const positions = [], skipped = [];
+    body.forEach((r, i) => {
+      const isin = String(r[c.isin] || '').trim().toUpperCase(), q = parseNumber(r[c.qty], dec), name = c.product !== undefined ? String(r[c.product] || '').trim() : '';
+      if (!isISIN(isin)) { if (name) skipped.push(name); return; }
+      if (isNaN(q)) { skipped.push(name || isin); return; }
+      const ex = positions.find((p) => p.isin === isin); if (ex) ex.qty = r8(ex.qty + q); else positions.push({ isin, name, qty: r8(q), cur: c.currency !== undefined ? String(r[c.currency] || '').trim() : '' });
+    });
+    return { positions: positions.filter((p) => p.qty > 0), skipped };
+  }
+
+  /* ---------------------------------------------------------------
+     DIAGNOSTIC : anomalies de l'historique enregistré. Chaque anomalie : actif, transactions, cause probable, action recommandée.
+     Rien n'est corrigé ici : les corrections incertaines restent à la main de l'utilisateur.
+     --------------------------------------------------------------- */
+  function diagnose(state, o) {
+    o = o || {}; const today = o.today || new Date().toISOString().slice(0, 10);
+    const items = [], rows = [], alias = state.isinAlias || {};
+    const insts = (state.holdings || []).map((h) => ({ h, kind: 'holding' })).concat((state.archive || []).map((h) => ({ h, kind: 'archive' })));
+    const push = (it) => items.push(Object.assign({ level: 'warn', txIds: [], act: [] }, it));
+    insts.forEach(({ h, kind }) => {
+      const isin = holdingIsin(h), key = isin ? canon(alias, isin) : 'N:' + norm(h.name), ref = referenceOf(state, h.account);
+      const { entries, cur, txs } = entriesFor(state, h);
+      if (!txs.length && !(kind === 'holding' && h.derived)) {
+        if (kind === 'holding') { const r = ref.map.get(key); rows.push({ id: h.id, isin, name: h.name || h.displayTicker, kind, app: Number(h.quantity) || 0, calc: null, ref: r ? r.qty : null, tx: 0, ok: null }); }
+        return;
+      }
+      const led = run(entries), r = ref.map.get(key), base = { instId: h.id, isin, name: h.name || h.displayTicker || isin };
+      const hq = kind === 'holding' ? Number(h.quantity) || 0 : 0;
+      rows.push({ id: h.id, isin, name: base.name, kind, app: hq, calc: led.qty, ref: r ? r.qty : null, tx: txs.length, ok: led.negative ? false : (kind === 'holding' ? (qtyEq(led.qty, hq) && (!r || ref.mode !== 'file' || qtyEq(r.qty, led.qty))) : (led.qty <= EPS || !!h.check ? null : false)) });
+      if (led.negative) {
+        const t = txs.filter((x) => x.type === 'sell').map((x) => x.id);
+        push(Object.assign({}, base, { level: 'error', code: 'negative', txIds: t, cause: 'Quantité calculée négative : les ventes dépassent les achats connus. Causes probables : split ou regroupement non présent dans le CSV, changement d\'ISIN (l\'achat est sous l\'ancien ISIN), historique incomplet.',
+          action: 'Rechercher un split (Yahoo), fusionner avec l\'ancien ou le nouvel ISIN, ou marquer une sortie hors transaction.', act: ['search_split', 'manual_split', 'alias', 'removal'] }));
+      }
+      if (kind === 'holding') {
+        if (h.derived && led.qty <= EPS && !led.negative) push(Object.assign({}, base, { code: 'zero_held', cause: 'Quantité calculée nulle (position entièrement vendue) mais l\'actif figure encore dans le portefeuille actuel.', action: 'Archiver : la position quitte le portefeuille actuel, ses opérations restent dans l\'historique.', act: ['archive'] }));
+        if (ref.map.size && isin && !r && h.derived) push(Object.assign({}, base, { level: 'error', code: 'not_in_ref', cause: 'Position calculée à partir de l\'historique, absente de vos positions réelles. Causes probables : ancienne position (changement d\'ISIN, fusion, radiation), vente ou split non visibles dans le CSV.',
+          action: 'Archiver cette position (rien n\'est supprimé), ou la fusionner avec l\'ISIN actuel.', act: ['archive', 'alias', 'removal'] }));
+        if (r && !led.negative && led.qty > EPS && !qtyEq(led.qty, r.qty)) push(Object.assign({}, base, { level: 'error', code: 'qty_ref', txIds: txs.map((x) => x.id), cause: 'Quantité calculée ' + led.qty + ' ≠ position réelle ' + r.qty + '. Cause probable : split ou regroupement absent du CSV (ou transaction manquante).',
+          action: 'Rechercher un split (Yahoo) ; sinon vérifier les transactions de cet actif.', act: ['search_split', 'manual_split'] }));
+        else if (hq > 0 && led.qty > EPS && !qtyEq(led.qty, hq) && !led.negative && (!r || !qtyEq(r.qty, led.qty)) && h.derived && !h.manual) push(Object.assign({}, base, { code: 'qty_app', cause: 'Quantité enregistrée ' + hq + ' ≠ quantité recalculée ' + led.qty + '.', action: 'Recalculer la position à partir des transactions.', act: ['recompute'] }));
+        const pr = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+        if (pr != null && led.pru != null && qtyEq(led.qty, hq) && (h.costCurrency || h.currency || 'EUR') === cur && Math.abs(pr - led.pru) > Math.max(0.005, pr * 0.002)) push(Object.assign({}, base, { code: 'pru_diff', cause: 'PRU enregistré ' + pr.toFixed(2) + ' ≠ PRU recalculé ' + led.pru.toFixed(2) + ' ' + cur + (h.derived ? '' : ' (PRU saisi à la main : conservé)') + '.',
+          action: h.derived && !h.manual ? 'Recalculer la position à partir des transactions.' : 'Aucune : le PRU saisi est protégé ; aligner seulement si vous le souhaitez.', act: h.derived && !h.manual ? ['recompute'] : [] }));
+      } else if (h.check && verdict(led, key, ref).code === 'open') {
+        push(Object.assign({}, base, { level: 'info', code: 'promote_ok', txIds: [], cause: 'Quantité calculée ' + led.qty + ' confirmée par vos positions réelles : cet actif peut rejoindre le portefeuille actuel.', action: 'Ajouter au portefeuille actuel (quantité et PRU calculés).', act: ['promote'] }));
+      } else if (h.check) push(Object.assign({}, base, { level: 'warn', code: 'check_' + h.check.code, cause: h.check.msg, txIds: txs.map((x) => x.id), action: h.check.code === 'unreferenced' ? 'Fusionner avec l\'ISIN actuel s\'il s\'agit d\'un changement d\'ISIN, marquer une sortie (radiation, offre, échange), ou l\'ajouter au portefeuille si c\'est bien une position réelle.' : h.check.code === 'qty_mismatch' ? 'Rechercher un split (Yahoo) ou en saisir un ; sinon vérifier les transactions manquantes.' : 'Rechercher un split (Yahoo), fusionner avec l\'ancien ou le nouvel ISIN, ou marquer une sortie hors transaction.', act: h.check.code === 'unreferenced' ? ['promote', 'alias', 'removal'] : ['search_split', 'manual_split', 'alias', 'removal', 'promote'] }));
+      // splits connus du marché, jamais appliqués sans validation
+      const first = led.first;
+      const cands = (h.splits || []).filter((s) => first && s.date >= first && s.date <= today && !(state.corp || []).some((c) => c.isin === key && c.kind === 'split' && Math.abs(Date.parse(c.date) - Date.parse(s.date)) < 5 * 86400000));
+      if (cands.length && (led.negative || (r && led.qty > EPS && !qtyEq(led.qty, r.qty)) || (kind === 'archive' && h.check))) {
+        const sim = run(entries.concat(cands.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null }))));
+        const coherent = !sim.negative && (r ? qtyEq(sim.qty, r.qty) : true);
+        push(Object.assign({}, base, { level: coherent ? 'info' : 'warn', code: 'split_candidate', cause: 'Split(s) trouvé(s) dans les données de marché : ' + cands.map((s) => s.ratio + ' pour 1 le ' + s.date).join(' ; ') + '. Avec ce split la quantité calculée serait ' + sim.qty + (r ? ' (position réelle : ' + r.qty + ')' : '') + (coherent ? ' : cohérent.' : ' : toujours incohérent.'),
+          action: coherent ? 'Valider le split pour recalculer la quantité et le PRU (le coût total reste inchangé).' : 'Vérifier avant d\'appliquer : le split seul ne suffit pas.', act: coherent ? ['apply_split'] : ['manual_split'], splits: cands, coherent }));
+      }
+      const bad = txs.filter((t) => !t.date || t.amountAcct == null || (t.source === 'degiro' && !t.isin && !isin));
+      if (bad.length) push(Object.assign({}, base, { code: 'tx_incomplete', txIds: bad.map((x) => x.id), cause: bad.length + ' transaction(s) sans date, sans montant ou sans ISIN : le PRU et la valorisation ne peuvent pas être calculés avec certitude.', action: 'Compléter ou supprimer ces transactions dans Historique → Opérations.' }));
+      const wn = txs.filter((t) => t.warn && t.warn.length);
+      if (wn.length) push(Object.assign({}, base, { level: 'info', code: 'tx_warn', txIds: wn.map((x) => x.id), cause: wn.length + ' transaction(s) importée(s) avec alerte : ' + Array.from(new Set([].concat.apply([], wn.map((x) => x.warn)))).slice(0, 3).join(' ; ') + '.', action: 'Contrôler ces lignes dans le CSV d\'origine.' }));
+      if (led.cycles > 1) push(Object.assign({}, base, { level: 'info', code: 'cycles', cause: 'Position clôturée puis rachetée : ' + led.cycles + ' cycles distincts, le PRU actuel ne reprend que le dernier cycle.', action: 'Aucune.' }));
+    });
+    // opérations sur titres repérées dans le CSV (jamais appliquées sans validation)
+    const impo = (state.imports || []).slice(-1)[0];
+    ((impo && impo.report && impo.report.corp) || []).forEach((c) => {
+      if (Array.isArray(c) || typeof c !== 'object') return;
+      const key = c.isin ? canon(alias, c.isin) : null, inst = key ? insts.find(({ h }) => canon(alias, holdingIsin(h)) === key) : null;
+      if ((state.corp || []).some((x) => x.isin === key && Math.abs(Date.parse(x.date) - Date.parse(c.date)) < 5 * 86400000)) return;
+      push({ level: 'warn', code: 'csv_corp', instId: inst ? inst.h.id : null, isin: c.isin || '', name: c.name || (inst && inst.h.name) || c.isin || '—', cause: 'Opération sur titres détectée dans le CSV le ' + c.date + ' : ' + c.desc + '. Elle n\'a pas été importée comme achat ou vente.',
+        action: c.ratio && c.isin ? 'Valider le split ×' + c.ratio + ' si c\'en est un ; sinon saisir la nature de l\'opération.' : 'Déterminer la nature de l\'opération (split, échange, livraison gratuite) et la saisir.', act: inst ? (c.ratio && c.isin ? ['apply_split', 'manual_split'] : ['manual_split', 'alias', 'removal']) : [], splits: c.ratio && c.isin ? [{ date: c.date, ratio: c.ratio }] : undefined });
+    });
+    // positions réelles absentes de l'application
+    const refs = referenceOf(state, o.account);
+    if (refs.mode === 'file') refs.map.forEach((p, isin) => { if (!insts.some(({ h }) => canon(alias, holdingIsin(h)) === isin && (h.kind !== 'archive'))) push({ level: 'warn', code: 'ref_missing', isin, name: p.name, instId: null, cause: 'Position réelle (' + p.qty + ') absente de l\'application.', action: 'Importer l\'historique ou ajouter la position (Mon portefeuille → Importer un relevé).' }); });
+    const order = { error: 0, warn: 1, info: 2 };
+    items.sort((a, b) => order[a.level] - order[b.level] || String(a.name).localeCompare(String(b.name)));
+    const imp = (state.imports || []).slice(-1)[0] || null;
+    return { items, rows, reference: { mode: refs.mode, count: refs.map.size, at: refs.at || null }, lastImport: imp ? { at: imp.at, name: imp.name, report: imp.report } : null,
+      counts: { error: items.filter((i) => i.level === 'error').length, warn: items.filter((i) => i.level === 'warn').length, info: items.filter((i) => i.level === 'info').length,
+        negative: rows.filter((r) => r.calc !== null && r.calc < -EPS).length, zeroHeld: items.filter((i) => i.code === 'zero_held').length } };
+  }
+
+  root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
+    holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

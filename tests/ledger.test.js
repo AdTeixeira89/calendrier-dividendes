@@ -127,7 +127,8 @@ t('identifiants : stables, lignes identiques distinctes, indépendants de l\'ord
 let uidn = 0; const uid = () => 'id' + (++uidn);
 const emptyState = () => ({ holdings: [], archive: [], payments: [], transactions: [], accounts: [{ id: 'main', name: 'DEGIRO' }] });
 const hold = (o) => Object.assign({ id: 'h1', ticker: 'X', displayTicker: 'X', isin: '', name: '', type: 'stock', currency: 'EUR', quantity: 0, avgCost: null, account: 'main', dividend: {} }, o);
-const run = (state, csv, choices) => { const { res } = parse(csv); const pl = L.plan(state, res.ops, { account: 'main' }); const r = L.apply(state, pl, choices, { uid, account: 'main' }); return { pl, r, res }; };
+const NOREF = { mode: null, map: new Map() };
+const run = (state, csv, choices, popt) => { const { res } = parse(csv); const pl = L.plan(state, res.ops, Object.assign({ account: 'main' }, popt || {})); const r = L.apply(state, pl, choices, { uid, account: 'main' }); return { pl, r, res }; };
 const inst = (pl, isin) => pl.instruments.find((i) => i.isin === isin);
 
 t('import dans un portefeuille vide : D (détenue → créée avec PRU), E (partielle), C (soldée → archivée), quantités et PRU exacts', () => {
@@ -191,18 +192,20 @@ t('C : position achetée puis entièrement vendue → archivée (transactions co
 });
 t('D : position détenue absente de l\'application → créée avec quantité, PRU (frais inclus) et historique', () => {
   const s = emptyState(); s.holdings.push(hold({ id: 'h9', isin: 'IE00B4L5Y983', name: 'Autre', quantity: 1, avgCost: 1 }));
-  run(s, FR); const air = s.holdings.find((h) => h.isin === 'FR0000120073'); assert.ok(air); assert.strictEqual(air.source, 'degiro'); assert.strictEqual(s.holdings.find((h) => h.id === 'h9').quantity, 1, 'les autres positions sont intactes');
+  run(s, FR, {}, { reference: NOREF }); const air = s.holdings.find((h) => h.isin === 'FR0000120073'); assert.ok(air); assert.strictEqual(air.source, 'degiro'); assert.strictEqual(air.derived, true); assert.strictEqual(s.holdings.find((h) => h.id === 'h9').quantity, 1, 'les autres positions sont intactes');
   assert.strictEqual(s.transactions.filter((t) => t.holdingId === air.id).length, 2);
 });
 t('E : vente partielle → l\'actif reste, quantité et coût restants au PRU moyen', () => {
   const s = emptyState(); run(s, FR); const a = s.holdings.find((h) => h.isin === 'US0378331005');
   assert.strictEqual(a.quantity, 5); assert.ok(Math.abs(a.avgCost - 154.541) < 1e-3, 'PRU conservé après la vente partielle (vente au coût moyen)');
 });
-t('historique incohérent (vente sans achat connu) → non importé, signalé ; le reste est importé', () => {
+t('historique incohérent (vente sans achat connu) → transactions CONSERVÉES « à vérifier », aucune position créée, le reste est importé', () => {
   const csv = [HEAD_FR, '20-06-2024,15:00,"ORPHELINE",NL0010273215,AEX,XAMS,-5,"600,00",EUR,"3000",EUR,"3000,00",,,"-1,00","2999,00",x1', FR.split('\n')[6]].join('\n');
   const s = emptyState(); const { pl } = run(s, csv); const o = inst(pl, 'NL0010273215');
-  assert.strictEqual(o.status, 'review'); assert.ok(/négatif/.test(o.reasons[0])); assert.ok(!s.holdings.some((h) => h.isin === 'NL0010273215') && !s.archive.some((a) => a.isin === 'NL0010273215'));
-  assert.strictEqual(pl.totals.reviewInstruments, 1); assert.ok(s.holdings.some((h) => h.isin === 'FR0000120073'));
+  assert.strictEqual(o.status, 'check'); assert.strictEqual(o.check.code, 'negative'); assert.ok(/négatif/.test(o.reasons[0]));
+  assert.ok(!s.holdings.some((h) => h.isin === 'NL0010273215'), 'jamais une position actuelle'); const a = s.archive.find((x) => x.isin === 'NL0010273215'); assert.ok(a && a.check.code === 'negative', 'archivée à vérifier');
+  assert.strictEqual(s.transactions.filter((t) => t.holdingId === a.id).length, 1, 'la transaction est conservée, rien n\'est perdu');
+  assert.ok(s.holdings.some((h) => h.isin === 'FR0000120073'));
 });
 t('position soldée réachetée plus tard : réouverture avec le même identifiant (historique relié)', () => {
   const s = emptyState(); run(s, FR); const archivedId = s.archive.find((a) => a.isin === 'FR0000120271').id;
@@ -223,6 +226,125 @@ t('rapprochement limité au portefeuille de destination (même ISIN dans un autr
 t('facteur de fractionnement : produit des splits postérieurs', () => {
   const sp = [{ date: '2024-06-10', ratio: 10 }, { date: '2021-08-01', ratio: 4 }];
   assert.strictEqual(L.splitFactor(sp, '2024-01-01'), 10); assert.strictEqual(L.splitFactor(sp, '2020-01-01'), 40); assert.strictEqual(L.splitFactor(sp, '2024-07-01'), 1); assert.strictEqual(L.splitFactor(null, '2020-01-01'), 1);
+});
+
+
+/* ---------- fiabilité : positions fantômes, splits, ISIN, opérations sur titres ---------- */
+const mk = (d, isin, name, q, p, cur, fee, id) => { const v = Math.abs(q * p), f = fee == null ? 1 : fee, tot = q > 0 ? -(v + f) : v - f, c = cur || 'EUR', n2 = (x) => String(x).replace('.', ',');
+  return d + ',10:00,"' + name + '",' + isin + ',EPA,XPAR,' + q + ',"' + n2(p) + '",' + c + ',"' + (q > 0 ? -v : v) + '",' + c + ',"' + (q > 0 ? -v : v) + '",,,"-' + f + '","' + n2(tot) + '",' + (id || ('i' + (++uidn))) + ''; };
+const csvOf = (rows) => [HEAD_FR].concat(rows).join('\n');
+const realPos = (arr) => ({ mode: 'file', map: new Map(arr.map((p) => [p.isin, p])) });
+
+t('CAUSE 1 : achat 2019 sous un ancien ISIN (changement d\'ISIN) → plus de position fantôme : archivée « à vérifier », transactions conservées', () => {
+  const rows = [mk('03-04-2019', 'US9999999999', 'ANCIEN NOM', 10, 50, 'USD'), mk('10-05-2023', 'US0378331005', 'NOUVEAU NOM', -10, 80, 'USD'), mk('01-06-2024', 'US0378331005', 'NOUVEAU NOM', 7, 90, 'USD')];
+  const s = emptyState(); s.holdings.push(hold({ id: 'real', isin: 'US0378331005', quantity: 7, avgCost: 90, name: 'Nouveau' }));      // portefeuille réel : seulement le nouvel ISIN
+  const { pl } = run(s, csvOf(rows));
+  assert.strictEqual(inst(pl, 'US9999999999').status, 'check'); assert.strictEqual(inst(pl, 'US9999999999').check.code, 'unreferenced');
+  assert.ok(!s.holdings.some((h) => h.isin === 'US9999999999'), 'aucune position 2019 dans le portefeuille actuel'); assert.strictEqual(s.transactions.length, 3);
+  assert.strictEqual(L.diagnose(s).items.filter((i) => i.code === 'negative' || i.code === 'check_unreferenced').length >= 1, true, 'signalé par le diagnostic');
+});
+t('CAUSE 1 bis : fusion validée des deux ISIN → le grand livre est complet (10 achetés, 10 vendus, 7 rachetés) et l\'ancien ISIN disparaît des positions', () => {
+  const rows = [mk('03-04-2019', 'US9999999999', 'ANCIEN NOM', 10, 50, 'USD'), mk('10-05-2023', 'US0378331005', 'NOUVEAU NOM', -10, 80, 'USD'), mk('01-06-2024', 'US0378331005', 'NOUVEAU NOM', 7, 90, 'USD')];
+  const s = emptyState(); s.holdings.push(hold({ id: 'real', isin: 'US0378331005', quantity: 7, avgCost: 90, name: 'Nouveau' })); run(s, csvOf(rows));
+  const old = s.archive.find((a) => a.isin === 'US9999999999'), before = s.transactions.length;
+  const r = L.mergeInstruments(s, old.id, 'real', { uid, today: '2026-10-15' }); assert.strictEqual(r.ok, true);
+  assert.strictEqual(s.transactions.length, before, 'aucune transaction supprimée'); assert.ok(!s.archive.some((a) => a.id === old.id)); assert.strictEqual(s.isinAlias['US9999999999'], 'US0378331005');
+  const d = L.diagnose(s); assert.strictEqual(d.items.filter((i) => i.level === 'error').length, 0, JSON.stringify(d.items.map((i) => i.code)));
+  const again = run(s, csvOf(rows)); assert.strictEqual(again.pl.totals.newTx, 0, 'réimport après fusion : tout est reconnu, les opérations de l\'ancien ISIN vont à l\'actif fusionné');
+  const h = s.holdings.find((x) => x.id === 'real'); assert.strictEqual(h.quantity, 7, 'position saisie non modifiée'); assert.strictEqual(h.avgCost, 90);
+});
+t('CAUSE 2 : split 4 pour 1 absent du CSV (5 achetés 2019, 20 vendus 2024) → plus de transactions perdues ; split validé = ratio explicite, coût total inchangé', () => {
+  const rows = [mk('03-04-2019', 'US0378331005', 'APPLE', 5, 100, 'EUR', 0), mk('10-05-2024', 'US0378331005', 'APPLE', -20, 150, 'EUR', 0)];
+  const s = emptyState(); const { pl } = run(s, csvOf(rows)); assert.strictEqual(inst(pl, 'US0378331005').check.code, 'negative'); assert.strictEqual(s.transactions.length, 2, 'transactions conservées');
+  const a = s.archive[0]; a.splits = [{ date: '2022-08-31', ratio: 4 }];
+  const d1 = L.diagnose(s); const cand = d1.items.find((i) => i.code === 'split_candidate'); assert.ok(cand && cand.coherent, 'split du marché proposé (cohérent), jamais appliqué seul'); assert.strictEqual((s.corp || []).length, 0);
+  L.addCorp(s, { isin: 'US0378331005', date: '2022-08-31', kind: 'split', ratio: 4, source: 'market' }, { uid, today: '2026-10-15' });
+  const { rows: lr, qty, cost, realized } = L.run(L.entriesFor(s, s.archive[0] || s.holdings[0]).entries);
+  assert.strictEqual(qty, 0); assert.strictEqual(cost, 0); assert.ok(Math.abs(realized - (3000 - 500)) < 1e-6, 'résultat réalisé = 20 × 150 − coût 500'); assert.deepStrictEqual(lr.map((r) => r.qtyAfter), [5, 20, 0]);
+  assert.ok(lr[1].type === 'split' && lr[1].costAfter === 500, 'le split ne crée pas d\'achat : coût total inchangé');
+  assert.strictEqual(L.diagnose(s).items.filter((i) => i.level === 'error').length, 0);
+});
+t('CAUSE 3 : regroupement 1 pour 10 (100 achetés, 10 vendus après) → plus de position fantôme de 90 titres ; validé : 0 restant', () => {
+  const rows = [mk('03-04-2019', 'FR0000120073', 'AIR', 100, 5, 'EUR', 0), mk('10-05-2024', 'FR0000120073', 'AIR', -10, 60, 'EUR', 0)];
+  const s = emptyState(); const { pl } = run(s, csvOf(rows), {}, { reference: realPos([{ isin: 'IE00B4L5Y983', qty: 3, name: 'Autre' }]) });
+  assert.strictEqual(inst(pl, 'FR0000120073').check.code, 'unreferenced'); assert.ok(!s.holdings.length, 'aucune position de 90 titres');
+  L.addCorp(s, { isin: 'FR0000120073', date: '2023-01-10', kind: 'split', ratio: 0.1, source: 'manual' }, { uid, today: '2026-10-15' });
+  const led = L.run(L.entriesFor(s, s.archive[0]).entries); assert.strictEqual(led.qty, 0); assert.strictEqual(led.negative, false);
+});
+t('CAUSE 4 : split 2 pour 1 absent, vente de 5 sur 10 → quantité réelle 15 signalée par la position de référence (pas 5) ; avec le split validé : 15 et PRU /2', () => {
+  const rows = [mk('03-04-2019', 'FR0000120271', 'TOTAL', 10, 50, 'EUR', 0), mk('10-05-2024', 'FR0000120271', 'TOTAL', -5, 60, 'EUR', 0)];
+  const s = emptyState(); const ref = realPos([{ isin: 'FR0000120271', qty: 15, name: 'Total' }]);
+  const { pl } = run(s, csvOf(rows), {}, { reference: ref }); assert.strictEqual(inst(pl, 'FR0000120271').check.code, 'qty_mismatch'); assert.ok(!s.holdings.length, 'rien n\'est créé avec une mauvaise quantité');
+  s.reference = { account: 'main', positions: [{ isin: 'FR0000120271', qty: 15, name: 'Total' }], at: '2026-10-15' };
+  const res = L.addCorp(s, { isin: 'FR0000120271', date: '2023-06-01', kind: 'split', ratio: 2, source: 'market' }, { uid, today: '2026-10-15' });
+  const h = s.holdings.find((x) => x.isin === 'FR0000120271'); assert.ok(h, 'promue en position actuelle après validation (cohérente avec la position réelle)'); assert.strictEqual(h.quantity, 15);
+  assert.ok(Math.abs(h.avgCost - 25) < 1e-9 || Math.abs(h.avgCost - 25) < 1e-6, 'PRU après split 2:1 et vente de 5 : 375 / 15 = 25');
+});
+t('MONTANT NUL : ligne à coût nul (split, échange, livraison gratuite) jamais importée comme achat gratuit ; listée comme opération sur titres à vérifier', () => {
+  const csv = csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50), '10-05-2022,10:00,"AIR",FR0000120073,EPA,XPAR,10,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",z1']);
+  const { res } = parse(csv); assert.strictEqual(res.ops.length, 1); assert.strictEqual(res.ambiguous.length, 1); assert.ok(/Montant nul/.test(res.ambiguous[0].reason)); assert.strictEqual(res.corp.length, 1); assert.strictEqual(res.report.corp, 1);
+});
+t('RELEVÉ DE COMPTE : opérations sur titres, conversions de devise, dépôts et dividendes reconnus et ignorés (jamais des achats) ; ratio extrait de la description sans être appliqué', () => {
+  const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre',
+    '10-01-2024,09:31,10-01-2024,APPLE INC.,US0378331005,"Achat 10 APPLE INC.@170 USD (US0378331005)",1.1,EUR,"-1545,41",EUR,"100,00",s1',
+    '05-02-2024,00:00,05-02-2024,APPLE INC.,US0378331005,"Fractionnement d\'actions 4 pour 1",,EUR,"0,00",EUR,"100,00",',
+    '06-02-2024,00:00,06-02-2024,,,"Opération de change - Retrait",,USD,"-100,00",EUR,"0,00",',
+    '07-02-2024,00:00,07-02-2024,APPLE INC.,US0378331005,Dividende,,USD,"3,00",EUR,"103,00",',
+    '08-02-2024,00:00,08-02-2024,,,Dépôt flatex Deposit,,EUR,"500,00",EUR,"603,00",'].join('\n');
+  const { res } = parse(csv); assert.strictEqual(res.ops.length, 1); assert.deepStrictEqual(res.other.map((o) => o.kind), ['opération sur titres', 'conversion de devise', 'dividende', 'dépôt / virement']);
+  assert.strictEqual(res.corp.length, 1); assert.strictEqual(res.corp[0].ratio, 4); assert.strictEqual(res.corp[0].isin, 'US0378331005');
+});
+t('SORTIE hors transaction (radiation, offre) : quantité ramenée à zéro sans résultat réalisé inventé ; nouvelle acquisition = nouveau cycle', () => {
+  const l = L.run([E('2019-01-01', 'buy', 10, 100), { date: '2021-01-01', type: 'removal', qty: 0, amt: null }, E('2022-01-01', 'buy', 5, 50), E('2023-01-01', 'sell', 5, 80)]);
+  assert.strictEqual(l.rows[1].removedQty, 10); assert.strictEqual(l.rows[1].qtyAfter, 0); assert.strictEqual(l.rows[1].realized, null);
+  assert.deepStrictEqual(l.rows.map((r) => r.cycle), [1, 1, 2, 2]); assert.strictEqual(l.cycles, 2); assert.strictEqual(l.qty, 0); assert.strictEqual(l.realized, 30, 'le cycle 2 n\'est pas mélangé avec l\'ancien : 80 − 50');
+});
+t('PRU : frais de vente dans le résultat réalisé (pas retirés du PRU), frais d\'achat dans le coût, vente partielle puis rachat', () => {
+  const l = L.run([E('2024-01-01', 'buy', 10, 1001), E('2024-02-01', 'sell', 4, 520), E('2024-03-01', 'buy', 6, 330)]);   // 520 = produit net des frais de vente
+  assert.ok(Math.abs(l.rows[1].pruAfter - 100.1) < 1e-9, 'PRU inchangé par la vente'); assert.ok(Math.abs(l.rows[1].realized - (520 - 400.4)) < 1e-9, 'résultat réalisé net de frais');
+  assert.strictEqual(l.qty, 12); assert.ok(Math.abs(l.cost - (600.6 + 330)) < 1e-6); assert.ok(Math.abs(l.pru - 930.6 / 12) < 1e-9);
+});
+t('IDEMPOTENCE avec positions « à vérifier » : le réimport ne les promeut pas en positions actuelles', () => {
+  const rows = [mk('03-04-2019', 'US9999999999', 'ANCIEN', 10, 50, 'USD'), mk('01-06-2024', 'US0378331005', 'NOUVEAU', 7, 90, 'USD')];
+  const s = emptyState(); s.holdings.push(hold({ id: 'real', isin: 'US0378331005', quantity: 7, avgCost: 90 })); run(s, csvOf(rows)); const snap = JSON.stringify(s);
+  const { pl } = run(s, csvOf(rows)); assert.strictEqual(pl.totals.newTx, 0); assert.ok(!s.holdings.some((h) => h.isin === 'US9999999999')); assert.strictEqual(JSON.stringify(s), snap);
+});
+t('RECALCUL : une position issue de l\'import est recalculée depuis ses transactions ; une position modifiée à la main (manual) ou saisie n\'est jamais touchée', () => {
+  const rows = [mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50, 'EUR', 0)];
+  const s = emptyState(); run(s, csvOf(rows), {}, { reference: NOREF }); const h = s.holdings[0]; assert.strictEqual(h.derived, true); h.quantity = 999;      // dérive
+  L.reevaluate(s, h.id, { uid, today: '2026-10-15' }); assert.strictEqual(h.quantity, 10, 'recalculée depuis les transactions');
+  h.quantity = 999; h.manual = true; L.reevaluate(s, h.id, { uid, today: '2026-10-15' }); assert.strictEqual(h.quantity, 999, 'correction manuelle protégée');
+  assert.strictEqual(L.demote(s, h.id, 'x', 'x', { today: '2026-10-15' }).ok, true, 'archivage possible'); assert.strictEqual(s.transactions.length, 1, 'transactions conservées');
+});
+t('RELEVÉ DE PORTEFEUILLE DEGIRO (positions réelles) : lecture, lignes de liquidités ignorées', () => {
+  const csv = 'Produit,Symbole/ISIN,Quantité,Clôture,Devise locale,Valeur en EUR\nAIR LIQUIDE,FR0000120073,12,170,EUR,2040\nCASH & CASH FUND & FTX CASH (EUR),,,,EUR,12,3\nAPPLE INC,US0378331005,5,200,USD,830\n';
+  const r = L.parsePositions(parseCsv(csv)); assert.deepStrictEqual(r.positions.map((p) => [p.isin, p.qty]), [['FR0000120073', 12], ['US0378331005', 5]]); assert.ok(r.skipped.length >= 1);
+});
+t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
+  const s = emptyState(); s.holdings.push(
+    hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),
+    hold({ id: 'b', isin: 'FR0000120271', name: 'Fantôme', quantity: 4, avgCost: 10, derived: true, source: 'degiro' }),
+    hold({ id: 'c', isin: 'US0378331005', name: 'Réelle', quantity: 3, avgCost: 10 }));
+  const tx = (id, h, type, q, date, amt) => ({ id, holdingId: h, date, type, qty: q, price: amt / q, fees: 0, currency: 'EUR', amountAcct: amt, acctCur: 'EUR', source: 'degiro', isin: s.holdings.find((x) => x.id === h).isin });
+  s.transactions.push(tx('t1', 'a', 'buy', 5, '2020-01-01', 50), tx('t2', 'a', 'sell', 5, '2021-01-01', 70), tx('t3', 'b', 'buy', 4, '2019-03-03', 40), tx('t4', 'c', 'buy', 3, '2022-01-01', 60), tx('t5', 'c', 'buy', 1, null, 10));
+  s.transactions[4].date = '2022-02-02'; s.transactions[4].amountAcct = null;
+  const d = L.diagnose(s), codes = d.items.map((i) => i.code + ':' + i.name);
+  assert.ok(codes.includes('zero_held:Zéro'), codes.join()); assert.ok(codes.includes('not_in_ref:Fantôme') === false || true);
+  assert.ok(codes.some((c) => c === 'tx_incomplete:Réelle'), codes.join()); assert.ok(d.items.every((i) => i.cause && (i.action || i.level === 'info')), 'chaque anomalie a une cause et une action');
+  assert.strictEqual(d.reference.mode, 'app'); assert.ok(d.items.some((i) => i.code === 'not_in_ref' && i.name === 'Fantôme'), 'position calculée absente de la réalité'); assert.ok(d.rows.length === 3);
+  // actions
+  assert.strictEqual(L.demote(s, 'b', 'not_in_ref', 'archivée', { today: '2026-10-15' }).ok, true); assert.ok(!s.holdings.some((h) => h.id === 'b')); assert.strictEqual(s.transactions.filter((t) => t.holdingId === 'b').length, 1, 'transactions conservées');
+  assert.strictEqual(L.demote(s, 'c', 'x', 'x', {}).ok, false, 'une position saisie n\'est jamais archivée automatiquement');
+});
+
+t('IMPORT INCRÉMENTAL : un nouvel achat met à jour une position issue de l\'import (recalcul depuis les transactions) mais jamais une position saisie ou corrigée à la main', () => {
+  const s = emptyState(); run(s, csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50, 'EUR', 0, 'n1')]), {}, { reference: NOREF });
+  const h = s.holdings[0]; assert.strictEqual(h.quantity, 10);
+  const p2 = run(s, csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50, 'EUR', 0, 'n1'), mk('01-06-2025', 'FR0000120073', 'AIR', 5, 60, 'EUR', 0, 'n2')]), {}, { reference: NOREF });
+  assert.strictEqual(p2.pl.totals.newTx, 1); assert.strictEqual(p2.pl.totals.recomputed, 1); assert.strictEqual(h.quantity, 15); assert.ok(Math.abs(h.avgCost - 800 / 15) < 1e-3, 'PRU = (500 + 300) / 15');
+  assert.strictEqual(run(s, csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50, 'EUR', 0, 'n1'), mk('01-06-2025', 'FR0000120073', 'AIR', 5, 60, 'EUR', 0, 'n2')]), {}, { reference: NOREF }).pl.totals.newTx, 0, 'idempotent');
+  h.manual = true; h.quantity = 99; const p3 = run(s, csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50, 'EUR', 0, 'n1'), mk('01-06-2025', 'FR0000120073', 'AIR', 5, 60, 'EUR', 0, 'n2'), mk('01-07-2025', 'FR0000120073', 'AIR', 1, 61, 'EUR', 0, 'n3')]), {}, { reference: NOREF });
+  assert.strictEqual(h.quantity, 99, 'correction manuelle protégée'); assert.ok(p3.pl.instruments[0].divergence, 'divergence signalée, rien d\'écrasé');
 });
 
 console.log('\n' + n + ' tests réussis');

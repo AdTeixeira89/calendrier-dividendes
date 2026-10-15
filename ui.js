@@ -187,29 +187,31 @@ const Tbl = {
   inst: {},
   st(id) { view.tables = view.tables || {}; return (view.tables[id] = view.tables[id] || { sel: new Set(), sortKey: null, sortDir: 1, shown: 0 }); },
   visibleKeys(cfg) {
-    const prefs = (state.settings.columns || {})[cfg.id];
+    const prefs = (state.settings.columns || {})[cfg.prefId || cfg.id];
     const known = new Set(cfg.columns.map((c) => c.key));
-    if (Array.isArray(prefs)) return prefs.filter((k) => known.has(k));
-    return cfg.columns.filter((c) => c.essential).map((c) => c.key);
+    let keys = Array.isArray(prefs) ? prefs.filter((k) => known.has(k)) : cfg.columns.filter((c) => c.essential).map((c) => c.key);
+    (cfg.forceKeys || []).forEach((k) => { if (known.has(k) && keys.indexOf(k) < 0) keys = keys.concat([k]); });
+    return keys;
   },
   menuHtml(cfg) {
     const vis = new Set(Tbl.visibleKeys(cfg));
-    let h = '<div class="dd"><button class="btn" type="button" data-dd aria-haspopup="true">' + icon('columns') + 'Colonnes à afficher</button><div class="dd-panel hide" data-cols="' + esc(cfg.id) + '">';
+    let h = '<div class="dd"><button class="btn" type="button" data-dd aria-haspopup="true">' + icon('columns') + 'Colonnes à afficher</button><div class="dd-panel hide" data-cols="' + esc(cfg.prefId || cfg.id) + '">';
     let grp = null;
     cfg.columns.forEach((c) => {
       const g = c.essential ? 'Essentielles' : 'Facultatives';
       if (g !== grp) { h += '<div class="grp">' + g + '</div>'; grp = g; }
       h += '<label class="chk"><input type="checkbox" data-col="' + esc(c.key) + '" ' + (vis.has(c.key) ? 'checked' : '') + '><span>' + esc(c.label) + '</span></label>';
     });
-    h += '<div class="dd-foot"><button class="link-btn" type="button" data-cols-reset="' + esc(cfg.id) + '">Par défaut</button><button class="link-btn" type="button" data-cols-all="' + esc(cfg.id) + '">Tout afficher</button></div></div></div>';
+    h += '<div class="dd-foot"><button class="link-btn" type="button" data-cols-reset="' + esc(cfg.prefId || cfg.id) + '">Par défaut</button><button class="link-btn" type="button" data-cols-all="' + esc(cfg.prefId || cfg.id) + '">Tout afficher</button></div></div></div>';
     return h;
   },
   setColumns(id, keys) {
     state.settings.columns = state.settings.columns || {};
     if (keys === null) delete state.settings.columns[id]; else state.settings.columns[id] = keys;
     saveState();
-    const i = Tbl.inst[id]; if (i) Tbl.render(i.host, i.cfg);
+    Object.keys(Tbl.inst).forEach((k) => { const i = Tbl.inst[k]; if (i && (i.cfg.prefId || i.cfg.id) === id && i.host && i.host.isConnected) Tbl.render(i.host, i.cfg); });
   },
+  instByPref(id) { return Tbl.inst[id] || Object.keys(Tbl.inst).map((k) => Tbl.inst[k]).find((i) => i && (i.cfg.prefId || i.cfg.id) === id && i.host && i.host.isConnected) || null; },
   selected(id) { return Array.from(Tbl.st(id).sel); },
   clearSel(id) { Tbl.st(id).sel.clear(); const i = Tbl.inst[id]; if (i) Tbl.render(i.host, i.cfg); },
 
@@ -292,7 +294,7 @@ const Tbl = {
 document.addEventListener('change', (e) => {
   const t = e.target;
   if (t.matches && t.matches('[data-cols] [data-col]')) {
-    const id = t.closest('[data-cols]').dataset.cols, inst = Tbl.inst[id]; if (!inst) return;
+    const id = t.closest('[data-cols]').dataset.cols, inst = Tbl.instByPref(id); if (!inst) return;
     const keys = $$('[data-cols="' + id + '"] [data-col]').filter((c) => c.checked).map((c) => c.dataset.col);
     Tbl.setColumns(id, keys);
   }
@@ -300,7 +302,7 @@ document.addEventListener('change', (e) => {
 document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-cols-reset]'), a = e.target.closest('[data-cols-all]');
   if (r) { Tbl.setColumns(r.dataset.colsReset, null); if (typeof renderPage === 'function') renderPage(); }
-  if (a) { const i = Tbl.inst[a.dataset.colsAll]; if (i) { Tbl.setColumns(i.cfg.id, i.cfg.columns.map((c) => c.key)); if (typeof renderPage === 'function') renderPage(); } }
+  if (a) { const i = Tbl.instByPref(a.dataset.colsAll); if (i) { Tbl.setColumns(i.cfg.prefId || i.cfg.id, i.cfg.columns.map((c) => c.key)); if (typeof renderPage === 'function') renderPage(); } }
 });
 
 /* ---------- infobulles : survol (souris) ou toucher (téléphone) ----------
@@ -397,7 +399,7 @@ function simpleBars(items, cur, label) {
 
 /* Courbe (aire + ligne) avec zones de survol / toucher. points : [{ label, value }], ref : ligne de référence facultative. */
 function lineChart(o) {
-  const W = 640, H = 220, L = 52, R = 10, T = 12, B = 26, pts = o.points, n = pts.length, mask = !!o.mask;
+  const W = 640, H = o.h || 220, L = 52, R = 10, T = 12, B = 26, pts = o.points, n = pts.length, mask = !!o.mask;
   if (n < 2) return '<div class="muted" style="padding:24px 0;text-align:center">' + esc(o.empty || 'Pas assez de données pour tracer la courbe.') + '</div>';
   const vals = pts.map((p) => p.value).concat(o.ref ? [o.ref.value] : [], o.costLine ? pts.map((p) => p.cost) : [], o.zero ? [0] : []);
   let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);

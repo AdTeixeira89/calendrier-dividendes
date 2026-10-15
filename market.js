@@ -82,6 +82,16 @@
       .map((s) => ({ date: new Date(s.date * 1000).toISOString().slice(0, 10), ratio: Math.round(s.numerator / s.denominator * 1e6) / 1e6 })).filter((s) => s.ratio !== 1).sort((a, b) => (a.date < b.date ? -1 : 1));
   }
 
+  /* Clôture de la séance précédente (variation journalière) : dernier cours QUOTIDIEN antérieur au jour du dernier cours ; null si la source n'est pas quotidienne. */
+  function prevCloseOf(res, meta, pence) {
+    const ts = res.timestamp || [], cl = ((res.indicators || {}).quote || [{}])[0].close || [];
+    if (!meta || !meta.regularMarketTime || ts.length < 5) return { prevClose: null, prevCloseAt: null };
+    const day = (t) => new Date(t * 1000).toISOString().slice(0, 10), today = day(meta.regularMarketTime);
+    const gaps = []; for (let i = Math.max(1, ts.length - 20); i < ts.length; i++) gaps.push((ts[i] - ts[i - 1]) / 86400); gaps.sort((a, b) => a - b);
+    if (gaps[Math.floor(gaps.length / 2)] > 5) return { prevClose: null, prevCloseAt: null };               // mensuel / hebdomadaire : pas de clôture précédente fiable
+    for (let i = ts.length - 1; i >= 0; i--) if (day(ts[i]) < today && cl[i] > 0) return { prevClose: Math.round((pence ? cl[i] / 100 : cl[i]) * 10000) / 10000, prevCloseAt: day(ts[i]) };
+    return { prevClose: null, prevCloseAt: null };
+  }
   const withDaily = (mo, d) => { if (mo && d) mo.d = d; return mo; };
 
   function detectFrequency(isoDates) {
@@ -162,12 +172,21 @@
         instrumentType: meta.instrumentType || null,        // EQUITY | ETF | …
         price: meta.regularMarketPrice > 0 ? (pence ? meta.regularMarketPrice / 100 : meta.regularMarketPrice) : null,
         priceAt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
-        hist: withDaily(monthlySeries(res, pence), dailySeries(res, pence)), splits: splitList(res), sector, industry,
+        hist: withDaily(monthlySeries(res, pence), dailySeries(res, pence)), splits: splitList(res), sector, industry, ...prevCloseOf(res, meta, pence),
         dividends: divs
       };
     }
 
-    return { call, search, resolveSymbol, fetchAsset };
+    /* Fractionnements d'un actif (Yahoo) : [{ date, ratio }]. Un ancien relais ne les renvoie pas (liste vide). */
+    async function fetchSplits(input, nameHint) {
+      const symbol = await resolveSymbol(input, nameHint);
+      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=max&interval=1mo');
+      const res = data.chart && data.chart.result && data.chart.result[0];
+      if (!res) throw new Error('Symbole inconnu.');
+      return { symbol, splits: splitList(res) };
+    }
+
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
@@ -200,6 +219,8 @@
     if (a.price > 0) { h.price = a.price; h.priceAt = a.priceAt || nowISO; }
     if (a.hist) h.hist = a.hist;
     if (a.splits) h.splits = a.splits;
+    if (a.instrumentType) h.instrumentType = a.instrumentType;
+    if ('prevClose' in a) { h.prevClose = a.prevClose; h.prevCloseAt = a.prevCloseAt || null; }
     if (!h.geoLocked) {     // secteur et pays : sauf si vous les avez saisis vous-même
       if (a.sector) { h.sector = a.sector; h.industry = a.industry || h.industry || null; }
       else if (a.instrumentType === 'ETF' && !h.sector) h.sector = 'ETF';

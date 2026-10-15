@@ -31,6 +31,7 @@ function wireDo(host) {
     else if (a === 'import') openImportPositions();
     else if (a === 'import-tx') openImportTransactions();
     else if (a === 'import-degiro') openImportDegiro();
+    else if (a === 'check-history') openDiagnostic();
     else if (a === 'export-csv') openCsvExport();
     else if (a === 'refresh') refreshMarket(visibleHoldings());
     else if (a === 'add-payment') openPaymentModal(null);
@@ -150,6 +151,8 @@ function portfolioColumns(nextMap, wMap) {
       html: (h) => '<button class="asset" type="button" data-open="' + esc(h.id) + '">' + avatar(h.displayTicker || h.ticker, h.logo, '', h.isin) + '<span><span class="nm">' + esc(h.name || h.displayTicker || h.ticker) + '</span><span class="tkr">' + esc(h.displayTicker || h.ticker) + '</span></span></button>' },
     { key: 'account', label: 'Compte', sort: (h) => accountName(h.account), html: (h) => esc(accountName(h.account)) },
     { key: 'type', label: 'Type', sort: (h) => h.type, html: (h) => esc(Engine.TYPES[h.type] || 'Action') },
+    { key: 'category', label: 'Catégorie', sort: (h) => Engine.category(h), html: (h) => '<select class="cat-sel" data-cat="' + esc(h.id) + '" aria-label="Catégorie de ' + esc(h.name || h.ticker) + '">' + (Engine.category(h) === 'unknown' ? '<option value="" selected>À classer…</option>' : '') +
+      Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '"' + (Engine.category(h) !== 'unknown' && h.type === k ? ' selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (h) => h.quantity, html: (h) => fmtNum(h.quantity) },
     { key: 'cost', label: 'Prix de revient', align: 'r', sort: (h) => h.avgCost, html: (h) => h.avgCost == null ? '—' : fmtMoney(h.avgCost, Engine.costCur(h)) },
     { key: 'invested', label: 'Investi', essential: true, align: 'r', sort: (h) => Engine.invested(h), html: (h) => Engine.invested(h) == null ? '—' : fmtMoney(Engine.invested(h), Engine.costCur(h)) },
@@ -200,6 +203,12 @@ function portfolioSummaryHtml(perf) {
     kpiCard('Rendement total', tr === null ? '—' : fmtPct(tr, 1, true), tr === null ? 'Plus-value + dividendes perçus' : 'Plus-value + ' + money(div, 0) + ' de dividendes perçus (vérifiés)', tr !== null ? (tr >= 0 ? 'income' : 'neg') : '') + '</div>';
 }
 
+/* Bandeau d'alerte : anomalies de l'historique (positions fantômes, quantités négatives, écarts avec les positions réelles…). */
+function diagBannerHtml() {
+  if (!state.transactions.length) return '';
+  const d = Ledger.diagnose(state, { today: todayISO() }), n = d.counts.error;
+  return n ? '<div class="notice warn" style="margin-bottom:12px"><span><b>' + n + ' anomalie(s)</b> dans l\'historique des transactions (position absente de vos positions réelles, quantité négative ou écart de quantité).</span><button class="btn sm" type="button" data-do="check-history">Contrôler l\'historique</button></div>' : '';
+}
 function renderPortfolio(host) {
   if (view.port.tab === 'ops') return renderOperations(host);
   if (view.port.tab === 'closed') return renderClosed(host);
@@ -207,28 +216,41 @@ function renderPortfolio(host) {
   const nextMap = nextByHolding();
   const perfAll = Engine.performance(state, convert, visibleIds()), wMap = {}; perfAll.rows.forEach((r) => { if (r.weight !== null) wMap[r.id] = r.weight; });
   const cols = portfolioColumns(nextMap, wMap);
-  const cfg = { id: 'portfolio', columns: cols, rows: [], getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
-    onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids),
-    empty: '<div class="card empty"><h3>Aucun actif ne correspond</h3><p>Modifiez la recherche ou les filtres.</p></div>',
-    footer: (rows) => {
-      const inv = Engine.investedTotal({ holdings: rows }, convert, null);
-      const run = Engine.runRate({ holdings: rows }, 'gross', convert, null);
-      const pv = Engine.portfolioValue({ holdings: rows }, convert, null), un = Engine.unrealized({ holdings: rows }, convert, null);
-      return { asset: rows.length + ' actif(s)', invested: money(inv.cost, 0), value: money(pv.total, 0), gain: un.count ? '<span class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + (un.gain >= 0 ? '+' : '') + money(un.gain, 0) + '</span>' : '—', gainpct: un.pct === null ? '—' : fmtPct(un.pct, 1, true), annual: money(run.total, 0) };
-    } };
-  cfg.rows = filteredHoldings();
+  const footer = (rows) => {
+    const inv = Engine.investedTotal({ holdings: rows }, convert, null);
+    const run = Engine.runRate({ holdings: rows }, 'gross', convert, null);
+    const pv = Engine.portfolioValue({ holdings: rows }, convert, null), un = Engine.unrealized({ holdings: rows }, convert, null);
+    return { asset: rows.length + ' actif(s)', invested: money(inv.cost, 0), value: money(pv.total, 0), gain: un.count ? '<span class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + (un.gain >= 0 ? '+' : '') + money(un.gain, 0) + '</span>' : '—', gainpct: un.pct === null ? '—' : fmtPct(un.pct, 1, true), annual: money(run.total, 0) };
+  };
+  // trois sections : à classer (si besoin), ETF, actions — la catégorie vient de l'actif (marché, nom) ou de votre choix manuel, jamais « action » par défaut
+  const all = filteredHoldings(), SECS = [['unknown', 'À classer', 'Catégorie non identifiée : confirmez-la dans la colonne « Catégorie » (enregistré, jamais écrasé par un import).'], ['etf', 'ETF', ''], ['stock', 'Actions', '']];
+  const cfgs = SECS.map((s) => {
+    const rows = all.filter((h) => Engine.category(h) === s[0]);
+    return { key: s[0], title: s[1], note: s[2], rows, cfg: { id: 'portfolio-' + s[0], prefId: 'portfolio', forceKeys: s[0] === 'unknown' ? ['category'] : [], columns: cols, rows, getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
+      onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids), footer,
+      empty: '<div class="card empty"><h3>' + (s[0] === 'etf' ? 'Aucun ETF détenu' : 'Aucune action détenue') + '</h3><p>' + (state.holdings.length ? 'Aucun actif de cette catégorie pour les filtres actuels.' : '') + '</p></div>' } };
+  }).filter((x) => x.key !== 'unknown' || x.rows.length);
+  const secH = (x) => { const pv = Engine.portfolioValue({ holdings: x.rows }, convert, null); return '<section class="port-sec"><div class="port-sec-h"><h2>' + esc(x.title) + '</h2><span class="muted">' + x.rows.length + ' position(s)' + (pv.count ? ' · ' + money(pv.total, 0) : '') + '</span></div>' + (x.note ? '<div class="notice info" style="margin-bottom:8px">' + esc(x.note) + '</div>' : '') + '<div id="tblHost-' + x.key + '"></div></section>'; };
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),
-    '<button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter</button>') +
-    portfolioSummaryHtml(perfAll) +
+    '<button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter un actif</button>') +
+    diagBannerHtml() + portfolioSummaryHtml(perfAll) +
     '<div class="toolbar">' + portTabsHtml() + '<input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +
     '<select id="pd" aria-label="Dividendes"><option value="all">Tous les actifs</option><option value="payer">Versent un dividende</option><option value="none">Sans dividende / capitalisants</option><option value="missing">Données manquantes</option></select>' +
-    '<span class="grow"></span>' + Tbl.menuHtml(cfg) + '</div><div id="tblHost"></div>';
+    '<span class="grow"></span>' + Tbl.menuHtml(cfgs[cfgs.length - 1].cfg) + '</div>' + cfgs.map(secH).join('');
   $('#pd', host).value = view.port.div;
-  let t; $('#pq', host).oninput = (e) => { view.port.q = e.target.value; clearTimeout(t); t = setTimeout(() => { cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); }, 160); };
-  $('#pt', host).onchange = (e) => { view.port.type = e.target.value; cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); };
-  $('#pd', host).onchange = (e) => { view.port.div = e.target.value; cfg.rows = filteredHoldings(); Tbl.render($('#tblHost'), cfg); };
-  wirePortTabs(host); Tbl.render($('#tblHost'), cfg); wireDo(host);
+  const draw = () => { const a2 = filteredHoldings(); cfgs.forEach((x) => { x.cfg.rows = a2.filter((h) => Engine.category(h) === x.key); Tbl.render($('#tblHost-' + x.key), x.cfg); }); Tbl.inst['portfolio'] = Tbl.inst[cfgs[cfgs.length - 1].cfg.id]; };
+  let t; $('#pq', host).oninput = (e) => { view.port.q = e.target.value; clearTimeout(t); t = setTimeout(draw, 160); };
+  $('#pt', host).onchange = (e) => { view.port.type = e.target.value; draw(); };
+  $('#pd', host).onchange = (e) => { view.port.div = e.target.value; draw(); };
+  wirePortTabs(host); draw(); wireDo(host);
+  // catégorie choisie à la main : enregistrée (typeLocked) et protégée des imports et des actualisations
+  host.onchange = (e) => {
+    const sel = e.target.closest && e.target.closest('[data-cat]'); if (!sel) return;
+    const h = holdingById(sel.dataset.cat); if (!h || !sel.value) return;
+    h.type = sel.value; h.typeLocked = true; h.typeSource = 'user'; if (sel.value === 'etf_acc') { h.dividend = h.dividend || {}; h.dividend.none = true; h.dividend.lastAmount = null; h.dividend.frequency = 'none'; }
+    saveState(); toast((h.name || h.ticker) + ' : catégorie enregistrée (' + Engine.TYPES[sel.value] + ').'); renderPortfolio(host);
+  };
 }
 
 /* ===============================================================
