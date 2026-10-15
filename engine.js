@@ -440,7 +440,7 @@
       const toEntries = (withMkt) => txs.map((t) => {
         const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees));
         const c = convertAt(raw, cur, t.date.slice(0, 7));
-        return { date: t.date, time: t.time || '', type: t.type, qty: num(t.qty), amt: c === null ? null : c, fees: num(t.fees) };
+        return { date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: num(t.qty), amt: t.corp ? 0 : (c === null ? null : c), fees: num(t.fees) };
       }).concat(corp.map((c) => ({ date: c.date, time: '', type: c.kind, qty: 0, ratio: c.ratio, amt: null })), withMkt ? mktOnly.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null })) : []);
       const cq = it.kind === 'holding' ? num(h.quantity) : 0, tol = 1e-6 * Math.max(1, cq);
       let ledgerRows = null, txMode = false;

@@ -11,12 +11,13 @@ const numOrNull = (v) => { if (v === '' || v === null || v === undefined) return
 /* Nombre « à la française ou anglaise » : 1 234,56 / 1,234.56 / 12.5 */
 function parseNum(raw) {
   if (raw === undefined || raw === null) return NaN;
-  let s = String(raw).trim().replace(/\s/g, '').replace(/[€$£]/g, '');
+  let s = String(raw).trim().replace(/\s/g, '').replace(/[€$£]/g, '').replace(/^\u2212/, '-').replace(/^\((.*)\)$/, '-$1');
   if (!s) return NaN;
   const c = s.includes(','), d = s.includes('.');
   if (c && d) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
   else if (c) s = s.replace(',', '.');
-  return parseFloat(s);
+  // lecture stricte : une date (« 15/03/2026 », « 2026-03-15 ») ou un texte ne doit jamais être lu comme un nombre (« 15 » ou « 2026 »)
+  return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s) ? parseFloat(s) : NaN;
 }
 function parseDateLoose(raw) {
   const s = String(raw || '').trim(); if (!s) return null;
@@ -259,6 +260,18 @@ async function runPrefill() {
 /* ===============================================================
    PORTEFEUILLES / COMPTES
    =============================================================== */
+/* Création rapide d'un autre portefeuille (compte-titres) ; il devient le portefeuille affiché. */
+function openNewAccountModal(onDone) {
+  const m = openModal('<h2>Nouveau portefeuille</h2><div class="sub">Par exemple un deuxième compte-titres, un PEA ou le compte d\'un proche. Les actifs et l\'historique s\'y rattachent à l\'ajout ou à l\'import.</div>' +
+    fld('Nom du portefeuille', '<input type="text" id="naName" placeholder="ex : PEA, DEGIRO, Trade Republic" maxlength="40" autocomplete="off">', '', 'naName') +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="naGo">Créer</button></div></div>', {});
+  const go = () => {
+    const v = $('#naName', m).value.trim(); if (!v) { $('#naName', m).focus(); return; }
+    if (state.accounts.some((a) => a.name.toLowerCase() === v.toLowerCase())) { toast('Un portefeuille « ' + v + ' » existe déjà.', { error: true }); return; }
+    const a = { id: uid(), name: v }; state.accounts.push(a); view.account = a.id; saveState(); closeModal(); renderPage(); toast('Portefeuille « ' + v + ' » créé.'); if (onDone) onDone(a);
+  };
+  $('#naGo', m).onclick = go; $('#naName', m).onkeydown = (e) => { if (e.key === 'Enter') go(); }; setTimeout(() => $('#naName', m).focus(), 50);
+}
 function openAccountsModal() {
   const rows = state.accounts.map((a) => '<div class="list-row" data-id="' + esc(a.id) + '"><input type="text" value="' + esc(a.name) + '" data-rename="' + esc(a.id) + '" aria-label="Nom"><span class="muted" style="white-space:nowrap">' + state.holdings.filter((h) => h.account === a.id).length + ' actif(s)</span><button class="btn sm icon ghost" type="button" data-del="' + esc(a.id) + '" aria-label="Supprimer" ' + (state.accounts.length <= 1 ? 'disabled' : '') + '>' + icon('trash') + '</button></div>').join('');
   const m = openModal('<h2>Portefeuilles / comptes-titres</h2><div class="sub">Séparez par exemple votre CTO et votre PEA. Chaque actif est rattaché à un portefeuille.</div>' + rows +
@@ -268,7 +281,7 @@ function openAccountsModal() {
     const id = b.dataset.del, n = state.holdings.filter((h) => h.account === id).length, fb = state.accounts.find((a) => a.id !== id);
     const c = await confirmDialog({ title: 'Supprimer ce portefeuille ?', body: n ? n + ' actif(s) seront déplacés vers « ' + esc(fb.name) + ' » (aucun actif n\'est supprimé).' : 'Ce portefeuille est vide.', confirmLabel: 'Supprimer', danger: true });
     if (!c.ok) { openAccountsModal(); return; }
-    state.holdings.forEach((h) => { if (h.account === id) h.account = fb.id; });
+    state.holdings.forEach((h) => { if (h.account === id) h.account = fb.id; }); (state.archive || []).forEach((h) => { if (h.account === id) h.account = fb.id; });
     state.accounts = state.accounts.filter((a) => a.id !== id); if (view.account === id) view.account = 'all';
     saveState(); renderPage(); openAccountsModal();
   });
@@ -292,7 +305,7 @@ function readFileRows(file) {
       r.onload = () => {
         if (typeof XLSX === 'undefined') return reject(new Error('Bibliothèque Excel indisponible (hors-ligne ?).'));
         const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
-        resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }));
+        resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '', dateNF: 'yyyy-mm-dd' }));
       };
       r.readAsArrayBuffer(file);
     } else reject(new Error('Format non pris en charge : utilisez un fichier .csv ou .xlsx.'));
@@ -324,12 +337,7 @@ function previewTable(rows, headerIdx, n) {
 /* ===============================================================
    IMPORT DES POSITIONS (relevé de portefeuille : DEGIRO, Trade Republic…)
    =============================================================== */
-async function openImportPositions() {
-  const file = await pickFile('.csv,.xlsx,.xls,.txt'); if (!file) return;
-  let rows; try { rows = (await readFileRows(file)).filter((r) => r && r.some((c) => String(c).trim() !== '')); } catch (e) { toast(e.message, { error: true }); return; }
-  if (!rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
-  renderPositionsMapping(rows, guessHeaderRow(rows, [['symbole', 'symbol', 'ticker', 'isin', 'code'], ['quantite', 'quantity', 'nombre', 'qty', 'position', 'en portefeuille']]));
-}
+async function openImportPositions() { return routeImport('positions'); }
 function renderPositionsMapping(rows, hIdx) {
   const head = rows[hIdx] || [], n = Math.max.apply(null, rows.map((r) => r.length));
   while (head.length < n) head.push('');
@@ -348,7 +356,9 @@ function renderPositionsMapping(rows, hIdx) {
     const c = cols(); const sm = $('#mSummary', m);
     if (c.t < 0 || c.q < 0) { sm.innerHTML = '<span>Choisissez les colonnes ticker / ISIN et quantité.</span>'; return null; }
     const r = classifyPositions(rows, hIdx, c);
-    sm.innerHTML = '<span><b>' + r.fresh.length + '</b> nouvel(s) actif(s) à ajouter · <b>' + r.dups.length + '</b> déjà présent(s) <b>conservé(s) sans modification</b>' + (r.bad ? ' · ' + r.bad + ' ligne(s) ignorée(s)' : '') + '</span>';
+    sm.innerHTML = '<span><b>' + r.fresh.length + '</b> nouvel(s) actif(s) à ajouter · <b>' + r.dups.length + '</b> déjà présent(s) <b>conservé(s) sans modification</b>' + (r.bad ? ' · ' + r.bad + ' ligne(s) ignorée(s)' : '') + '</span>' +
+      (r.dateLike ? '<div class="warn-t" style="margin-top:4px">⚠ ' + r.dateLike + ' valeur(s) de la colonne Quantité ressemblent à des <b>dates</b> : mauvaise colonne choisie ? (ces lignes sont ignorées, jamais lues comme des nombres).</div>' : '') +
+      (r.yearLike ? '<div class="warn-t" style="margin-top:4px">⚠ ' + r.yearLike + ' quantité(s) comprise(s) entre 1900 et 2100 : vérifiez qu\'il ne s\'agit pas d\'années.</div>' : '');
     return r;
   };
   $$('select', m).forEach((x) => x.addEventListener('change', (e) => { if (e.target.id !== 'mH') refresh(); }));
@@ -371,10 +381,12 @@ function classifyPositions(rows, hIdx, c) {
   const inAcc = state.holdings.filter((h) => h.account === c.acc);
   const keys = new Set(), names = new Set();
   inAcc.forEach((h) => { [h.ticker, h.displayTicker, h.isin].forEach((k) => { if (k) keys.add(String(k).trim().toUpperCase()); }); if (h.name) names.add(norm(h.name)); });
-  const fresh = [], dups = []; let bad = 0;
+  const fresh = [], dups = []; let bad = 0, dateLike = 0, yearLike = 0;
   rows.slice(hIdx + 1).forEach((r) => {
     const tk = String(r[c.t] || '').trim(), qty = parseNum(r[c.q]);
+    if (parseDateLoose(r[c.q])) dateLike++;
     if (!tk || !qty || qty <= 0 || isNaN(qty)) { bad++; return; }
+    if (Number.isInteger(qty) && qty >= 1900 && qty <= 2100) yearLike++;
     const name = c.nm >= 0 ? String(r[c.nm] || '').trim() : '';
     if (keys.has(tk.toUpperCase()) || (name && names.has(norm(name)))) { dups.push(tk); return; }
     keys.add(tk.toUpperCase()); if (name) names.add(norm(name));
@@ -383,7 +395,7 @@ function classifyPositions(rows, hIdx, c) {
       avgCost: c.cc >= 0 && !isNaN(parseNum(r[c.cc])) ? parseNum(r[c.cc]) : null, currency: /^[A-Z]{3}$/.test(cur) ? cur : baseCur(), account: c.acc, logo: null, source: 'import', addedAt: todayISO(),
       dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } });
   });
-  return { fresh, dups, bad };
+  return { fresh, dups, bad, dateLike, yearLike };
 }
 
 /* ===============================================================
@@ -398,12 +410,7 @@ function classifyTx(typeStr, catStr) {
   if (/\b(buy|achat|kauf|purchase|acquisition|saveback|savings plan|plan d.epargne|sparplan|round up|stock perk)\b/.test(t)) return 'buy';
   return 'other';
 }
-async function openImportTransactions() {
-  const file = await pickFile('.csv,.xlsx,.xls,.txt'); if (!file) return;
-  let rows; try { rows = (await readFileRows(file)).filter((r) => r && r.some((c) => String(c).trim() !== '')); } catch (e) { toast(e.message, { error: true }); return; }
-  if (!rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
-  renderTxMapping(rows, guessHeaderRow(rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {});
-}
+async function openImportTransactions() { return routeImport('generic'); }
 function txFromRows(rows, hIdx, cols, opts) {
   const out = { buys: [], sells: [], dividends: [], skipped: 0, bad: 0 };
   const g = (r, k) => cols[k] >= 0 ? r[cols[k]] : '';

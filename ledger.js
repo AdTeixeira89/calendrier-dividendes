@@ -80,10 +80,10 @@
     ['time', /^(heure|time|uhrzeit|hora|tijd|ora|heure d execution)$/],
     ['isin', /\bisin\b/],
     ['fx', /(taux de change|exchange rate|wisselkoers|wechselkurs|tipo de cambio|tasso di cambio|fx rate|koers wissel)/],
-    ['localValue', /((valeur|value|waarde|wert|valor|valore) (locale|local|lokale|lokaler))|local value|valeur locale|lokale waarde/],
+    ['localValue', /((valeur|value|waarde|wert|valor|valore) (locale|local|lokale|lokaler))|local value|valeur locale|lokale waarde|montant devise locale|local currency amount|betrag in lokaler wahrung/],
     ['orderId', /(id ordre|id de l ordre|order id|orderid|order nr|ordernummer|auftrags|id commande|order reference|ordre id)/],
     ['fee', /(frais|fees?\b|kosten|gebuhr|gebuehr|comision|commission|courtage|brokerage|autofx|costi|spese|transaction costs)/],
-    ['total', /^(total|totaal|gesamt|totale|total eur|montant total|totaal eur)( [a-z]{3})?$/],
+    ['total', /^(total|totaal|gesamt|totale|total eur|montant total|totaal eur|montant negocie|net amount|negotiated amount|genegotieerd bedrag|verhandelter betrag)( [a-z]{3})?$/],
     ['valueAcct', /^(valeur|value|waarde|wert|valor|valore|montant|amount|bedrag)( [a-z]{3})?$/],
     ['qty', /^(quantite|quantity|aantal|anzahl|cantidad|quantita|nombre|number|shares|stuks|qty|nb|nombre de titres|nbre)$/],
     ['price', /^(cours|price|koers|kurs|prix|precio|prezzo|cotation|prix unitaire|unit price)( [a-z]{3})?$/],
@@ -93,7 +93,7 @@
     ['description', /^(description|omschrijving|beschreibung|descripcion|descrizione|operation|libelle)$/],
     ['currency', /^(devise|currency|munt|wahrung|waehrung|moneda|valuta|divisa)( .*)?$/],
     ['venue', /^(lieu d execution|lieu execution|venue|execution venue|ausfuhrungsort|ausfuehrungsort|uitvoeringsplaats|lugar de ejecucion|sede di esecuzione)$/],
-    ['exchange', /^(bourse de reference|bourse|reference exchange|exchange|referenzborse|referenzboerse|referentiebeurs|beurs|bolsa de referencia|borsa)$/],
+    ['exchange', /^(place boursiere selectionnee|place boursiere|bourse de reference|bourse|reference exchange|exchange|referenzborse|referenzboerse|referentiebeurs|beurs|bolsa de referencia|borsa)$/],
     ['product', /^(produit|product|produkt|producto|prodotto|nom|name|titel|security|instrument|titre|naam|nom du produit|asset)$/]
   ];
   function roleOf(header) {
@@ -218,7 +218,8 @@
         const ch = num(g(r, 'change')); if (!isNaN(ch)) total = Math.abs(ch);
       } else {
         qty = num(g(r, 'qty'));
-        if (isNaN(qty) || qty === 0) { out.bad.push({ line, reason: 'Quantité illisible ou nulle (« ' + g(r, 'qty') + ' »)', raw }); return; }
+        if (!isNaN(qty) && qty === 0) { out.other.push({ line, kind: 'ligne informative (quantité nulle)', desc: name || isin, date, raw }); return; }     // aucune quantité : pas une opération
+        if (isNaN(qty)) { out.bad.push({ line, reason: 'Quantité illisible (« ' + g(r, 'qty') + ' »)', raw }); return; }
         price = Math.abs(num(g(r, 'price')));
         const lv = num(g(r, 'localValue'));
         if (isNaN(price) && !isNaN(lv)) price = Math.abs(lv) / Math.abs(qty);
@@ -227,9 +228,14 @@
         priceCur = priceCur === 'GBp' ? 'GBX' : priceCur.toUpperCase();
         const t = num(g(r, 'total')), v = num(g(r, 'valueAcct'));
         total = isNaN(t) ? null : Math.abs(t); valueAcct = isNaN(v) ? null : Math.abs(v);
-        if (price === 0 || (total !== null && total === 0)) {      // aucun flux d'argent : livraison gratuite, split, échange… jamais un achat à coût nul sans validation
-          out.ambiguous.push({ line, reason: 'Montant nul : opération sur titres probable (split, échange, livraison gratuite) — non importée, à vérifier', raw });
-          out.corp.push({ line, date, isin, name, desc: 'Montant nul (quantité ' + qty + ')', ratio: null, source: 'csv', zero: true }); return;
+        if (price === 0 || (total !== null && total === 0)) {
+          // Mouvement de titres SANS flux d'argent (livraison gratuite, droits, échange, retrait, radiation…). La quantité est explicite : elle est reprise
+          // (livraison = quantité + à coût nul ; retrait = quantité −, sans résultat réalisé), jamais comme un achat ou une vente.
+          out.corp.push({ line, date, isin, name, desc: (qty < 0 ? 'Retrait de ' + Math.abs(qty) : 'Livraison de ' + qty) + ' titre(s) sans montant', ratio: null, source: 'csv', zero: true });
+          if (opt.zeroMode === 'skip') { out.ambiguous.push({ line, reason: 'Mouvement de titres sans montant (livraison gratuite, droits, échange, retrait) — non importé sur votre demande', raw }); return; }
+          if (!signed) { out.ambiguous.push({ line, reason: 'Mouvement de titres sans montant dont le sens est indéterminé (quantité non signée)', raw }); return; }
+          out.ops.push({ line, date, time, name, isin, type: qty < 0 ? 'sell' : 'buy', qty: r8(Math.abs(qty)), price: 0, priceCur: priceCur || accCur, valueAcct: 0, acctCur: accCur, fees: 0, total: 0, amt: 0, fxRate: null, orderId: g(r, 'orderId'), venue: g(r, 'venue'), exchange: g(r, 'exchange'), zero: true, warn: [], raw, seq: out.ops.length });
+          return;
         }
         if (typeCell) { if (BUY_WORDS.test(typeCell) || /achat|buy|koop|kauf|compra/i.test(typeCell)) kind = 'buy'; else if (SELL_WORDS.test(typeCell) || /vente|sell|verkoop|verkauf|venta/i.test(typeCell)) kind = 'sell'; }
         const signTotal = isNaN(t) || t === 0 ? 0 : (t < 0 ? 1 : -1);        // total négatif = argent sorti = achat
@@ -238,7 +244,9 @@
           else if (signTotal) kind = signTotal > 0 ? 'buy' : 'sell';
         }
         if (!kind) { out.ambiguous.push({ line, reason: 'Achat ou vente indéterminé (quantité non signée et total absent)', raw }); return; }
-        if (signed && signTotal && ((kind === 'buy' && signTotal < 0) || (kind === 'sell' && signTotal > 0))) { out.ambiguous.push({ line, reason: 'Signe de la quantité et du total contradictoires', raw }); return; }
+        // vente dont les frais dépassent le produit (fraction de titre, petite ligne) : total négatif légitime
+        const feesOver = kind === 'sell' && signTotal > 0 && valueAcct !== null && cols.fees.reduce((a, c) => a + (isNaN(num(r[c])) ? 0 : Math.abs(num(r[c]))), 0) + 0.005 >= valueAcct;
+        if (signed && signTotal && !feesOver && ((kind === 'buy' && signTotal < 0) || (kind === 'sell' && signTotal > 0))) { out.ambiguous.push({ line, reason: 'Signe de la quantité et du total contradictoires', raw }); return; }
       }
       qty = Math.abs(qty);
       if (isNaN(qty) || qty === 0) { out.bad.push({ line, reason: 'Quantité illisible', raw }); return; }
@@ -287,7 +295,7 @@
        removal sortie hors transaction (radiation, offre, échange) : quantité et coût ramenés à zéro, sans résultat réalisé
      Une nouvelle acquisition après une vente totale ouvre un nouveau cycle (position économique distincte).
      --------------------------------------------------------------- */
-  const RANK = { split: 0, buy: 1, sell: 2, removal: 3 };
+  const RANK = { split: 0, buy: 1, grant: 1, sell: 2, retire: 2, removal: 3 };
   const orderKey = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : (RANK[a.type] || 0) - (RANK[b.type] || 0));
   function run(entries) {
     const sorted = entries.map((e, i) => ({ e, i })).sort((a, b) => orderKey(a.e, b.e) || a.i - b.i).map((x) => x.e);
@@ -301,6 +309,13 @@
         if (e.amt == null) { costUnknown++; row.issue = 'Montant inconnu : prix de revient non calculable'; }
         else cost += e.amt;
         row.realized = null;
+      } else if (e.type === 'grant') {                    // livraison gratuite (droits, actions gratuites, échange) : quantité +, coût inchangé
+        if (qty <= EPS) cycle++;
+        qty += q; row.realized = null;
+      } else if (e.type === 'retire') {                   // retrait de titres sans produit (radiation, offre, échange, expiration de droits) : quantité −, coût sorti, aucun résultat réalisé
+        const avg = qty > EPS ? cost / qty : 0, sold = Math.min(q, Math.max(qty, 0));
+        if (q - qty > EPS) { negative = true; row.issue = 'Retrait supérieur à la quantité détenue (historique incomplet ?)'; issues.push({ date: e.date, msg: row.issue }); }
+        row.costOut = r2(avg * sold); cost -= avg * sold; qty -= sold; row.realized = null; if (qty < EPS) { qty = 0; cost = 0; }
       } else if (e.type === 'split') {
         const r = Number(e.ratio);
         if (!(r > 0) || r === 1) row.issue = 'Ratio de split invalide';
@@ -364,7 +379,7 @@
     const first = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0], cur = first ? cc(first) : 'EUR';
     const entries = txs.map((t) => {
       const amt = cc(t) !== cur ? null : (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0)));
-      return { id: t.id, date: t.date, time: t.time || '', type: t.type, qty: Number(t.qty), amt, fees: Number(t.fees || 0), tx: t };
+      return { id: t.id, date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: t.corp ? 0 : amt, fees: Number(t.fees || 0), tx: t };
     }).concat(corpEntries(state, holdingIsin(inst)));
     return { entries, cur, txs };
   }
@@ -419,8 +434,8 @@
       });
       const fileIds = new Set(list.map((o) => o.extId)), cur0 = last.acctCur;
       // historique connu = opérations du fichier + opérations déjà enregistrées que ce fichier ne contient pas (autre source, ancien export)
-      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0))) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
-      const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
+      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0))) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
+      const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.zero ? (o.type === 'buy' ? 'grant' : 'retire') : o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
         .concat(extra, corpEntries(st2, isNameKey(key) ? '' : key));
       const led = run(entries);
       const inst = { key, isin: isNameKey(key) ? '' : key, name, ops: list, newOps, dupOps, led, include: true, ref: found, currency: last.priceCur, acctCur: last.acctCur, venue: last.venue || '',
@@ -509,7 +524,7 @@
       }
       inst.newOps.forEach((o) => {
         state.transactions.push({ id: uid(), holdingId: id, ticker: tickerLabel, name: inst.name || label, isin: inst.isin || undefined, date: o.date, time: o.time || undefined, type: o.type, qty: o.qty, price: o.price, fees: o.fees == null ? 0 : o.fees, feesCur: o.acctCur,
-          currency: o.priceCur, amountAcct: o.amt, acctCur: o.acctCur, fxRate: o.fxRate == null ? undefined : o.fxRate, orderId: o.orderId || undefined, venue: o.venue || undefined, exchange: o.exchange || undefined, warn: o.warn && o.warn.length ? o.warn : undefined, source: 'degiro', extId: o.extId });
+          currency: o.priceCur, amountAcct: o.amt, acctCur: o.acctCur, fxRate: o.fxRate == null ? undefined : o.fxRate, orderId: o.orderId || undefined, venue: o.venue || undefined, exchange: o.exchange || undefined, corp: o.zero ? true : undefined, warn: o.warn && o.warn.length ? o.warn : undefined, source: 'degiro', extId: o.extId });
         res.tx++;
       });
     });
@@ -622,6 +637,13 @@
     insts.forEach(({ h, kind }) => {
       const isin = holdingIsin(h), key = isin ? canon(alias, isin) : 'N:' + norm(h.name), ref = referenceOf(state, h.account);
       const { entries, cur, txs } = entriesFor(state, h);
+      if (kind === 'holding' && !h.derived) {      // quantité saisie / importée à plat : une année lue comme un nombre (« 2026 ») ou un écart avec la position réelle ne se corrige jamais seul
+        const q0 = Number(h.quantity) || 0, r0 = ref.mode === 'file' ? ref.map.get(key) : null, looksYear = Number.isInteger(q0) && q0 >= 1900 && q0 <= 2100;
+        if (looksYear && !(r0 && qtyEq(r0.qty, q0))) push({ instId: h.id, isin, name: h.name || h.displayTicker || isin, level: 'error', code: 'qty_year', cause: 'Quantité ' + q0 + ' : ressemble à une année (une date a peut-être été lue comme un nombre lors d\'un import). Les valeurs, le poids et le rendement de cet actif sont faussés.',
+          action: r0 ? 'Remplacer par la position réelle (' + r0.qty + ') ou corriger à la main.' : 'Corriger la quantité à la main (aucune position réelle de référence chargée).', act: r0 ? ['set_ref_qty', 'edit'] : ['edit'], refQty: r0 ? r0.qty : null });
+        else if (r0 && ref.mode === 'file' && !txs.length && !qtyEq(r0.qty, q0)) push({ instId: h.id, isin, name: h.name || h.displayTicker || isin, level: 'warn', code: 'qty_vs_ref', cause: 'Quantité enregistrée ' + q0 + ' ≠ position réelle du relevé DEGIRO (' + r0.qty + ').',
+          action: 'Remplacer par la position réelle ou corriger à la main : rien n\'est modifié sans votre accord.', act: ['set_ref_qty', 'edit'], refQty: r0.qty });
+      }
       if (!txs.length && !(kind === 'holding' && h.derived)) {
         if (kind === 'holding') { const r = ref.map.get(key); rows.push({ id: h.id, isin, name: h.name || h.displayTicker, kind, app: Number(h.quantity) || 0, calc: null, ref: r ? r.qty : null, tx: 0, ok: null }); }
         return;
@@ -649,7 +671,8 @@
       } else if (h.check) push(Object.assign({}, base, { level: 'warn', code: 'check_' + h.check.code, cause: h.check.msg, txIds: txs.map((x) => x.id), action: h.check.code === 'unreferenced' ? 'Fusionner avec l\'ISIN actuel s\'il s\'agit d\'un changement d\'ISIN, marquer une sortie (radiation, offre, échange), ou l\'ajouter au portefeuille si c\'est bien une position réelle.' : h.check.code === 'qty_mismatch' ? 'Rechercher un split (Yahoo) ou en saisir un ; sinon vérifier les transactions manquantes.' : 'Rechercher un split (Yahoo), fusionner avec l\'ancien ou le nouvel ISIN, ou marquer une sortie hors transaction.', act: h.check.code === 'unreferenced' ? ['promote', 'alias', 'removal'] : ['search_split', 'manual_split', 'alias', 'removal', 'promote'] }));
       // splits connus du marché, jamais appliqués sans validation
       const first = led.first;
-      const cands = (h.splits || []).filter((s) => first && s.date >= first && s.date <= today && !(state.corp || []).some((c) => c.isin === key && c.kind === 'split' && Math.abs(Date.parse(c.date) - Date.parse(s.date)) < 5 * 86400000));
+      const zeroMoves = txs.filter((t) => t.corp).map((t) => t.date);
+      const cands = (h.splits || []).filter((s) => first && s.date >= first && s.date <= today && !zeroMoves.some((d0) => Math.abs(Date.parse(d0) - Date.parse(s.date)) < 10 * 86400000) && !(state.corp || []).some((c) => c.isin === key && c.kind === 'split' && Math.abs(Date.parse(c.date) - Date.parse(s.date)) < 5 * 86400000));
       if (cands.length && (led.negative || (r && led.qty > EPS && !qtyEq(led.qty, r.qty)) || (kind === 'archive' && h.check))) {
         const sim = run(entries.concat(cands.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null }))));
         const coherent = !sim.negative && (r ? qtyEq(sim.qty, r.qty) : true);
@@ -665,7 +688,7 @@
     // opérations sur titres repérées dans le CSV (jamais appliquées sans validation)
     const impo = (state.imports || []).slice(-1)[0];
     ((impo && impo.report && impo.report.corp) || []).forEach((c) => {
-      if (Array.isArray(c) || typeof c !== 'object') return;
+      if (Array.isArray(c) || typeof c !== 'object' || (c.zero && (state.transactions || []).some((t) => t.corp && t.date === c.date))) return;
       const key = c.isin ? canon(alias, c.isin) : null, inst = key ? insts.find(({ h }) => canon(alias, holdingIsin(h)) === key) : null;
       if ((state.corp || []).some((x) => x.isin === key && Math.abs(Date.parse(x.date) - Date.parse(c.date)) < 5 * 86400000)) return;
       push({ level: 'warn', code: 'csv_corp', instId: inst ? inst.h.id : null, isin: c.isin || '', name: c.name || (inst && inst.h.name) || c.isin || '—', cause: 'Opération sur titres détectée dans le CSV le ' + c.date + ' : ' + c.desc + '. Elle n\'a pas été importée comme achat ou vente.',

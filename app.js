@@ -495,7 +495,7 @@ function buildShell() {
     '<label class="sr" for="acctSel">Portefeuille</label><select id="acctSel" style="min-height:36px"></select><span id="syncChipTop"></span></header>' +
     '<main id="page" tabindex="-1"></main></div><nav class="tabbar" aria-label="Navigation">' + tabs + '</nav>';
   $$('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
-  $('#acctSel').onchange = (e) => { view.account = e.target.value; renderPage(); };
+  $('#acctSel').onchange = (e) => { if (e.target.value === '__new__') { e.target.value = view.account; openNewAccountModal(); return; } view.account = e.target.value; renderPage(); };
   $$('#syncChipSide,#syncChipTop').forEach((c) => c.addEventListener('click', () => go('settings')));
 }
 function renderSyncChip() {
@@ -518,7 +518,7 @@ function renderShell() {
   applyAppearance();
   $$('[data-go]').forEach((b) => b.classList.toggle('active', b.dataset.go === view.page));
   const sel = $('#acctSel');
-  if (sel) { sel.innerHTML = '<option value="all">Tous les portefeuilles</option>' + state.accounts.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join(''); sel.value = view.account; sel.classList.toggle('hide', state.accounts.length < 2 && view.page === 'settings'); }
+  if (sel) { sel.innerHTML = '<option value="all">Tous les portefeuilles</option>' + state.accounts.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join('') + '<option value="__new__">+ Nouveau portefeuille…</option>'; sel.value = view.account; sel.classList.toggle('hide', false); }
   renderSyncChip();
 }
 function renderPage() {
@@ -626,7 +626,7 @@ function csvDividends() {
 function csvTransactions() {
   const ids = visibleIds(), L = { buy: 'Achat', sell: 'Vente' };
   const rows = state.transactions.filter((t) => !ids || ids.has(t.holdingId)).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).map((t) => [
-    t.date || '', L[t.type] || t.type || '', t.ticker || '', t.name || '', t.qty, t.price, t.fees, t.currency || '', t.source || '']);
+    t.date || '', t.corp ? (t.type === 'buy' ? 'Livraison gratuite' : 'Retrait de titres') : (L[t.type] || t.type || ''), t.ticker || '', t.name || '', t.qty, t.price, t.fees, t.currency || '', t.source || '']);
   return csvText(['Date', 'Opération', 'Ticker', 'Nom', 'Quantité', 'Prix', 'Frais', 'Devise', 'Source'], rows);
 }
 async function csvValueSeries() {

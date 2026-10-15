@@ -282,7 +282,12 @@ t('CAUSE 4 : split 2 pour 1 absent, vente de 5 sur 10 → quantité réelle 15 s
 });
 t('MONTANT NUL : ligne à coût nul (split, échange, livraison gratuite) jamais importée comme achat gratuit ; listée comme opération sur titres à vérifier', () => {
   const csv = csvOf([mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50), '10-05-2022,10:00,"AIR",FR0000120073,EPA,XPAR,10,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",z1']);
-  const { res } = parse(csv); assert.strictEqual(res.ops.length, 1); assert.strictEqual(res.ambiguous.length, 1); assert.ok(/Montant nul/.test(res.ambiguous[0].reason)); assert.strictEqual(res.corp.length, 1); assert.strictEqual(res.report.corp, 1);
+  const { res } = parse(csv); assert.strictEqual(res.ops.length, 1); assert.strictEqual(res.ambiguous.length, 1); assert.ok(/sans montant/.test(res.ambiguous[0].reason)); assert.strictEqual(res.corp.length, 1); assert.strictEqual(res.report.corp, 1);
+});
+t('MOUVEMENT SANS MONTANT (fichier signé) : livraison gratuite = entrée à coût nul, retrait = sortie sans résultat réalisé', () => {
+  const rows = [mk('03-04-2019', 'FR0000120073', 'AIR', 10, 50), '10-05-2022,10:00,"AIR",FR0000120073,EPA,XPAR,5,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",z1', '11-05-2023,10:00,"AIR",FR0000120073,EPA,XPAR,-3,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",z2', mk('12-05-2023', 'FR0000120073', 'AIR', -2, 70)];
+  const { res } = parse(csvOf(rows)); assert.strictEqual(res.ops.filter((o) => o.zero).length, 2); assert.strictEqual(res.corp.length, 2);
+  const s = emptyState(); run(s, csvOf(rows), {}, { reference: NOREF }); const h = s.holdings[0]; assert.strictEqual(h.quantity, 10, '10 + 5 − 3 − 2'); assert.ok(Math.abs(h.avgCost - 501 / 15) < 1e-6, 'PRU dilué par la livraison gratuite, inchangé par le retrait');
 });
 t('RELEVÉ DE COMPTE : opérations sur titres, conversions de devise, dépôts et dividendes reconnus et ignorés (jamais des achats) ; ratio extrait de la description sans être appliqué', () => {
   const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre',
@@ -319,6 +324,17 @@ t('RECALCUL : une position issue de l\'import est recalculée depuis ses transac
 t('RELEVÉ DE PORTEFEUILLE DEGIRO (positions réelles) : lecture, lignes de liquidités ignorées', () => {
   const csv = 'Produit,Symbole/ISIN,Quantité,Clôture,Devise locale,Valeur en EUR\nAIR LIQUIDE,FR0000120073,12,170,EUR,2040\nCASH & CASH FUND & FTX CASH (EUR),,,,EUR,12,3\nAPPLE INC,US0378331005,5,200,USD,830\n';
   const r = L.parsePositions(parseCsv(csv)); assert.deepStrictEqual(r.positions.map((p) => [p.isin, p.qty]), [['FR0000120073', 12], ['US0378331005', 5]]); assert.ok(r.skipped.length >= 1);
+});
+t('VENTE dont les frais dépassent le produit (fraction de titre) : importée, pas « contradictoire »', () => {
+  const rows = [mk('03-04-2019', 'US5381461012', 'LIVEPERSON', 1, 5), '10-04-2024,15:30,"LIVEPERSON",US5381461012,XNAS,XNAS,-1,"0,7739",USD,"0,77",USD,"0,72",,,"-2,00","-1,28",v1'];
+  const { res } = parse(csvOf(rows)); assert.strictEqual(res.ambiguous.length, 0); assert.strictEqual(res.ops.length, 2);
+});
+t('DIAGNOSTIC : quantité qui ressemble à une année (2026) ou écart avec la position réelle — signalé avec correction proposée, jamais corrigé seul', () => {
+  const s = emptyState(); s.holdings.push(hold({ id: 'y', isin: 'FR0000120073', name: 'AIR', quantity: 2026 }), hold({ id: 'z', isin: 'US0378331005', name: 'APPLE', quantity: 8 }));
+  s.reference = { at: '2026-10-01', account: 'main', positions: [{ isin: 'FR0000120073', name: 'AIR', qty: 12 }, { isin: 'US0378331005', name: 'APPLE', qty: 5 }] };
+  const d = L.diagnose(s, { today: '2026-10-15' }); const y = d.items.find((i) => i.code === 'qty_year'), z = d.items.find((i) => i.code === 'qty_vs_ref');
+  assert.ok(y && y.refQty === 12 && y.act.includes('set_ref_qty')); assert.ok(z && z.refQty === 5); assert.strictEqual(s.holdings[0].quantity, 2026, 'rien n\'est modifié par le diagnostic');
+  const s2 = emptyState(); s2.holdings.push(hold({ id: 'y', isin: 'FR0000120073', name: 'AIR', quantity: 2026 })); const y2 = L.diagnose(s2, { today: '2026-10-15' }).items.find((i) => i.code === 'qty_year'); assert.ok(y2 && y2.act.join() === 'edit');
 });
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(

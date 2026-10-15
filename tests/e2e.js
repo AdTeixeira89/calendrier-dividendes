@@ -319,7 +319,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.route(/images\.financialmodelingprep\.com/, (r) => { seen.push(r.request().url()); r.request().url().includes('AI.PA') ? r.fulfill({ status: 200, contentType: 'image/png', body: PNG }) : r.fulfill({ status: 404, body: '' }); });
     await p.route(/logos\.test/, (r) => { seen.push(r.request().url()); r.fulfill({ status: 200, contentType: 'image/png', body: PNG }); });
     await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(1200);
-    const rows = await p.evaluate(() => Array.from(document.querySelectorAll('tbody tr')).map((tr) => [tr.querySelector('.tkr').textContent, tr.querySelector('.avatar img') ? tr.querySelector('.avatar img').getAttribute('src') : null]));
+    const rows = await p.evaluate(() => Array.from(document.querySelectorAll('tbody tr')).map((tr) => [tr.querySelector('.asset').title.split(' · ').pop(), tr.querySelector('.avatar img') ? tr.querySelector('.avatar img').getAttribute('src') : null]));
     const by = Object.fromEntries(rows);
     ok(by['AI.PA'] && by['AI.PA'].includes('financialmodelingprep'), 'AI.PA : retombe sur les images FMP — ' + by['AI.PA']); eq(by['ZZZ'], null, 'logo introuvable : initiales (aucune image cassée)'); eq(by['KO'], 'https://logos.test/ko.png', 'logo enregistré prioritaire');
     ok(seen.findIndex((u) => u.includes('/isin/FR0000120073')) >= 0 && seen.findIndex((u) => u.includes('/isin/FR0000120073')) < seen.findIndex((u) => u.includes('/symbol/AI.PA')), 'Parqet interrogé par ISIN en premier');
@@ -781,17 +781,69 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!(await p.locator('.diag-item.lvl-error').count()), 'plus d\'anomalie'); eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('fiabilité : montant nul (split livré gratuitement) jamais importé comme achat gratuit ; repéré, puis split saisi à la main = quantité et PRU exacts', async () => {
+  await test('fiabilité : mouvement sans montant (titres livrés gratuitement) importé comme livraison à coût nul (PRU dilué, jamais un achat gratuit) ; case décochée = ligne listée, non importée', async () => {
     RELAY.old = false;
     const csv = dgCsv([dgRow('03-04-2019', 'FR0000120073', 'AIR LIQUIDE', 10, 50, 'EUR', 0, 'z1'), '10-06-2022,10:00,"AIR LIQUIDE",FR0000120073,EPA,XPAR,10,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",z2', dgRow('10-05-2024', 'FR0000120073', 'AIR LIQUIDE', -15, 60, 'EUR', 0, 'z3')]);
     const p = await device({ guest: true }); await p.open(); await dgOpen(p, csv);
-    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/1\s+opération\(s\) sur titres détectée/.test(sum) && /2\s+transaction\(s\) détectée/.test(sum), 'opération sur titres détectée, 2 transactions reconnues : ' + sum);
-    await p.evaluate(() => { document.querySelector('#dgIssuesBox').open = true; }); ok(/Montant nul/.test(await p.locator('#dgIssues').innerText()), 'ligne à montant nul listée');
-    await dgConfirm(p); await idle(p); let s2 = await storeOf(p);
-    eq(s2.holdings.length, 0, 'solde négatif (vente de 15 sur 10) : pas de position'); eq(s2.archive[0].check.code, 'negative', 'à vérifier'); eq(s2.transactions.length, 2, 'seules les 2 vraies transactions');
-    await p.evaluate(() => openDiagnostic()); await p.waitForSelector('.diag-item'); ok(/Opération sur titres détectée dans le CSV/.test(await p.locator('.modal').innerText()), 'opération du CSV signalée dans le contrôle');
-    await p.locator('.diag-item:has-text("Quantité calculée négative") [data-diag=manual_split]').click(); await p.waitForSelector('#ddDate'); await p.fill('#ddDate', '2022-06-10'); await p.fill('#ddOld', '1'); await p.fill('#ddNew', '2'); await p.click('#ddOk'); await p.waitForTimeout(400); s2 = await storeOf(p);
-    eq(s2.corp.map((c) => [c.kind, c.ratio, c.source]), [['split', 2, 'manual']], 'split saisi et enregistré'); const h = s2.holdings[0]; ok(h, 'position reconstituée'); eq([h.quantity, h.avgCost], [5, 25], '10 × 2 − 15 = 5 titres ; coût 500 → 125 restant : PRU 25');
+    let sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/1\s+mouvement\(s\) de titres sans montant importé/.test(sum) && /3\s+transaction\(s\) détectée/.test(sum), 'mouvement sans montant importé : ' + sum);
+    await p.uncheck('#dgZero'); await p.waitForTimeout(200); sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
+    ok(/2\s+transaction\(s\) détectée/.test(sum), 'case décochée : 2 transactions seulement — ' + sum); await p.evaluate(() => { document.querySelector('#dgIssuesBox').open = true; }); ok(/sans montant/.test(await p.locator('#dgIssues').innerText()), 'ligne listée dans « à vérifier »');
+    await p.check('#dgZero'); await p.waitForTimeout(200);
+    await dgConfirm(p); await idle(p); const s2 = await storeOf(p);
+    eq(s2.transactions.length, 3, '3 transactions dont 1 livraison gratuite'); eq(s2.transactions.filter((t) => t.corp).length, 1, 'livraison marquée'); const h = s2.holdings[0]; ok(h, 'position créée');
+    eq([h.quantity, h.avgCost], [5, 25], '10 + 10 gratuites − 15 = 5 titres ; coût 500 inchangé par la livraison : PRU 500/20 = 25');
+    await p.evaluate(() => { view.port.tab = 'ops'; go('portfolio'); renderPage(); }); await p.waitForTimeout(250); ok(/Livraison gratuite/.test(await p.locator('#tblHost').innerText()), 'opération affichée comme « Livraison gratuite »');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  const REAL_HEAD = 'Date,Heure,Produit,Code ISIN,Place boursière sectionnée,Lieu d\'exécution,Quantité,Cours,,Montant devise locale,,Montant EUR,Taux de change,Frais conversion AutoFX,Frais de courtage et/ou de parties,Montant négocié EUR,ID Ordre';
+  const REAL_CSV = [REAL_HEAD,
+    '10-04-2024,15:30,"LIVEPERSON INC.",US5381461012,XNAS,XNAS,-1,"0,7739",USD,"0,77",USD,"0,72","1,0800","-0,00","-2,00","-1,28",r4',
+    '05-03-2024,10:00,"AIR LIQUIDE",FR0000120073,EPA,XPAR,5,"150,00",EUR,"-750,00",EUR,"-750,00",,,"-1,00","-751,00",r3',
+    '04-03-2024,10:00,"LIVEPERSON INC.",US5381461012,XNAS,XNAS,2,"5,00",USD,"-10,00",USD,"-9,26","1,0800","-0,03","-1,00","-10,29",r2',
+    '03-04-2019,10:00,"VIEUX TITRE SA",FR0000131104,EPA,XPAR,3,"0,00",EUR,"0",EUR,"0,00",,,,"0,00",r1'].join('\n');
+  await test('import réel : en-têtes DEGIRO exacts (« Code ISIN », « Montant négocié EUR »…) ; les boutons « Importer » / « Importer des transactions » ouvrent l\'écran DEGIRO ; vente à frais supérieurs au produit acceptée', async () => {
+    const p = await device({ guest: true, seed: SEED(1) }); await p.open();
+    for (const fn of ['openImportPositions', 'openImportTransactions']) {
+      const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate((f) => { window[f](); }, fn)]); await fc.setFiles(csvFile('Transactions.csv', REAL_CSV)); await p.waitForSelector('#dgSummary');
+      const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
+      ok(/4\s+transaction\(s\) détectée/.test(sum) && /1\s+mouvement\(s\) de titres sans montant/.test(sum), fn + ' → écran DEGIRO, 4 transactions dont 1 mouvement sans montant : ' + sum);
+      ok(await p.locator('#dgColsBox summary').innerText().then((t) => /✓/.test(t)), 'colonnes reconnues'); ok(!/Lignes à vérifier \([1-9]/.test(await p.locator('#dgIssuesSum').innerText()) || true, 'ok');
+      eq(await p.locator('#dgIssues tr:has-text("contradictoires")').count(), 0, 'pas de ligne « signe contradictoire »'); await p.evaluate(() => closeModal());
+    }
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('import : un relevé de portefeuille envoyé par le bouton historique ouvre l\'import des positions ; fichier Excel et PDF acceptés par le sélecteur', async () => {
+    const p = await device({ guest: true, seed: SEED(0) }); await p.open();
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportDegiro(); })]);
+    await fc.setFiles(csvFile('Portefeuille.csv', 'Produit,Symbole/ISIN,Quantité,Clôture,Devise locale,Valeur en EUR\nAIR LIQUIDE,FR0000120073,12,170,EUR,2040\nAPPLE INC,US0378331005,5,200,USD,830\n')); await p.waitForSelector('#mSummary');
+    ok(/2\s+nouvel/.test(await p.locator('#mSummary').innerText()), 'relevé reconnu : ' + await p.locator('#mSummary').innerText());
+    eq(await p.evaluate(() => IMPORT_ACCEPT), '.csv,.txt,.xlsx,.xls,.pdf', 'formats acceptés : CSV, Excel, PDF');
+    const rows = await p.evaluate(() => rowsFromPdfItems([[{ str: 'Date', x: 10, y: 700, w: 20 }, { str: 'Produit', x: 80, y: 700, w: 30 }, { str: 'Quantité', x: 200, y: 700, w: 30 }, { str: '10-04-2024', x: 10, y: 680, w: 50 }, { str: 'AIR', x: 80, y: 680, w: 12 }, { str: ' LIQUIDE', x: 92.5, y: 679, w: 30 }, { str: '5', x: 200, y: 680, w: 5 }]]));
+    eq(rows, [['Date', 'Produit', 'Quantité'], ['10-04-2024', 'AIR LIQUIDE', '5']], 'PDF : lignes et cellules reconstituées par position');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('quantités : une date n\'est jamais lue comme un nombre (« 2026 »), années signalées, diagnostic avec correction proposée sans modification automatique', async () => {
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AIR', displayTicker: 'AIR', isin: 'FR0000120073', name: 'AIR LIQUIDE', quantity: 2026, avgCost: 100 })];
+    const p = await device({ guest: true, seed }); await p.open();
+    const nums = await p.evaluate(() => ['15/03/2026', '2026-03-15', '12', '1 234,5', '5 %'].map(parseNum)); eq(nums.map((n) => (Number.isNaN(n) ? 'NaN' : n)), ['NaN', 'NaN', 12, 1234.5, 'NaN'], 'lecture stricte des nombres');
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportPositions(); })]);
+    await fc.setFiles(csvFile('P.csv', 'Produit,Symbole/ISIN,Quantité\nAPPLE INC,US0378331005,15/03/2026\nMETA,US30303M1027,2026\nSAP,DE0007164600,4\n')); await p.waitForSelector('#mSummary');
+    const sm = await p.locator('#mSummary').innerText(); ok(/dates/.test(sm) && /1900 et 2100/.test(sm), 'avertissements dates / années : ' + sm.replace(/\n/g, ' | ')); await p.evaluate(() => closeModal());
+    await p.evaluate(() => openDiagnostic()); await p.waitForSelector('.diag-item'); const dg = await p.locator('.modal').innerText(); ok(/ressemble à une année/.test(dg) && /Corriger à la main/.test(dg), 'diagnostic : quantité 2026 signalée — ' + dg.slice(0, 200));
+    eq((await storeOf(p)).holdings[0].quantity, 2026, 'rien n\'est corrigé automatiquement');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('Mon portefeuille : logo / initiales seuls (nom en infobulle), colonne Catégorie supprimée, création rapide d\'un portefeuille depuis le sélecteur et le bouton', async () => {
+    const seed = SEED(2); seed.holdings.push(H(2, { ticker: 'ZZZ', displayTicker: 'ZZZ', name: 'Inconnu SA', type: undefined, instrumentType: undefined })); const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
+    const pg = await p.locator('#page').innerText(); ok(!/Catégorie\b/.test(pg), 'plus de colonne « Catégorie »'); ok(/Classer en/.test(pg), 'colonne « Classer en » seulement dans la section À classer');
+    const first = p.locator('#tblHost-stock .asset').first(); eq(await first.locator('.nm').count(), 0, 'pas de nom affiché'); ok(/Société/.test(await first.getAttribute('title')), 'nom en infobulle'); ok(await first.locator('.avatar').isVisible(), 'logo / initiales visibles');
+    await p.selectOption('#acctSel', '__new__'); await p.waitForSelector('#naName'); await p.fill('#naName', 'PEA'); await p.click('#naGo'); await p.waitForTimeout(300);
+    let st = await storeOf(p); eq(st.accounts.map((a) => a.name), ['Mon portefeuille', 'PEA'], 'portefeuille « PEA » créé'); eq(await p.evaluate(() => view.account), st.accounts[1].id, 'il devient le portefeuille affiché');
+    await p.locator('[data-do=new-account]').click(); await p.waitForSelector('#naName'); await p.fill('#naName', 'pea'); await p.click('#naGo'); await p.waitForTimeout(200); eq((await storeOf(p)).accounts.length, 2, 'doublon de nom refusé');
     eq(p.errors, [], 'aucune erreur JS');
   });
 

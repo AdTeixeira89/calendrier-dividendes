@@ -31,6 +31,7 @@ function wireDo(host) {
     else if (a === 'import') openImportPositions();
     else if (a === 'import-tx') openImportTransactions();
     else if (a === 'import-degiro') openImportDegiro();
+    else if (a === 'new-account') openNewAccountModal();
     else if (a === 'check-history') openDiagnostic();
     else if (a === 'export-csv') openCsvExport();
     else if (a === 'refresh') refreshMarket(visibleHoldings());
@@ -144,15 +145,15 @@ function gainPct(h) {
   const v = Engine.value(h), i = Engine.invested(h); if (v === null || i === null) return null;
   const cv = convert(v, h.currency), ci = convert(i, Engine.costCur(h)); return cv === null || !ci ? null : (cv - ci) / ci;
 }
-function portfolioColumns(nextMap, wMap) {
+function portfolioColumns(nextMap, wMap, names) {
   const cur = (h, v, d) => v === null || v === undefined ? '—' : fmtMoney(v, h.currency, d === undefined ? {} : { d });
   return [
     { key: 'asset', label: 'Actif', essential: true, sort: (h) => (h.name || h.displayTicker || h.ticker || '').toLowerCase(),
-      html: (h) => '<button class="asset" type="button" data-open="' + esc(h.id) + '">' + avatar(h.displayTicker || h.ticker, h.logo, '', h.isin) + '<span><span class="nm">' + esc(h.name || h.displayTicker || h.ticker) + '</span><span class="tkr">' + esc(h.displayTicker || h.ticker) + '</span></span></button>' },
+      // logo / initiales seuls (plus de place pour les chiffres) ; le nom reste en infobulle et pour les lecteurs d'écran. Section « À classer » : nom visible.
+      html: (h) => { const nm = h.name || h.displayTicker || h.ticker, tk = h.displayTicker || h.ticker; return '<button class="asset' + (names ? '' : ' asset-only') + '" type="button" data-open="' + esc(h.id) + '" title="' + esc(nm + (tk && tk !== nm ? ' · ' + tk : '')) + '">' + avatar(tk, h.logo, '', h.isin) +
+        (names ? '<span><span class="nm">' + esc(nm) + '</span><span class="tkr">' + esc(tk) + '</span></span>' : '<span class="sr">' + esc(nm) + '</span>') + '</button>'; } },
     { key: 'account', label: 'Compte', sort: (h) => accountName(h.account), html: (h) => esc(accountName(h.account)) },
     { key: 'type', label: 'Type', sort: (h) => h.type, html: (h) => esc(Engine.TYPES[h.type] || 'Action') },
-    { key: 'category', label: 'Catégorie', sort: (h) => Engine.category(h), html: (h) => '<select class="cat-sel" data-cat="' + esc(h.id) + '" aria-label="Catégorie de ' + esc(h.name || h.ticker) + '">' + (Engine.category(h) === 'unknown' ? '<option value="" selected>À classer…</option>' : '') +
-      Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '"' + (Engine.category(h) !== 'unknown' && h.type === k ? ' selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (h) => h.quantity, html: (h) => fmtNum(h.quantity) },
     { key: 'cost', label: 'Prix de revient', align: 'r', sort: (h) => h.avgCost, html: (h) => h.avgCost == null ? '—' : fmtMoney(h.avgCost, Engine.costCur(h)) },
     { key: 'invested', label: 'Investi', essential: true, align: 'r', sort: (h) => Engine.invested(h), html: (h) => Engine.invested(h) == null ? '—' : fmtMoney(Engine.invested(h), Engine.costCur(h)) },
@@ -215,7 +216,9 @@ function renderPortfolio(host) {
   if (!state.holdings.length && !(state.archive || []).length && !state.transactions.length) { host.innerHTML = pageHead('Mon portefeuille', 'Vos actifs, quantités et prix de revient') + emptyPortfolio(); wireDo(host); return; }
   const nextMap = nextByHolding();
   const perfAll = Engine.performance(state, convert, visibleIds()), wMap = {}; perfAll.rows.forEach((r) => { if (r.weight !== null) wMap[r.id] = r.weight; });
-  const cols = portfolioColumns(nextMap, wMap);
+  const cols = portfolioColumns(nextMap, wMap, false), colsU = portfolioColumns(nextMap, wMap, true);
+  colsU.splice(1, 0, { key: 'category', label: 'Classer en', sort: (h) => Engine.category(h), html: (h) => '<select class="cat-sel" data-cat="' + esc(h.id) + '" aria-label="Catégorie de ' + esc(h.name || h.ticker) + '">' + (Engine.category(h) === 'unknown' ? '<option value="" selected>À classer…</option>' : '') +
+      Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '"' + (Engine.category(h) !== 'unknown' && h.type === k ? ' selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' });
   const footer = (rows) => {
     const inv = Engine.investedTotal({ holdings: rows }, convert, null);
     const run = Engine.runRate({ holdings: rows }, 'gross', convert, null);
@@ -223,16 +226,16 @@ function renderPortfolio(host) {
     return { asset: rows.length + ' actif(s)', invested: money(inv.cost, 0), value: money(pv.total, 0), gain: un.count ? '<span class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + (un.gain >= 0 ? '+' : '') + money(un.gain, 0) + '</span>' : '—', gainpct: un.pct === null ? '—' : fmtPct(un.pct, 1, true), annual: money(run.total, 0) };
   };
   // trois sections : à classer (si besoin), ETF, actions — la catégorie vient de l'actif (marché, nom) ou de votre choix manuel, jamais « action » par défaut
-  const all = filteredHoldings(), SECS = [['unknown', 'À classer', 'Catégorie non identifiée : confirmez-la dans la colonne « Catégorie » (enregistré, jamais écrasé par un import).'], ['etf', 'ETF', ''], ['stock', 'Actions', '']];
+  const all = filteredHoldings(), SECS = [['unknown', 'À classer', 'Type non identifié : choisissez Action ou ETF dans la colonne « Classer en » (enregistré, jamais écrasé par un import). Cette colonne disparaît une fois l\'actif classé.'], ['etf', 'ETF', ''], ['stock', 'Actions', '']];
   const cfgs = SECS.map((s) => {
     const rows = all.filter((h) => Engine.category(h) === s[0]);
-    return { key: s[0], title: s[1], note: s[2], rows, cfg: { id: 'portfolio-' + s[0], prefId: 'portfolio', forceKeys: s[0] === 'unknown' ? ['category'] : [], columns: cols, rows, getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
+    return { key: s[0], title: s[1], note: s[2], rows, cfg: { id: 'portfolio-' + s[0], prefId: 'portfolio', forceKeys: s[0] === 'unknown' ? ['category'] : [], columns: s[0] === 'unknown' ? colsU : cols, rows, getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
       onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids), footer,
       empty: '<div class="card empty"><h3>' + (s[0] === 'etf' ? 'Aucun ETF détenu' : 'Aucune action détenue') + '</h3><p>' + (state.holdings.length ? 'Aucun actif de cette catégorie pour les filtres actuels.' : '') + '</p></div>' } };
   }).filter((x) => x.key !== 'unknown' || x.rows.length);
   const secH = (x) => { const pv = Engine.portfolioValue({ holdings: x.rows }, convert, null); return '<section class="port-sec"><div class="port-sec-h"><h2>' + esc(x.title) + '</h2><span class="muted">' + x.rows.length + ' position(s)' + (pv.count ? ' · ' + money(pv.total, 0) : '') + '</span></div>' + (x.note ? '<div class="notice info" style="margin-bottom:8px">' + esc(x.note) + '</div>' : '') + '<div id="tblHost-' + x.key + '"></div></section>'; };
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' actif(s) · ' + esc(marketLine()),
-    '<button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter un actif</button>') +
+    '<button class="btn" type="button" data-do="new-account">' + icon('plus') + 'Nouveau portefeuille</button><button class="btn" type="button" data-do="export-csv">' + icon('download') + 'Exporter</button><button class="btn" type="button" data-do="import">' + icon('upload') + 'Importer</button><button class="btn" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button><button class="btn primary" type="button" data-do="add">' + icon('plus') + 'Ajouter un actif</button>') +
     diagBannerHtml() + portfolioSummaryHtml(perfAll) +
     '<div class="toolbar">' + portTabsHtml() + '<input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +
@@ -381,7 +384,7 @@ function txRows() {
 function txColumns() {
   return [
     { key: 'date', label: 'Date', essential: true, sort: (t) => t.date, html: (t) => esc(fmtDate(t.date)) },
-    { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
+    { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.corp ? '<span class="badge info">' + (t.type === 'buy' ? 'Livraison gratuite' : 'Retrait de titres') + '</span>' : t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
     { key: 'asset', label: 'Actif', essential: true, sort: (t) => (t.name || t.ticker || '').toLowerCase(), html: (t) => { const h = holdingById(t.holdingId); return '<span class="asset">' + avatar(t.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(t.name || t.ticker) + '</span><span class="tkr">' + esc(t.ticker) + '</span></span></span>'; } },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (t) => t.qty, html: (t) => fmtNum(t.qty) },
     { key: 'price', label: 'Prix', align: 'r', sort: (t) => t.price, html: (t) => fmtMoney(t.price, t.currency, { d: 4 }) },

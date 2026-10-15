@@ -9,7 +9,7 @@ const DIAG_LVL = { error: ['Anomalie', 'warn'], warn: ['À vérifier', 'warn'], 
 
 function diagTxLabel(id) {
   const t = state.transactions.find((x) => x.id === id); if (!t) return '';
-  return fmtDate(t.date, { day: 'numeric', month: 'short', year: 'numeric' }) + ' · ' + (t.type === 'buy' ? 'achat' : 'vente') + ' ' + fmtNum(t.qty);
+  return fmtDate(t.date, { day: 'numeric', month: 'short', year: 'numeric' }) + ' · ' + (t.corp ? (t.type === 'buy' ? 'livraison gratuite' : 'retrait de titres') : t.type === 'buy' ? 'achat' : 'vente') + ' ' + fmtNum(t.qty);
 }
 function diagDeps() { return { uid, today: todayISO() }; }
 
@@ -26,10 +26,10 @@ function openDiagnostic() {
     const st = r.ok === false ? '<span class="badge warn">Écart</span>' : r.ok === true ? '<span class="badge received">Cohérent</span>' : '<span class="muted">—</span>';
     return '<tr><td><b>' + esc(r.name) + '</b><div class="dg-note">' + esc(r.isin || '') + '</div></td><td>' + (r.kind === 'holding' ? 'Détenue' : 'Clôturée / à vérifier') + '</td><td class="r">' + (r.kind === 'holding' ? fmtNum(r.app) : '—') + '</td><td class="r">' + (r.calc === null ? '—' : (r.calc < 0 ? '<span class="neg">' + fmtNum(r.calc) + '</span>' : fmtNum(r.calc))) + '</td><td class="r">' + (r.ref === null ? '—' : fmtNum(r.ref)) + '</td><td>' + st + '</td></tr>';
   }).join('');
-  const btn = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'] };
+  const btn = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null] };
   const items = d.items.map((it, n) => {
     const lv = DIAG_LVL[it.level], tx = it.txIds.slice(0, 5).map(diagTxLabel).filter(Boolean);
-    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'archive' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + esc(fmtDate(s.date)) + ')').join(', ') : btn[a][0]) + '</button>').join('');
+    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'archive' || a === 'set_ref_qty' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + esc(fmtDate(s.date)) + ')').join(', ') : btn[a][0]) + '</button>').join('');
     return '<div class="diag-item lvl-' + it.level + '"><div class="diag-h"><span class="badge ' + lv[1] + '">' + lv[0] + '</span> <b>' + esc(it.name || '—') + '</b>' + (it.isin ? ' <small class="muted">' + esc(it.isin) + '</small>' : '') + '</div>' +
       '<div class="diag-line"><b>Cause probable :</b> ' + esc(it.cause) + '</div><div class="diag-line"><b>Action recommandée :</b> ' + esc(it.action || '—') + '</div>' +
       (tx.length ? '<div class="diag-line muted"><b>Transactions concernées :</b> ' + tx.map(esc).join(' ; ') + (it.txIds.length > 5 ? ' … (+' + (it.txIds.length - 5) + ')' : '') + '</div>' : '') + (acts ? '<div class="btn-row" style="margin-top:8px">' + acts + '</div>' : '') + '</div>';
@@ -63,7 +63,7 @@ function diagDialog(title, body, onOk) {
 const diagInst = (it) => (it.instId ? instrumentById(it.instId) : null);
 
 async function diagLoadReference() {
-  const f = await pickFile('.csv,.txt,.xlsx,.xls'); if (!f) return;
+  const f = await pickFile(IMPORT_ACCEPT); if (!f) return;
   let d; try { d = await readHistoryRows(f); } catch (e) { toast(e.message, { error: true }); return; }
   const r = Ledger.parsePositions(d.rows); if (!r.positions.length) { toast(r.error || 'Aucune position (ISIN + quantité) reconnue dans ce fichier.', { error: true }); return; }
   const last = (state.imports || []).slice(-1)[0], derived = state.holdings.find((h) => h.derived), acc = (last && last.account) || (derived && derived.account) || state.accounts[0].id;
@@ -113,5 +113,7 @@ async function diagAct(kind, it) {
   }
   if (kind === 'archive') { diagCommit('Position archivée : ' + it.name, () => Ledger.demote(state, it.instId, it.code, it.cause, diagDeps())); return; }
   if (kind === 'promote') { diagCommit('Position ajoutée au portefeuille actuel : ' + it.name, () => Ledger.promote(state, it.instId, diagDeps()), () => { const h = state.holdings.find((x) => x.id === it.instId); if (h && state.settings.relayUrl) refreshMarket([h], { silent: true }); }); return; }
+  if (kind === 'set_ref_qty') { diagCommit('Quantité corrigée : ' + it.name + ' → ' + it.refQty, () => { const h = state.holdings.find((x) => x.id === it.instId); if (!h || !(it.refQty > 0)) return { ok: false, error: 'Position réelle introuvable.' }; h.quantity = it.refQty; h.manual = true; return { ok: true }; }); return; }
+  if (kind === 'edit') { closeModal(); openHoldingModal(it.instId); return; }
   if (kind === 'recompute') { diagCommit('Position recalculée : ' + it.name, () => { const r = Ledger.reevaluate(state, it.instId, diagDeps()); return { ok: true, r }; }); return; }
 }
