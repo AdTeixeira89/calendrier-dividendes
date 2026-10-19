@@ -96,12 +96,54 @@ function renderHome(host) {
     : '<div class="empty" style="padding:18px 8px"><h3>Données insuffisantes</h3><p>Renseignez le prix de revient de vos positions et actualisez les cours pour voir leurs performances.</p></div>') + '</section>';
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>') +
-    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>';
+    '<div class="home-wrap' + (state.settings.quiver ? ' with-side' : '') + '"><div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>' +
+    (state.settings.quiver ? '<aside class="home-side" id="quiverBox" aria-label="Quiver Quantitative"></aside>' : '') + '</div>';
+  if (state.settings.quiver) drawQuiver($('#quiverBox', host));
 
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
   $$('[data-goto]', host).forEach((b) => b.onclick = () => { view.divTab = b.dataset.goto; go('dividends'); });
+}
+
+/* ===============================================================
+   QUIVER QUANTITATIVE (optionnel) : transactions du Congrès américain sur vos actifs américains
+   Jeton = secret du relais (jamais dans le navigateur). Données mises en cache 6 h ; rien n'est complété ni inventé.
+   =============================================================== */
+const quiverMem = { at: 0, key: '', data: null };
+function quiverTickers() {                   // titres cotés aux États-Unis : ticker simple (sans suffixe de place) en USD
+  const out = []; visibleHoldings().forEach((h) => { const t = String(h.displayTicker || h.ticker || '').toUpperCase(); if (/^[A-Z]{1,5}$/.test(t) && (h.currency || 'USD') === 'USD' && !out.includes(t)) out.push(t); });
+  return out.slice(0, 12);
+}
+async function quiverLoad(tickers) {
+  const key = tickers.join(','), now = Date.now();
+  if (quiverMem.data && quiverMem.key === key && now - quiverMem.at < 6 * 3600e3) return quiverMem.data;
+  try { const c = JSON.parse(localStorage.getItem('dca_quiver') || 'null'); if (c && c.key === key && now - c.at < 6 * 3600e3) { Object.assign(quiverMem, c); return c.data; } } catch (e) { /* ignoré */ }
+  let trades = [], skipped = 0;
+  if (tickers.length) { for (const t of tickers) { const r = await market.fetchCongress(t); trades = trades.concat(r.trades); skipped += r.skipped; } trades.sort((a, b) => (a.date < b.date ? 1 : -1)); }
+  else { const r = await market.fetchCongress(); trades = r.trades; skipped = r.skipped; }
+  const data = { trades: trades.slice(0, 30), general: !tickers.length, skipped, at: new Date().toISOString() };
+  Object.assign(quiverMem, { at: now, key, data }); try { localStorage.setItem('dca_quiver', JSON.stringify({ at: now, key, data })); } catch (e) { /* ignoré */ }
+  return data;
+}
+function quiverCard(inner) { return '<section class="card card-pad"><div class="card-head"><h3>Congrès américain</h3><span class="muted" style="font-size:12px">Quiver Quantitative</span></div>' + inner + '</section>'; }
+async function drawQuiver(box) {
+  if (!box) return;
+  if (!state.settings.relayUrl) { box.innerHTML = quiverCard('<p class="muted" style="font-size:13px">Renseignez d\'abord le relais de données (Paramètres).</p>'); return; }
+  box.innerHTML = quiverCard('<p class="muted" style="font-size:13px">Chargement…</p>');
+  try {
+    const d = await quiverLoad(quiverTickers()); if (!document.body.contains(box)) return;
+    const rows = d.trades.slice(0, 8).map((t) => '<div class="qv-row"><div class="qv-h"><b>' + esc(t.ticker) + '</b><span class="badge ' + (t.side === 'buy' ? 'received' : t.side === 'sell' ? 'warn' : '') + '">' + (t.side === 'buy' ? 'Achat' : t.side === 'sell' ? 'Vente' : esc(t.sideRaw || '—')) + '</span><small class="muted">' + esc(fmtDate(t.date, { day: 'numeric', month: 'short', year: '2-digit' })) + '</small></div>' +
+      '<div class="qv-s muted">' + esc(t.rep || '—') + (t.party ? ' (' + esc(t.party) + ')' : '') + (t.chamber ? ' · ' + esc(t.chamber) : '') + (t.amount ? ' · ' + esc(t.amount) : '') + '</div></div>').join('');
+    box.innerHTML = quiverCard((d.general ? '<p class="hint" style="margin:0 0 6px">Aucun de vos actifs n\'est coté aux États-Unis : flux général des dernières transactions.</p>' : '<p class="hint" style="margin:0 0 6px">Dernières transactions déclarées sur vos actifs américains (' + quiverTickers().length + ').</p>') +
+      (rows || '<div class="muted" style="font-size:13px;padding:6px 0">Aucune transaction déclarée sur ces actifs.</div>') +
+      '<p class="hint" style="margin:8px 0 0">Déclarations publiques, publiées avec retard ; fourchettes de montants, pas de montants exacts. Informatif, pas un conseil.' + (d.skipped ? ' ' + d.skipped + ' ligne(s) illisible(s) ignorée(s).' : '') + '</p>');
+  } catch (e) {
+    if (!document.body.contains(box)) return;
+    const help = e.code === 'unconfigured' ? 'Pour l\'activer : dans Cloudflare, ouvrez votre Worker → Settings → Variables and Secrets, ajoutez le secret <b>QUIVER_TOKEN</b> (votre jeton API Quiver, abonnement API requis), puis redéployez le code du relais depuis le dépôt.'
+      : e.code === 'oldrelay' ? 'Redéployez le code du relais (<code>relay/worker.js</code>) pour ajouter la route Quiver.' : '';
+    box.innerHTML = quiverCard('<div class="notice ' + (e.code === 'unconfigured' ? 'info' : 'warn') + '"><span>' + esc(e.message) + '</span></div>' + (help ? '<p class="hint" style="margin-top:8px">' + help + '</p>' : ''));
+  }
 }
 
 /* ===============================================================

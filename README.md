@@ -63,6 +63,10 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Quiver Quantitative (optionnel)
+
+Panneau « Congrès américain » à droite de l'Accueil (sous les cartes sur mobile) : dernières transactions déclarées par des élus américains sur **vos actifs cotés aux États-Unis** (flux général s'il n'y en a aucun). Désactivé par défaut (Paramètres → Données de marché). Nécessite un **abonnement API Quiver** ; le jeton est un **secret du relais** (`QUIVER_TOKEN` dans Cloudflare → Variables and Secrets), jamais stocké dans l'application ni envoyé au navigateur ; redéployez `relay/worker.js` pour la route `/quiver` (cache 1 h côté relais, 6 h côté application). Les lignes sans titre ou sans date sont écartées, jamais complétées. Données publiques, déclarées avec retard et en fourchettes : informatif, pas un conseil.
+
 ## Imports
 
 - **Formats lus** : **CSV** (UTF-8 ou Windows-1252 détecté, séparateur et décimales détectés), **Excel** (.xlsx / .xls, dates lues en AAAA-MM-JJ) et **PDF** (texte extrait par le lecteur pdf.js chargé à la demande : lignes et cellules reconstituées par position ; un PDF scanné/image n'est pas lisible — exportez alors le CSV). Quel que soit le bouton d'import utilisé, le fichier est **reconnu** (historique de transactions ↔ relevé de portefeuille) et envoyé au bon écran ; l'aperçu et la confirmation sont identiques pour les trois formats.

@@ -107,6 +107,24 @@
     return 'annual';
   }
 
+  /* Transactions du Congrès (Quiver) → liste normalisée. Lecture défensive : une ligne sans titre ou sans date est écartée et comptée, jamais complétée. */
+  function parseCongress(json) {
+    const arr = Array.isArray(json) ? json : (json && Array.isArray(json.data) ? json.data : null);
+    if (!arr) return { trades: [], skipped: 0, unrecognized: true };
+    const pick = (o, keys) => { for (const k of keys) if (o[k] !== undefined && o[k] !== null && String(o[k]).trim() !== '') return String(o[k]).trim(); return ''; };
+    const trades = []; let skipped = 0;
+    arr.forEach((o) => {
+      if (!o || typeof o !== 'object') { skipped++; return; }
+      const ticker = pick(o, ['Ticker', 'ticker']).toUpperCase(), date = pick(o, ['TransactionDate', 'Traded', 'Date', 'transaction_date']).slice(0, 10);
+      if (!ticker || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { skipped++; return; }
+      const t = pick(o, ['Transaction', 'Type', 'transaction']).toLowerCase();
+      trades.push({ ticker, date, rep: pick(o, ['Representative', 'Name', 'Senator', 'representative']), side: /purchase|buy|achat/.test(t) ? 'buy' : /sale|sell|vente/.test(t) ? 'sell' : 'other', sideRaw: pick(o, ['Transaction', 'Type', 'transaction']),
+        amount: pick(o, ['Range', 'Amount', 'range']), chamber: pick(o, ['House', 'Chamber']), party: pick(o, ['Party']), reported: pick(o, ['ReportDate', 'Filed', 'report_date']).slice(0, 10) });
+    });
+    trades.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    return { trades, skipped, unrecognized: !trades.length && arr.length > 0 };
+  }
+
   function makeClient(opts) {
     const getRelay = opts.getRelay;
     const fetchFn = opts.fetch || function () { return globalThis.fetch.apply(globalThis, arguments); };
@@ -186,7 +204,23 @@
       return { symbol, splits: splitList(res) };
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits };
+    /* Quiver Quantitative (optionnel, via le relais : le jeton reste un secret du relais). Sans ticker : flux récent ; avec ticker : historique de ce titre. */
+    async function fetchCongress(ticker) {
+      const relay = (getRelay() || '').replace(/\/+$/, '');
+      if (!relay) throw Object.assign(new Error('Aucune adresse de relais de données.'), { code: 'norelay' });
+      let r;
+      try { r = await fetchFn(relay + '/quiver' + (ticker ? '?ticker=' + encodeURIComponent(ticker) : '')); }
+      catch (e) { throw Object.assign(new Error('Relais de données injoignable.'), { code: 'offline' }); }
+      if (r.status === 501) throw Object.assign(new Error('Quiver n\'est pas activé sur le relais.'), { code: 'unconfigured' });
+      if (r.status === 404) throw Object.assign(new Error('Votre relais n\'est pas à jour (route /quiver absente).'), { code: 'oldrelay' });
+      if (r.status === 401 || r.status === 403) throw Object.assign(new Error(r.status === 401 ? 'Jeton Quiver refusé (401) : vérifiez le secret QUIVER_TOKEN du relais et votre abonnement API.' : 'Accès refusé (403).'), { code: 'denied' });
+      if (r.status === 429) throw Object.assign(new Error('Quiver limite temporairement les requêtes (429).'), { code: 'rate' });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data) throw Object.assign(new Error('Réponse Quiver invalide (code ' + r.status + ').'), { code: 'bad' });
+      return parseCongress(data);
+    }
+
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchCongress };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
@@ -287,6 +321,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseCongress, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

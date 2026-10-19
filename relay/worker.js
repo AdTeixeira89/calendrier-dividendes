@@ -1,7 +1,7 @@
 /* Relais Cloudflare Workers pour Calendrier Dividendes.
    Yahoo Finance n'autorise pas les appels directs depuis une page web (CORS) :
    ce relais les fait à la place du navigateur et ajoute l'en-tête manquant.
-   Il n'expose que deux routes en lecture seule et n'accepte que votre site. */
+   Il n'expose que des routes en lecture seule (Yahoo ; Quiver en option) et n'accepte que votre site. */
 
 const ALLOWED_ORIGINS = [
   'https://adteixeira89.github.io',
@@ -26,7 +26,7 @@ function reply(body, status, origin, extra){
 }
 
 export default {
-  async fetch(request){
+  async fetch(request, env){
     const origin = request.headers.get('Origin') || '';
     if(!ALLOWED_ORIGINS.includes(origin)){
       return new Response('Origine non autorisée', { status: 403 });
@@ -51,8 +51,22 @@ export default {
       const q = (url.searchParams.get('q') || '').trim();
       if(!q || q.length > 80) return reply({ error: 'Requête invalide' }, 400, origin);
       target = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`;
+    }else if(url.pathname === '/quiver'){
+      // Quiver Quantitative (optionnel) : transactions du Congrès américain. Le jeton API reste un SECRET du relais
+      // (Cloudflare → Settings → Variables and Secrets → QUIVER_TOKEN) : il n'est jamais envoyé au navigateur.
+      const token = env && env.QUIVER_TOKEN;
+      if(!token) return reply({ error: 'quiver_not_configured' }, 501, origin);
+      const ticker = (url.searchParams.get('ticker') || '').trim().toUpperCase();
+      if(ticker && !/^[A-Z0-9.\-]{1,10}$/.test(ticker)) return reply({ error: 'Symbole invalide' }, 400, origin);
+      const path = ticker ? `/beta/historical/congresstrading/${encodeURIComponent(ticker)}` : '/beta/live/congresstrading';
+      const up = await fetch('https://api.quiverquant.com' + path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json', 'User-Agent': UA },
+        cf: { cacheTtl: 3600, cacheEverything: true },
+      });
+      const body = await up.text();
+      return reply(body, up.status, origin, { 'Cache-Control': 'private, max-age=3600' });
     }else{
-      return reply({ error: 'Route inconnue (utilisez /chart ou /search)' }, 404, origin);
+      return reply({ error: 'Route inconnue (utilisez /chart, /search ou /quiver)' }, 404, origin);
     }
 
     // Cache de 6 h côté Cloudflare : ménage Yahoo et accélère les relances.

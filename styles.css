@@ -485,3 +485,11 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 @media (min-width:900px){ .home-top{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)} }
 .perf-gain{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-left:auto}
 .perf-row b{min-width:62px;text-align:right}
+
+/* Accueil : panneau latéral optionnel (Quiver) */
+.home-wrap{display:block}
+.home-side{margin-top:16px;min-width:0}
+@media (min-width:1180px){ .home-wrap.with-side{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start} .home-wrap.with-side .home-side{margin-top:0;position:sticky;top:12px} }
+.qv-row{padding:8px 0;border-top:1px solid var(--border)} .qv-row:first-of-type{border-top:0}
+.qv-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .qv-h small{margin-left:auto}
+.qv-s{font-size:12.5px;margin-top:2px;overflow-wrap:anywhere}
