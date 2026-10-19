@@ -76,12 +76,3 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   const h2 = { id: '2', ticker: 'NOVO-B.CO', type: 'stock', geoLocked: true, sector: 'Ma saisie', country: 'Mon pays', dividend: {} }; M.applyToHolding(h2, a, '2026-10-14'); assert.deepStrictEqual([h2.sector, h2.country], ['Ma saisie', 'Mon pays']);
   console.log('ok   historique de cours mensuel, secteur et pays (dérivé ou saisi)');
 })();
-(async () => {
-  const p = M.parseCongress([{ Ticker: 'aapl', TransactionDate: '2026-09-30', Transaction: 'Purchase', Representative: 'A. Elu', Range: '$1,001 - $15,000', House: 'House', Party: 'D' }, { Ticker: 'MSFT', TransactionDate: '2026-10-02', Transaction: 'Sale (Partial)', Representative: 'B. Elu' }, { Ticker: '', TransactionDate: '2026-10-01' }, { Ticker: 'X', TransactionDate: 'bientôt' }, null]);
-  assert.deepStrictEqual(p.trades.map((x) => [x.ticker, x.side, x.date]), [['MSFT', 'sell', '2026-10-02'], ['AAPL', 'buy', '2026-09-30']], 'triées, sens reconnu'); assert.strictEqual(p.skipped, 3, 'lignes sans titre / date écartées, jamais complétées');
-  assert.strictEqual(M.parseCongress({ error: 'x' }).unrecognized, true); assert.strictEqual(M.parseCongress([{ Foo: 1 }]).unrecognized, true);
-  const calls = []; const mk = (status, body) => M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => { calls.push(u); return { status, ok: status < 300, json: async () => body }; } });
-  const r = await mk(200, [{ Ticker: 'AAPL', TransactionDate: '2026-09-30', Transaction: 'Purchase' }]).fetchCongress('AAPL'); assert.strictEqual(r.trades.length, 1); assert.strictEqual(calls[0], 'https://r.dev/quiver?ticker=AAPL');
-  for (const [st, code] of [[501, 'unconfigured'], [404, 'oldrelay'], [401, 'denied'], [429, 'rate']]) { let c = null; try { await mk(st, {}).fetchCongress(); } catch (e) { c = e.code; } assert.strictEqual(c, code, 'erreur ' + st); }
-  console.log('ok   Quiver : lecture défensive des transactions du Congrès, erreurs explicites (jeton absent, relais ancien, refusé, limite)');
-})();

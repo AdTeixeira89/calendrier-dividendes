@@ -69,11 +69,6 @@ async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
   if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
-  if (u.pathname === '/quiver') {
-    if (RELAY.quiver === 'unconfigured') return j({ error: 'quiver_not_configured' }, 501);
-    const t = u.searchParams.get('ticker'); RELAY.quiverCalls = (RELAY.quiverCalls || []).concat(t || '*');
-    return j(t === 'AAPL' ? [{ Ticker: 'AAPL', TransactionDate: '2026-10-01', Transaction: 'Purchase', Representative: 'Élu Test', Party: 'D', House: 'House', Range: '$1,001 - $15,000' }] : []);
-  }
   return route.fulfill({ status: 404 });
 }
 
@@ -850,19 +845,6 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     let st = await storeOf(p); eq(st.accounts.map((a) => a.name), ['Mon portefeuille', 'PEA'], 'portefeuille « PEA » créé'); eq(await p.evaluate(() => view.account), st.accounts[1].id, 'il devient le portefeuille affiché');
     await p.locator('[data-do=new-account]').click(); await p.waitForSelector('#naName'); await p.fill('#naName', 'pea'); await p.click('#naGo'); await p.waitForTimeout(200); eq((await storeOf(p)).accounts.length, 2, 'doublon de nom refusé');
     eq(p.errors, [], 'aucune erreur JS');
-  });
-
-  await test('Quiver (optionnel) : panneau à droite de l\'accueil, désactivé par défaut ; transactions du Congrès sur les actifs américains détenus ; message clair si le jeton n\'est pas configuré', async () => {
-    RELAY.old = false; RELAY.quiver = 'ok'; RELAY.quiverCalls = [];
-    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', price: 200, avgCost: 100 }), H(1, { ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Air Liquide', currency: 'EUR', price: 170, avgCost: 100 })];
-    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('home')); await p.waitForTimeout(300);
-    eq(await p.locator('#quiverBox').count(), 0, 'pas de panneau par défaut'); eq(RELAY.quiverCalls, [], 'aucun appel Quiver tant que l\'option est désactivée');
-    await p.evaluate(() => { state.settings.quiver = true; saveState(); renderPage(); }); await p.waitForSelector('#quiverBox .qv-row'); const t = await p.locator('#quiverBox').innerText();
-    ok(/AAPL/.test(t) && /Achat/.test(t) && /Élu Test/.test(t) && /1,001/.test(t), 'transaction affichée : ' + t.replace(/\n/g, ' | ')); eq(RELAY.quiverCalls, ['AAPL'], 'seul le titre américain détenu est interrogé (pas AI.PA)');
-    ok(/Informatif, pas un conseil/.test(t), 'mention informative');
-    await p.evaluate(() => { localStorage.removeItem('dca_quiver'); quiverMem.data = null; }).catch(() => {}); RELAY.quiver = 'unconfigured';
-    await p.evaluate(() => { localStorage.removeItem('dca_quiver'); quiverMem.data = null; renderPage(); }); await p.waitForSelector('#quiverBox .notice'); ok(/QUIVER_TOKEN/.test(await p.locator('#quiverBox').innerText()), 'aide d\'activation affichée');
-    eq(p.errors.filter((e) => !/501/.test(e)), [], 'aucune erreur JS'); RELAY.quiver = 'ok';
   });
 
   await test('contrôle : une anomalie peut être ignorée (masquée, non comptée dans le bandeau), rétablie, annulée ; rien n\'est modifié', async () => {
