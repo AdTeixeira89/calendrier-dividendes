@@ -81,4 +81,10 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   const r = M.parseNews(j, 'aapl'); assert.deepStrictEqual(r.items.map((x) => x.title), ['A'], 'seul l\'article ciblant ce titre, https, daté'); assert.strictEqual(M.parseNews({}, 'X').unrecognized, true);
   console.log('ok   actualités : seuls les articles qui citent le titre (pas de panorama), liens https, date obligatoire');
 })();
+(async () => {
+  const mk = (tr) => M.makeClient({ getRelay: () => 'https://r.dev', fetch: async () => ({ status: 200, ok: true, json: async () => ({ translations: tr }) }) });
+  assert.deepStrictEqual(await mk(['Bonjour', null, 'Same']).translate(['Hello', 'World', 'Same']), ['Bonjour', null, null], 'null ou identique = non traduit');
+  assert.deepStrictEqual(await mk([]).translate([]), []);
+  console.log('ok   traduction des titres : non traduit = original conservé');
+})();
 

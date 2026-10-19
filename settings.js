@@ -19,6 +19,7 @@ function renderSettings(host) {
   const dataSrc = '<div class="field"><label for="sRelay">Adresse du relais de données (Yahoo Finance)</label><input type="text" id="sRelay" value="' + esc(s.relayUrl) + '" placeholder="https://…workers.dev"><span class="hint">Fournit nom, devise et historique des dividendes (date de détachement et montant par titre). Ne fournit ni date de paiement, ni retenue fiscale : saisissez-les à la main ou importez vos transactions.</span></div>' +
     '<div class="btn-row"><button class="btn" type="button" id="sTest">Tester le relais</button><button class="btn" type="button" id="sRefresh">' + icon('refresh') + 'Actualiser tous les actifs</button></div><div class="hint" id="sRelayMsg" style="margin-top:8px">' + esc(marketLine()) + '</div>' +
     '<label class="chk" style="margin-top:8px"><input type="checkbox" id="sNews" ' + (s.news !== false ? 'checked' : '') + '><span>Accueil : actualités de mes actifs (Yahoo Finance, gratuit ; panneau à droite sur ordinateur). Nécessite le relais à jour.</span></label>' +
+    '<label class="chk" style="margin-top:8px"><input type="checkbox" id="sNewsFr" ' + (s.newsFr !== false ? 'checked' : '') + '><span>Traduire automatiquement les titres des actualités en français (service de traduction public de Google via le relais : seuls les titres des articles sont envoyés).</span></label>' +
     '<label class="chk" style="margin-top:8px"><input type="checkbox" id="sAuto" ' + (s.autoRefresh ? 'checked' : '') + '><span>Actualiser automatiquement (au plus une fois par jour, à l\'ouverture)</span></label>';
   const BG = [['aurore', 'Aurore', 'linear-gradient(135deg,#2fbf84,#3b8fdc 55%,#8c64e6)'], ['emeraude', 'Émeraude', 'linear-gradient(135deg,#10b981,#14b8a6 55%,#84cc16)'], ['saphir', 'Saphir', 'linear-gradient(135deg,#3b82f6,#6366f1 55%,#0ea5e9)'], ['or', 'Or', 'linear-gradient(135deg,#eab308,#f59e0b 55%,#17a064)'], ['aucun', 'Sobre', 'linear-gradient(135deg,#eef1f4,#dde3e9)']];
   const look = '<div class="field"><label for="sTheme">Mode</label><select id="sTheme">' + opt('auto', 'Automatique (selon l\'appareil)', (s.theme || 'auto') === 'auto') + opt('light', 'Clair', s.theme === 'light') + opt('dark', 'Sombre', s.theme === 'dark') + '</select></div>' +
@@ -50,6 +51,7 @@ function renderSettings(host) {
   $('#sRelay', host).onchange = (e) => { state.settings.relayUrl = e.target.value.trim().replace(/\/+$/, ''); saveState(); };
   on('sRefresh', () => refreshMarket(null));
   $('#sNews', host).onchange = (e) => { state.settings.news = e.target.checked; saveState(); };
+  $('#sNewsFr', host).onchange = (e) => { state.settings.newsFr = e.target.checked; saveState(); };
   $('#sAuto', host).onchange = (e) => { state.settings.autoRefresh = e.target.checked; saveState(); };
   $('#sBase', host).onchange = (e) => { state.settings.baseCurrency = e.target.value; saveState(); renderPage(); };
   $('#sMode', host).onchange = (e) => { state.settings.incomeMode = e.target.value; saveState(); toast('Préférence enregistrée.'); };

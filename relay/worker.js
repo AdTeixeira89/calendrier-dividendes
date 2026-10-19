@@ -37,6 +37,25 @@ export default {
     const url = new URL(request.url);
     let target;
 
+    if(url.pathname === '/translate'){
+      // Traduction automatique en français des titres d'actualités (service public de traduction de Google, sans clé).
+      // Jusqu'à 10 titres de 220 caractères au plus ; en cas d'échec, la traduction est null (l'application garde le titre d'origine).
+      const titles = url.searchParams.getAll('t').slice(0, 10).map((x) => x.slice(0, 220));
+      if(!titles.length) return reply({ error: 'Aucun titre' }, 400, origin);
+      const out = await Promise.all(titles.map(async (t) => {
+        try{
+          const r = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fr&dt=t&q=' + encodeURIComponent(t), {
+            headers: { 'User-Agent': UA }, cf: { cacheTtl: 86400, cacheEverything: true },
+          });
+          if(!r.ok) return null;
+          const d = await r.json();
+          const fr = Array.isArray(d && d[0]) ? d[0].map((seg) => (seg && seg[0]) || '').join('').trim() : '';
+          return fr || null;
+        }catch(e){ return null; }
+      }));
+      return reply({ translations: out }, 200, origin, { 'Cache-Control': 'public, max-age=86400' });
+    }
+
     if(url.pathname === '/chart'){
       // Cours, dividendes (date ex-dividende + montant), fractionnements, nom et devise.
       const symbol = (url.searchParams.get('symbol') || '').trim();
@@ -57,7 +76,7 @@ export default {
       if(!/^[A-Za-z0-9.\-^=]{1,20}$/.test(symbol)) return reply({ error: 'Symbole invalide' }, 400, origin);
       target = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=0&newsCount=10&listsCount=0`;
     }else{
-      return reply({ error: 'Route inconnue (utilisez /chart, /search ou /news)' }, 404, origin);
+      return reply({ error: 'Route inconnue (utilisez /chart, /search, /news ou /translate)' }, 404, origin);
     }
 
     // Cache de 6 h côté Cloudflare : ménage Yahoo et accélère les relances.

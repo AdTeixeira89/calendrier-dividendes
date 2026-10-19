@@ -69,6 +69,7 @@ async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
   if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
+  if (u.pathname === '/translate') { RELAY.trCalls = (RELAY.trCalls || []).concat([u.searchParams.getAll('t')]); return j({ translations: u.searchParams.getAll('t').map((t) => (RELAY.trFail ? null : 'FR: ' + t)) }); }
   if (u.pathname === '/news') {
     const t = u.searchParams.get('symbol'); RELAY.newsCalls = (RELAY.newsCalls || []).concat(t);
     const now = Math.floor(Date.now() / 1000);
@@ -867,9 +868,10 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     RELAY.old = false; RELAY.newsCalls = [];
     const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', price: 200, avgCost: 100 }), H(1, { ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Air Liquide', price: 170, avgCost: 100 })];
     const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('home')); await p.waitForSelector('#newsBox .news-row'); const t = await p.locator('#newsBox').innerText();
-    ok(/Apple relève ses prévisions/.test(t) && /Test Wire/.test(t), 'article affiché : ' + t.replace(/\n/g, ' | ')); ok(!/Panorama/.test(t), 'panorama de marché (4 titres liés) écarté'); ok(!/dangereux/.test(t), 'lien non https écarté');
+    ok(/FR: Apple relève ses prévisions/.test(t) && /Test Wire/.test(t), 'article affiché, titre traduit : ' + t.replace(/\n/g, ' | ')); ok(/traduits automatiquement/.test(t), 'mention de la traduction automatique'); eq(await p.locator('#newsBox .news-t').getAttribute('title'), 'Original : Apple relève ses prévisions', 'original en infobulle'); ok(!/Panorama/.test(t), 'panorama de marché (4 titres liés) écarté'); ok(!/dangereux/.test(t), 'lien non https écarté');
     eq(await p.locator('#newsBox .news-row').count(), 1, 'un seul article retenu'); ok(/rien pour AI\.PA/.test(t), 'titre sans actualité signalé, rien d\'inventé');
     eq((await p.locator('#newsBox .news-row').getAttribute('rel')), 'noopener noreferrer', 'lien sûr'); eq(RELAY.newsCalls.sort(), ['AAI.PA'.slice(1), 'AAPL'].sort(), 'chaque actif interrogé une fois');
+    RELAY.trFail = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(!/FR:/.test(await p.locator('#newsBox').innerText()), 'traduction indisponible : titre d\'origine conservé'); RELAY.trFail = false;
     await p.evaluate(() => { state.settings.news = false; saveState(); renderPage(); }); await p.waitForTimeout(200); eq(await p.locator('#newsBox').count(), 0, 'désactivable'); eq(p.errors, [], 'aucune erreur JS');
   });
 

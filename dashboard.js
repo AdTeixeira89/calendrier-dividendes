@@ -136,6 +136,14 @@ async function newsFetch(hs, key) {
   Object.assign(newsMem, { at: now, key, data }); try { localStorage.setItem('dca_news', JSON.stringify({ at: now, key, data })); } catch (e) { /* ignoré */ }
   return data;
 }
+async function newsTranslate(d) {
+  if (state.settings.newsFr === false) return;
+  const todo = d.items.slice(0, 8).filter((n) => n.fr === undefined);
+  if (!todo.length) return;
+  try { const tr = await market.translate(todo.map((n) => n.title)); todo.forEach((n, i) => { n.fr = tr[i]; }); }
+  catch (e) { return; }                    // service indisponible : titres d'origine, réessayé au prochain affichage
+  try { localStorage.setItem('dca_news', JSON.stringify({ at: newsMem.at, key: newsMem.key, data: d })); } catch (e) { /* ignoré */ }
+}
 function newsCard(inner) { return '<section class="card card-pad"><div class="card-head"><h3>Actualités</h3><span class="muted" style="font-size:12px">vos actifs · Yahoo Finance</span></div>' + inner + '</section>'; }
 async function drawNews(box) {
   if (!box) return;
@@ -143,10 +151,12 @@ async function drawNews(box) {
   box.innerHTML = newsCard('<p class="muted" style="font-size:13px">Chargement…</p>');
   try {
     const d = await newsLoad(hs); if (!document.body.contains(box)) return;
+    await newsTranslate(d);                 // titres en français (facultatif ; l'original reste visible en infobulle)
+    if (!document.body.contains(box)) return;
     const ago = (iso) => { const h = Math.max(0, (Date.now() - Date.parse(iso)) / 3600e3); return h < 1 ? 'il y a moins d\'1 h' : h < 24 ? 'il y a ' + Math.round(h) + ' h' : fmtDate(iso.slice(0, 10), { day: 'numeric', month: 'short' }); };
-    const rows = d.items.slice(0, 8).map((n) => '<a class="news-row" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer"><span class="news-h"><b>' + esc(n.symbol) + '</b><small class="muted">' + esc(n.publisher) + ' · ' + esc(ago(n.at)) + '</small></span><span class="news-t">' + esc(n.title) + '</span></a>').join('');
+    const rows = d.items.slice(0, 8).map((n) => '<a class="news-row" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer"><span class="news-h"><b>' + esc(n.symbol) + '</b><small class="muted">' + esc(n.publisher) + ' · ' + esc(ago(n.at)) + '</small></span><span class="news-t"' + (n.fr ? ' title="' + esc('Original : ' + n.title) + '"' : '') + '>' + esc(n.fr || n.title) + '</span></a>').join('');
     box.innerHTML = newsCard((rows || '<div class="muted" style="font-size:13px;padding:6px 0">Aucune actualité trouvée pour vos actifs.</div>') +
-      '<p class="hint" style="margin:8px 0 0">Articles Yahoo Finance qui citent vos titres (le plus souvent en anglais). Couverture surtout américaine' + (d.none.length ? ' : rien pour ' + d.none.slice(0, 6).map(esc).join(', ') + (d.none.length > 6 ? '…' : '') : '') + '. Informatif, pas un conseil.</p>');
+      '<p class="hint" style="margin:8px 0 0">Articles Yahoo Finance qui citent vos titres' + (state.settings.newsFr === false ? ' (titres d\'origine, souvent en anglais)' : ', titres traduits automatiquement en français (original en infobulle)') + '. Couverture surtout américaine' + (d.none.length ? ' : rien pour ' + d.none.slice(0, 6).map(esc).join(', ') + (d.none.length > 6 ? '…' : '') : '') + '. Informatif, pas un conseil.</p>');
   } catch (e) {
     if (!document.body.contains(box)) return;
     box.innerHTML = newsCard('<div class="notice warn"><span>' + esc(/404|invalide/i.test(e.message) ? 'Mettez à jour le relais Cloudflare (route /news absente).' : e.message) + '</span></div>');

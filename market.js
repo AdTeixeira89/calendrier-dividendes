@@ -206,7 +206,15 @@
       return parseNews(data, symbol);
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews };
+    /* Titres traduits en français (null = non traduit : on garde alors l'original). */
+    async function translate(titles) {
+      if (!titles.length) return [];
+      const data = await call('/translate?' + titles.map((t) => 't=' + encodeURIComponent(t)).join('&'));
+      const tr = data && Array.isArray(data.translations) ? data.translations : [];
+      return titles.map((t, i) => (typeof tr[i] === 'string' && tr[i].trim() && tr[i].trim() !== t ? tr[i].trim() : null));
+    }
+
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews, translate };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
