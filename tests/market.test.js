@@ -87,4 +87,9 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.deepStrictEqual(await mk([]).translate([]), []);
   console.log('ok   traduction des titres : non traduit = original conservé');
 })();
+(async () => {
+  const c = M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => { const q = new URL(u).searchParams.get('q'); if (q === 'KO') return { ok: false, status: 429, json: async () => ({}) }; if (q === 'Quota') return { ok: true, json: async () => ({ responseData: { translatedText: 'MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS' } }) }; return { ok: true, json: async () => ({ responseData: { translatedText: q === 'Same' ? 'Same' : 'L&#39;action de ' + q } }) }; } });
+  assert.deepStrictEqual(await c.translateDirect(['Apple', 'KO', 'Quota', 'Same']), ["L'action de Apple", null, null, null], 'échec, quota ou texte identique = non traduit');
+  console.log('ok   traduction de secours (navigateur) : quota et erreurs = original conservé');
+})();
 

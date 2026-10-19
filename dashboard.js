@@ -150,16 +150,22 @@ async function newsFetch(hs, key) {
   Object.assign(newsMem, { at: now, key, data }); try { localStorage.setItem('dca_news', JSON.stringify({ at: now, key, data })); } catch (e) { /* ignoré */ }
   return data;
 }
+/* Traductions déjà obtenues (mémoire locale : un titre n'est traduit qu'une fois). */
+const trMemo = () => { try { return JSON.parse(localStorage.getItem('dca_tr') || '{}') || {}; } catch (e) { return {}; } };
 async function newsTranslate(d) {
   d.trStatus = 'ok';
   if (state.settings.newsFr === false) { d.trStatus = 'off'; return; }
-  const todo = d.items.slice(0, 8).filter((n) => n.fr === undefined);
-  if (!todo.length) { if (d.items.slice(0, 8).some((n) => n.fr === null) && !d.items.slice(0, 8).some((n) => n.fr)) d.trStatus = 'unavailable'; return; }
-  try {
-    const tr = await market.translate(todo.map((n) => n.title)); todo.forEach((n, i) => { n.fr = tr[i]; });
-    if (!tr.some(Boolean)) { d.trStatus = 'unavailable'; todo.forEach((n) => { delete n.fr; }); return; }       // échec : on réessaiera, rien n'est mémorisé
-  } catch (e) { d.trStatus = /404|invalide/i.test(e.message) ? 'oldrelay' : 'unavailable'; return; }     // rien n'est mémorisé : réessayé au prochain affichage
-  try { localStorage.setItem('dca_news', JSON.stringify({ at: newsMem.at, key: newsMem.key, data: d })); } catch (e) { /* ignoré */ }
+  const top = d.items.slice(0, 8), memo = trMemo();
+  top.forEach((n) => { if (n.fr == null && memo[n.title]) n.fr = memo[n.title]; });
+  let todo = top.filter((n) => !n.fr); if (!todo.length) return;
+  let tr = null, relayErr = null;
+  try { tr = await market.translate(todo.map((n) => n.title)); } catch (e) { relayErr = e; }          // 1. relais (Google, puis MyMemory)
+  if (!tr || !tr.some(Boolean)) {                                                                        // 2. secours : MyMemory directement depuis le navigateur
+    try { tr = await market.translateDirect(todo.map((n) => n.title)); } catch (e) { tr = null; }
+  }
+  todo.forEach((n, i) => { if (tr && tr[i]) { n.fr = tr[i]; memo[n.title] = tr[i]; } });
+  if (!todo.some((n) => n.fr)) { d.trStatus = relayErr && /404|invalide/i.test(relayErr.message) ? 'oldrelay' : 'unavailable'; return; }   // rien n'est mémorisé : réessayé au prochain affichage
+  try { const keys = Object.keys(memo); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach((k) => { delete memo[k]; }); localStorage.setItem('dca_tr', JSON.stringify(memo)); localStorage.setItem('dca_news', JSON.stringify({ at: newsMem.at, key: newsMem.key, data: d })); } catch (e) { /* ignoré */ }
 }
 function newsCard(inner) { return '<section class="card card-pad"><div class="card-head"><h3>Actualités</h3><span class="muted" style="font-size:12px">vos actifs · Yahoo Finance</span></div>' + inner + '</section>'; }
 async function drawNews(box) {
@@ -172,7 +178,7 @@ async function drawNews(box) {
     if (!document.body.contains(box)) return;
     const ago = (iso) => { const h = Math.max(0, (Date.now() - Date.parse(iso)) / 3600e3); return h < 1 ? 'il y a moins d\'1 h' : h < 24 ? 'il y a ' + Math.round(h) + ' h' : fmtDate(iso.slice(0, 10), { day: 'numeric', month: 'short' }); };
     const rows = d.items.slice(0, 8).map((n) => '<a class="news-row" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer"><span class="news-h"><b>' + esc(n.symbol) + '</b><small class="muted">' + esc(n.publisher) + ' · ' + esc(ago(n.at)) + '</small></span><span class="news-t"' + (n.fr ? ' title="' + esc('Original : ' + n.title) + '"' : '') + '>' + esc(n.fr || n.title) + '</span></a>').join('');
-    const trNote = d.trStatus === 'oldrelay' ? '<div class="notice warn" style="margin-bottom:8px"><span>Traduction impossible : mettez à jour le relais Cloudflare (route /translate absente). Titres affichés en anglais.</span></div>'
+    const trNote = d.trStatus === 'oldrelay' ? '<div class="notice warn" style="margin-bottom:8px"><span>Traduction impossible : le relais n\'est pas à jour (route /translate absente) et le service de secours ne répond pas. Titres affichés en anglais.</span></div>'
       : d.trStatus === 'unavailable' ? '<div class="notice warn" style="margin-bottom:8px"><span>Service de traduction indisponible pour le moment : titres affichés en anglais.</span></div>' : '';
     box.innerHTML = newsCard(trNote + (rows || '<div class="muted" style="font-size:13px;padding:6px 0">Aucune actualité trouvée pour vos actifs.</div>') +
       '<p class="hint" style="margin:8px 0 0">Articles Yahoo Finance qui citent vos titres' + (state.settings.newsFr === false ? ' (titres d\'origine, souvent en anglais)' : ', titres traduits automatiquement en français (original en infobulle)') + '. Couverture surtout américaine' + (d.none.length ? ' : rien pour ' + d.none.slice(0, 6).map(esc).join(', ') + (d.none.length > 6 ? '…' : '') : '') + '. Informatif, pas un conseil.</p>');

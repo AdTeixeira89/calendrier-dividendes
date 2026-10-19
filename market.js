@@ -214,7 +214,20 @@
       return titles.map((t, i) => (typeof tr[i] === 'string' && tr[i].trim() && tr[i].trim() !== t ? tr[i].trim() : null));
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews, translate };
+    /* Secours : traduction directement depuis le navigateur par MyMemory (gratuit, sans clé, accessible en CORS) quand le relais ne traduit pas. Un titre à la fois ; null = non traduit. */
+    async function translateDirect(titles) {
+      return Promise.all(titles.map(async (t) => {
+        try {
+          const r = await fetchFn('https://api.mymemory.translated.net/get?langpair=en%7Cfr&q=' + encodeURIComponent(t.slice(0, 220)));
+          if (!r.ok) return null;
+          const d = await r.json(), x = d && d.responseData && typeof d.responseData.translatedText === 'string' ? d.responseData.translatedText : '';
+          const fr = x.replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim();
+          return fr && fr !== t && !/MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(fr) ? fr : null;
+        } catch (e) { return null; }
+      }));
+    }
+
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews, translate, translateDirect };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
