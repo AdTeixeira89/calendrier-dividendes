@@ -107,6 +107,21 @@
     return 'annual';
   }
 
+  /* Actualités Yahoo d'un titre → liste normalisée. N'est retenu que ce qui concerne vraiment ce titre : il doit figurer parmi les titres liés de l'article,
+     et l'article ne doit pas être un panorama de marché (plus de 3 titres liés). Lien https uniquement. */
+  function parseNews(json, symbol) {
+    const arr = json && Array.isArray(json.news) ? json.news : null;
+    if (!arr) return { items: [], unrecognized: true };
+    const sym = String(symbol || '').toUpperCase(), items = [];
+    arr.forEach((n) => {
+      if (!n || typeof n.title !== 'string' || typeof n.link !== 'string' || !/^https:\/\//i.test(n.link) || !(n.providerPublishTime > 0)) return;
+      const rel = Array.isArray(n.relatedTickers) ? n.relatedTickers.map((x) => String(x).toUpperCase()) : [];
+      if (!rel.includes(sym) || rel.length > 3) return;
+      items.push({ symbol: sym, title: n.title.trim(), publisher: String(n.publisher || '').trim(), link: n.link, at: new Date(n.providerPublishTime * 1000).toISOString() });
+    });
+    return { items, unrecognized: false };
+  }
+
   function makeClient(opts) {
     const getRelay = opts.getRelay;
     const fetchFn = opts.fetch || function () { return globalThis.fetch.apply(globalThis, arguments); };
@@ -186,7 +201,12 @@
       return { symbol, splits: splitList(res) };
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits };
+    async function fetchNews(symbol) {
+      const data = await call('/news?symbol=' + encodeURIComponent(symbol));
+      return parseNews(data, symbol);
+    }
+
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
@@ -287,6 +307,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

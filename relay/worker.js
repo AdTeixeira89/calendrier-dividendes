@@ -51,8 +51,13 @@ export default {
       const q = (url.searchParams.get('q') || '').trim();
       if(!q || q.length > 80) return reply({ error: 'Requête invalide' }, 400, origin);
       target = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`;
+    }else if(url.pathname === '/news'){
+      // Actualités Yahoo Finance d'un titre (gratuit, sans clé).
+      const symbol = (url.searchParams.get('symbol') || '').trim();
+      if(!/^[A-Za-z0-9.\-^=]{1,20}$/.test(symbol)) return reply({ error: 'Symbole invalide' }, 400, origin);
+      target = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=0&newsCount=10&listsCount=0`;
     }else{
-      return reply({ error: 'Route inconnue (utilisez /chart ou /search)' }, 404, origin);
+      return reply({ error: 'Route inconnue (utilisez /chart, /search ou /news)' }, 404, origin);
     }
 
     // Cache de 6 h côté Cloudflare : ménage Yahoo et accélère les relances.

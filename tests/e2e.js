@@ -69,6 +69,11 @@ async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
   if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
+  if (u.pathname === '/news') {
+    const t = u.searchParams.get('symbol'); RELAY.newsCalls = (RELAY.newsCalls || []).concat(t);
+    const now = Math.floor(Date.now() / 1000);
+    return j({ news: t === 'AAPL' ? [{ title: 'Apple relève ses prévisions', publisher: 'Test Wire', link: 'https://example.com/a', providerPublishTime: now - 7200, relatedTickers: ['AAPL'] }, { title: 'Panorama des marchés', publisher: 'Test Wire', link: 'https://example.com/b', providerPublishTime: now - 3600, relatedTickers: ['AAPL', 'MSFT', 'NVDA', 'TSLA'] }, { title: 'Lien dangereux', publisher: 'X', link: 'javascript:alert(1)', providerPublishTime: now, relatedTickers: ['AAPL'] }] : [] });
+  }
   return route.fulfill({ status: 404 });
 }
 
@@ -671,7 +676,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(n1 >= 15 && n1 <= 25, '1 mois : séances quotidiennes (' + n1 + ' points)'); ok(n3 > n1 && n12 > n3 && nAll >= n12, 'plus la période est longue, plus de points : ' + [n1, n3, n12, nAll]);
     const hv = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 0, today: new Date() }); const last = h.points[h.points.length - 1]; return { v: last.value, cost: last.cost, partial: h.points.filter((q) => q.partial).length, allTx: h.allTx, first: h.points[0].value }; });
     eq(hv.first, 0, 'part de zéro avant la première opération'); ok(hv.allTx && hv.partial === 0, 'tous les actifs valorisés'); ok(Math.abs(hv.v - (30 * 175 + 5 * 190 / 1.2)) < 1 || hv.v > 0, 'valeur actuelle = quantités × cours du jour'); ok(hv.cost > 0 && Math.abs(hv.cost - (1402 + 772.705)) < 1.5, 'capital investi = coût de revient restant (' + hv.cost + ')');
-    const tip = async () => { await p.locator(chart + ' .hit').last().hover(); await p.waitForTimeout(200); return (await p.locator('.tip').innerText()).replace(/\n/g, ' | '); };
+    const tip = async () => { await p.locator(chart + ' .hit').last().hover({ force: true }); await p.waitForTimeout(200); return (await p.locator('.tip').innerText()).replace(/\n/g, ' | '); };
     const t1 = await tip(); ok(/Valeur : .*€/.test(t1) && /Capital investi/.test(t1) && /AIR LIQUIDE|L'Air Liquide/i.test(t1), 'infobulle détaillée : ' + t1);
     ok(!/vs PRU/i.test(await p.locator('#page').innerText()), 'aucune mention « vs PRU » sur l\'accueil');
     await p.click('#eyeBtn'); await p.waitForTimeout(250); const t3 = await tip(); ok(/masqués/.test(t3) && !/\d\s?€/.test(t3), 'chiffres masqués dans l\'infobulle : ' + t3);
@@ -856,6 +861,16 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.locator('[data-unign]').first().click().catch(async () => { await p.locator('summary:has-text("ignorées")').click(); await p.locator('[data-unign]').first().click(); }); await p.waitForTimeout(300);
     ok(/ressemble à une année/.test(await p.locator('.modal').innerText()), 'rétablie'); eq(Object.keys((await storeOf(p)).ignored).length, 0, 'ignorance retirée');
     eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('actualités : panneau à droite de l\'accueil limité à mes actifs (articles qui citent réellement le titre, pas les panoramas), liens sûrs, désactivable', async () => {
+    RELAY.old = false; RELAY.newsCalls = [];
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', price: 200, avgCost: 100 }), H(1, { ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Air Liquide', price: 170, avgCost: 100 })];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('home')); await p.waitForSelector('#newsBox .news-row'); const t = await p.locator('#newsBox').innerText();
+    ok(/Apple relève ses prévisions/.test(t) && /Test Wire/.test(t), 'article affiché : ' + t.replace(/\n/g, ' | ')); ok(!/Panorama/.test(t), 'panorama de marché (4 titres liés) écarté'); ok(!/dangereux/.test(t), 'lien non https écarté');
+    eq(await p.locator('#newsBox .news-row').count(), 1, 'un seul article retenu'); ok(/rien pour AI\.PA/.test(t), 'titre sans actualité signalé, rien d\'inventé');
+    eq((await p.locator('#newsBox .news-row').getAttribute('rel')), 'noopener noreferrer', 'lien sûr'); eq(RELAY.newsCalls.sort(), ['AAI.PA'.slice(1), 'AAPL'].sort(), 'chaque actif interrogé une fois');
+    await p.evaluate(() => { state.settings.news = false; saveState(); renderPage(); }); await p.waitForTimeout(200); eq(await p.locator('#newsBox').count(), 0, 'désactivable'); eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {

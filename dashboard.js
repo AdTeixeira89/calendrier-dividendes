@@ -96,12 +96,61 @@ function renderHome(host) {
     : '<div class="empty" style="padding:18px 8px"><h3>Données insuffisantes</h3><p>Renseignez le prix de revient de vos positions et actualisez les cours pour voir leurs performances.</p></div>') + '</section>';
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>') +
-    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>';
+    '<div class="home-wrap' + (newsOn() ? ' with-side' : '') + '"><div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>' +
+    (newsOn() ? '<aside class="home-side" id="newsBox" aria-label="Actualités de vos actifs"></aside>' : '') + '</div>';
+  if (newsOn()) drawNews($('#newsBox', host));
 
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
   $$('[data-goto]', host).forEach((b) => b.onclick = () => { view.divTab = b.dataset.goto; go('dividends'); });
+}
+
+/* ===============================================================
+   ACTUALITÉS de VOS actifs (Yahoo Finance via le relais, gratuit) — panneau latéral de l'accueil
+   Seuls les articles qui concernent réellement un titre détenu sont gardés ; cache 1 h ; rien n'est résumé ni inventé.
+   =============================================================== */
+const newsOn = () => state.settings.news !== false && !!state.settings.relayUrl && state.holdings.length > 0;
+const newsMem = { at: 0, key: '', data: null };
+function newsSymbols() {                    // les 12 positions les plus importantes (valeur, à défaut montant investi)
+  return visibleHoldings().filter((h) => h.ticker && !Market.isISIN(h.ticker)).map((h) => ({ h, w: Engine.value(h) || 0 })).sort((a, b) => b.w - a.w).slice(0, 12).map((x) => x.h);
+}
+function newsLoad(hs) {                     // un seul chargement à la fois par jeu de titres (les rendus répétés de l'accueil partagent la même requête)
+  const key = hs.map((h) => h.ticker).join(',');
+  if (newsMem.pending && newsMem.pendingKey === key) return newsMem.pending;
+  newsMem.pendingKey = key; newsMem.pending = newsFetch(hs, key).finally(() => { newsMem.pending = null; });
+  return newsMem.pending;
+}
+async function newsFetch(hs, key) {
+  const now = Date.now();
+  if (newsMem.data && newsMem.key === key && now - newsMem.at < 3600e3) return newsMem.data;
+  try { const c = JSON.parse(localStorage.getItem('dca_news') || 'null'); if (c && c.key === key && now - c.at < 3600e3) { Object.assign(newsMem, c); return c.data; } } catch (e) { /* ignoré */ }
+  let items = [], none = [], err = null;
+  for (const h of hs) {
+    try { const r = await market.fetchNews(h.ticker); if (r.items.length) items = items.concat(r.items.map((n) => Object.assign(n, { name: h.name || h.displayTicker || h.ticker, hid: h.id }))); else none.push(h.displayTicker || h.ticker); }
+    catch (e) { err = e; if (e.rate || e.fatal) break; }
+  }
+  if (!items.length && err) throw err;
+  const seen = new Set(); items = items.sort((a, b) => (a.at < b.at ? 1 : -1)).filter((n) => !seen.has(n.link) && seen.add(n.link)).slice(0, 40);
+  const data = { items, none, at: new Date().toISOString() };
+  Object.assign(newsMem, { at: now, key, data }); try { localStorage.setItem('dca_news', JSON.stringify({ at: now, key, data })); } catch (e) { /* ignoré */ }
+  return data;
+}
+function newsCard(inner) { return '<section class="card card-pad"><div class="card-head"><h3>Actualités</h3><span class="muted" style="font-size:12px">vos actifs · Yahoo Finance</span></div>' + inner + '</section>'; }
+async function drawNews(box) {
+  if (!box) return;
+  const hs = newsSymbols(); if (!hs.length) { box.innerHTML = newsCard('<p class="muted" style="font-size:13px">Aucun actif avec un ticker.</p>'); return; }
+  box.innerHTML = newsCard('<p class="muted" style="font-size:13px">Chargement…</p>');
+  try {
+    const d = await newsLoad(hs); if (!document.body.contains(box)) return;
+    const ago = (iso) => { const h = Math.max(0, (Date.now() - Date.parse(iso)) / 3600e3); return h < 1 ? 'il y a moins d\'1 h' : h < 24 ? 'il y a ' + Math.round(h) + ' h' : fmtDate(iso.slice(0, 10), { day: 'numeric', month: 'short' }); };
+    const rows = d.items.slice(0, 8).map((n) => '<a class="news-row" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer"><span class="news-h"><b>' + esc(n.symbol) + '</b><small class="muted">' + esc(n.publisher) + ' · ' + esc(ago(n.at)) + '</small></span><span class="news-t">' + esc(n.title) + '</span></a>').join('');
+    box.innerHTML = newsCard((rows || '<div class="muted" style="font-size:13px;padding:6px 0">Aucune actualité trouvée pour vos actifs.</div>') +
+      '<p class="hint" style="margin:8px 0 0">Articles Yahoo Finance qui citent vos titres (le plus souvent en anglais). Couverture surtout américaine' + (d.none.length ? ' : rien pour ' + d.none.slice(0, 6).map(esc).join(', ') + (d.none.length > 6 ? '…' : '') : '') + '. Informatif, pas un conseil.</p>');
+  } catch (e) {
+    if (!document.body.contains(box)) return;
+    box.innerHTML = newsCard('<div class="notice warn"><span>' + esc(/404|invalide/i.test(e.message) ? 'Mettez à jour le relais Cloudflare (route /news absente).' : e.message) + '</span></div>');
+  }
 }
 
 /* ===============================================================

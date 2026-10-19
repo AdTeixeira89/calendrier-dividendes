@@ -63,6 +63,10 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Actualités de vos actifs
+
+Panneau « Actualités » à droite de l'Accueil (sous les cartes sur mobile) : articles **Yahoo Finance** (gratuit, sans clé, via le relais) qui citent **vos** titres — les 12 plus importants. Seuls les articles dont les titres liés incluent votre actif sont gardés (les panoramas de marché à plus de 3 titres sont écartés), liens https uniquement, cache 1 h. La couverture est surtout américaine : les titres sans article sont signalés, rien n'est inventé ni résumé. Case dans Paramètres pour le désactiver ; nécessite de **redéployer `relay/worker.js`** (route `/news`).
+
 ## Ignorer une anomalie
 
 Dans « Contrôle de l'historique », chaque anomalie a un bouton **Ignorer** : elle est masquée et n'est plus comptée (bandeau, alertes), sans rien modifier aux données. Elle est listée sous « Anomalies ignorées » avec **Rétablir** ; l'action est annulable immédiatement. Si les chiffres qui la motivent changent (quantité, écart…), l'anomalie **réapparaît** d'elle-même.

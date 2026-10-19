@@ -76,3 +76,9 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   const h2 = { id: '2', ticker: 'NOVO-B.CO', type: 'stock', geoLocked: true, sector: 'Ma saisie', country: 'Mon pays', dividend: {} }; M.applyToHolding(h2, a, '2026-10-14'); assert.deepStrictEqual([h2.sector, h2.country], ['Ma saisie', 'Mon pays']);
   console.log('ok   historique de cours mensuel, secteur et pays (dérivé ou saisi)');
 })();
+(async () => {
+  const now = Math.floor(Date.now() / 1000), j = { news: [{ title: ' A ', publisher: 'P', link: 'https://x.dev/a', providerPublishTime: now, relatedTickers: ['AAPL'] }, { title: 'B', link: 'https://x.dev/b', providerPublishTime: now, relatedTickers: ['AAPL', 'A', 'B', 'C'] }, { title: 'C', link: 'http://x.dev/c', providerPublishTime: now, relatedTickers: ['AAPL'] }, { title: 'D', link: 'https://x.dev/d', providerPublishTime: now, relatedTickers: ['MSFT'] }, { title: 'E', link: 'https://x.dev/e', relatedTickers: ['AAPL'] }] };
+  const r = M.parseNews(j, 'aapl'); assert.deepStrictEqual(r.items.map((x) => x.title), ['A'], 'seul l\'article ciblant ce titre, https, daté'); assert.strictEqual(M.parseNews({}, 'X').unrecognized, true);
+  console.log('ok   actualités : seuls les articles qui citent le titre (pas de panorama), liens https, date obligatoire');
+})();
+
