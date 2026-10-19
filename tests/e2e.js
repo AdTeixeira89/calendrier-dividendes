@@ -69,6 +69,7 @@ async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null); return j({ quotes: s ? [{ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null }] : [] }); }
   if (u.pathname === '/chart') { const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
+  if (u.pathname === '/translate' && RELAY.trOld) return route.fulfill({ status: 404 });
   if (u.pathname === '/translate') { RELAY.trCalls = (RELAY.trCalls || []).concat([u.searchParams.getAll('t')]); return j({ translations: u.searchParams.getAll('t').map((t) => (RELAY.trFail ? null : 'FR: ' + t)) }); }
   if (u.pathname === '/news') {
     const t = u.searchParams.get('symbol'); RELAY.newsCalls = (RELAY.newsCalls || []).concat(t);
@@ -872,6 +873,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(await p.locator('#newsBox .news-row').count(), 1, 'un seul article retenu'); ok(/rien pour AI\.PA/.test(t), 'titre sans actualité signalé, rien d\'inventé');
     eq((await p.locator('#newsBox .news-row').getAttribute('rel')), 'noopener noreferrer', 'lien sûr'); eq(RELAY.newsCalls.sort(), ['AAI.PA'.slice(1), 'AAPL'].sort(), 'chaque actif interrogé une fois');
     RELAY.trFail = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(!/FR:/.test(await p.locator('#newsBox').innerText()), 'traduction indisponible : titre d\'origine conservé'); RELAY.trFail = false;
+    RELAY.trOld = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(/mettez à jour le relais/i.test(await p.locator('#newsBox').innerText()), 'ancien relais : message explicite au lieu d\'un échec silencieux'); RELAY.trOld = false;
     await p.evaluate(() => { state.settings.news = false; saveState(); renderPage(); }); await p.waitForTimeout(200); eq(await p.locator('#newsBox').count(), 0, 'désactivable'); eq(p.errors, [], 'aucune erreur JS');
   });
 

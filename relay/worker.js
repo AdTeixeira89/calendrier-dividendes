@@ -38,20 +38,29 @@ export default {
     let target;
 
     if(url.pathname === '/translate'){
-      // Traduction automatique en français des titres d'actualités (service public de traduction de Google, sans clé).
+      // Traduction automatique en français des titres d'actualités (service public de traduction de Google, puis MyMemory en secours ; sans clé).
       // Jusqu'à 10 titres de 220 caractères au plus ; en cas d'échec, la traduction est null (l'application garde le titre d'origine).
       const titles = url.searchParams.getAll('t').slice(0, 10).map((x) => x.slice(0, 220));
       if(!titles.length) return reply({ error: 'Aucun titre' }, 400, origin);
+      const dec = (x) => x.replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      const viaGoogle = async (t) => {
+        const r = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fr&dt=t&q=' + encodeURIComponent(t), { headers: { 'User-Agent': UA }, cf: { cacheTtl: 86400, cacheEverything: true } });
+        if(!r.ok) return null;
+        const d = await r.json();
+        return Array.isArray(d && d[0]) ? d[0].map((seg) => (seg && seg[0]) || '').join('').trim() : null;
+      };
+      const viaMyMemory = async (t) => {           // secours gratuit sans clé (quota quotidien limité)
+        const r = await fetch('https://api.mymemory.translated.net/get?langpair=en%7Cfr&q=' + encodeURIComponent(t), { headers: { 'User-Agent': UA }, cf: { cacheTtl: 86400, cacheEverything: true } });
+        if(!r.ok) return null;
+        const d = await r.json();
+        const fr = d && d.responseData && typeof d.responseData.translatedText === 'string' ? dec(d.responseData.translatedText).trim() : '';
+        return fr && !/MYMEMORY WARNING|QUERY LENGTH LIMIT/i.test(fr) ? fr : null;
+      };
       const out = await Promise.all(titles.map(async (t) => {
-        try{
-          const r = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fr&dt=t&q=' + encodeURIComponent(t), {
-            headers: { 'User-Agent': UA }, cf: { cacheTtl: 86400, cacheEverything: true },
-          });
-          if(!r.ok) return null;
-          const d = await r.json();
-          const fr = Array.isArray(d && d[0]) ? d[0].map((seg) => (seg && seg[0]) || '').join('').trim() : '';
-          return fr || null;
-        }catch(e){ return null; }
+        for(const f of [viaGoogle, viaMyMemory]){
+          try{ const fr = await f(t); if(fr) return fr; }catch(e){ /* service suivant */ }
+        }
+        return null;
       }));
       return reply({ translations: out }, 200, origin, { 'Cache-Control': 'public, max-age=86400' });
     }
