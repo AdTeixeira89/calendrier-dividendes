@@ -63,6 +63,10 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Ignorer une anomalie
+
+Dans « Contrôle de l'historique », chaque anomalie a un bouton **Ignorer** : elle est masquée et n'est plus comptée (bandeau, alertes), sans rien modifier aux données. Elle est listée sous « Anomalies ignorées » avec **Rétablir** ; l'action est annulable immédiatement. Si les chiffres qui la motivent changent (quantité, écart…), l'anomalie **réapparaît** d'elle-même.
+
 ## Quiver Quantitative (optionnel)
 
 Panneau « Congrès américain » à droite de l'Accueil (sous les cartes sur mobile) : dernières transactions déclarées par des élus américains sur **vos actifs cotés aux États-Unis** (flux général s'il n'y en a aucun). Désactivé par défaut (Paramètres → Données de marché). Nécessite un **abonnement API Quiver** ; le jeton est un **secret du relais** (`QUIVER_TOKEN` dans Cloudflare → Variables and Secrets), jamais stocké dans l'application ni envoyé au navigateur ; redéployez `relay/worker.js` pour la route `/quiver` (cache 1 h côté relais, 6 h côté application). Les lignes sans titre ou sans date sont écartées, jamais complétées. Données publiques, déclarées avec retard et en fourchettes : informatif, pas un conseil.

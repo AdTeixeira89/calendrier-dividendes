@@ -67,7 +67,7 @@ function hydrateState(parsed) {
     s.holdings = Array.isArray(s.holdings) ? s.holdings : [];
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
-    s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {};
+    s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {}; if (!s.ignored || typeof s.ignored !== 'object' || Array.isArray(s.ignored)) s.ignored = {};
     s.archive = Array.isArray(s.archive) ? s.archive : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
     if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;

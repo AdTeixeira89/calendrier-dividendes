@@ -336,6 +336,12 @@ t('DIAGNOSTIC : quantité qui ressemble à une année (2026) ou écart avec la p
   assert.ok(y && y.refQty === 12 && y.act.includes('set_ref_qty')); assert.ok(z && z.refQty === 5); assert.strictEqual(s.holdings[0].quantity, 2026, 'rien n\'est modifié par le diagnostic');
   const s2 = emptyState(); s2.holdings.push(hold({ id: 'y', isin: 'FR0000120073', name: 'AIR', quantity: 2026 })); const y2 = L.diagnose(s2, { today: '2026-10-15' }).items.find((i) => i.code === 'qty_year'); assert.ok(y2 && y2.act.join() === 'edit');
 });
+t('DIAGNOSTIC : anomalie ignorée = masquée et non comptée, rétablissable ; elle réapparaît si les chiffres changent', () => {
+  const s = emptyState(); s.holdings.push(hold({ id: 'y', isin: 'FR0000120073', name: 'AIR', quantity: 2026 }));
+  const d1 = L.diagnose(s, { today: '2026-10-15' }), it = d1.items.find((i) => i.code === 'qty_year'); assert.ok(it && it.sig && d1.counts.error === 1);
+  s.ignored = { [it.sig]: { at: '2026-10-16T10:00:00Z' } }; const d2 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(!d2.items.some((i) => i.code === 'qty_year')); assert.strictEqual(d2.counts.error, 0); assert.strictEqual(d2.ignored.length, 1);
+  s.holdings[0].quantity = 2025; const d3 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(d3.items.some((i) => i.code === 'qty_year'), 'cause différente : réapparaît'); assert.strictEqual(d3.ignored.length, 0);
+});
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(
     hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),

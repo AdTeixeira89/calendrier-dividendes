@@ -865,6 +865,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors.filter((e) => !/501/.test(e)), [], 'aucune erreur JS'); RELAY.quiver = 'ok';
   });
 
+  await test('contrôle : une anomalie peut être ignorée (masquée, non comptée dans le bandeau), rétablie, annulée ; rien n\'est modifié', async () => {
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AIR', displayTicker: 'AIR', isin: 'FR0000120073', name: 'AIR LIQUIDE', quantity: 2026, avgCost: 100 })];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => openDiagnostic()); await p.waitForSelector('.diag-item');
+    await p.locator('.diag-item [data-ign]').first().click(); await p.waitForTimeout(300); await p.waitForSelector('.modal');
+    const t = await p.locator('.modal').innerText(); ok(!/ressemble à une année/.test(t.split('Anomalies ignorées')[0]), 'anomalie masquée de la liste active'); ok(/Anomalies ignorées \(1\)/.test(t), 'section « ignorées » avec compteur');
+    const st = await storeOf(p); eq(Object.keys(st.ignored).length, 1, 'ignorance enregistrée'); eq(st.holdings[0].quantity, 2026, 'aucune donnée modifiée');
+    await p.locator('[data-unign]').first().click().catch(async () => { await p.locator('summary:has-text("ignorées")').click(); await p.locator('[data-unign]').first().click(); }); await p.waitForTimeout(300);
+    ok(/ressemble à une année/.test(await p.locator('.modal').innerText()), 'rétablie'); eq(Object.keys((await storeOf(p)).ignored).length, 0, 'ignorance retirée');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {
     const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple réelle', quantity: 3, avgCost: 90 }), H(1, { ticker: 'OLD', displayTicker: 'OLD', isin: 'FR0000120271', name: 'Ancienne 2019', quantity: 5, avgCost: 10, source: 'degiro', derived: true })];

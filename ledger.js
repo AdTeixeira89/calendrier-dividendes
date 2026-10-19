@@ -699,8 +699,13 @@
     if (refs.mode === 'file') refs.map.forEach((p, isin) => { if (!insts.some(({ h }) => canon(alias, holdingIsin(h)) === isin && (h.kind !== 'archive'))) push({ level: 'warn', code: 'ref_missing', isin, name: p.name, instId: null, cause: 'Position réelle (' + p.qty + ') absente de l\'application.', action: 'Importer l\'historique ou ajouter la position (Mon portefeuille → Importer un relevé).' }); });
     const order = { error: 0, warn: 1, info: 2 };
     items.sort((a, b) => order[a.level] - order[b.level] || String(a.name).localeCompare(String(b.name)));
+    // anomalies ignorées par l'utilisateur : signature = code + actif + empreinte de la cause (si les chiffres changent, l'anomalie réapparaît)
+    const hash = (str) => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+    items.forEach((it) => { it.sig = it.code + '|' + (it.isin || it.instId || norm(it.name)) + '|' + hash(String(it.cause || '')); });
+    const ign = state.ignored || {}, ignored = items.filter((it) => ign[it.sig]).map((it) => Object.assign({}, it, { ignoredAt: ign[it.sig].at || null })), kept = items.filter((it) => !ign[it.sig]);
+    items.length = 0; kept.forEach((it) => items.push(it));
     const imp = (state.imports || []).slice(-1)[0] || null;
-    return { items, rows, reference: { mode: refs.mode, count: refs.map.size, at: refs.at || null }, lastImport: imp ? { at: imp.at, name: imp.name, report: imp.report } : null,
+    return { items, ignored, rows, reference: { mode: refs.mode, count: refs.map.size, at: refs.at || null }, lastImport: imp ? { at: imp.at, name: imp.name, report: imp.report } : null,
       counts: { error: items.filter((i) => i.level === 'error').length, warn: items.filter((i) => i.level === 'warn').length, info: items.filter((i) => i.level === 'info').length,
         negative: rows.filter((r) => r.calc !== null && r.calc < -EPS).length, zeroHeld: items.filter((i) => i.code === 'zero_held').length } };
   }
