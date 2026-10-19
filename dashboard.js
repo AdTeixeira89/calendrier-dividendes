@@ -82,10 +82,11 @@ function renderHome(host) {
   const yEvs = Engine.buildEvents(state, new Date(y, 0, 1), new Date(y, 11, 31), today, ids);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const series = Engine.monthlySeries(state, y, mode, convert, today, ids);
-  const divCard = '<section class="card card-pad"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
+  const divBars = (h_, w_) => stackedBars({ w: w_, tipLabels: w_ ? MOIS_C : null, labels: w_ ? MOIS_C.map((m_) => m_.charAt(0).toUpperCase()) : MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: h_, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] });
+  const divCard = '<section class="card card-pad" id="divCardEl"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
     '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
     '<div><span>À venir</span>' + sens('<b>' + money(yUp.total, 0) + '</b>') + '</div><div><span>Prochain</span><b>' + (first ? esc(first.ticker) + '</b><small>' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '</small>' : '—</b>') + '</div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: 150, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>';
+    '<div id="divChart">' + divBars(150) + '</div></section>';
 
   /* --- 3. « PERFORMANCES » : les 5 positions les plus rentables et les 5 plus négatives (plus-value latente / montant investi) --- */
   const perfAll = Engine.performance(state, convert, ids), ranked = perfAll.rows.filter((r) => r.pct !== null).sort((x, y2) => y2.pct - x.pct);
@@ -100,6 +101,19 @@ function renderHome(host) {
     (newsOn() ? '<aside class="home-side" id="newsBox" aria-label="Actualités de vos actifs"></aside>' : '') + '</div>';
   if (newsOn()) drawNews($('#newsBox', host));
 
+  // la carte « Dividendes » prend la même hauteur que la carte « Valeur du portefeuille » (côte à côte) : le graphique des dividendes s'agrandit en conséquence
+  const fitDiv = () => {
+    const hero_ = $('.hero', host), card_ = $('#divCardEl', host), box_ = $('#divChart', host); if (!hero_ || !card_ || !box_) return;
+    box_.innerHTML = divBars(150);
+    if (!window.matchMedia('(min-width:900px)').matches) return;
+    // échelle 1:1 (texte lisible, initiales des mois) : le graphique garde ses proportions et gagne la hauteur manquante
+    const cw = Math.round(box_.clientWidth); if (cw < 120) return;
+    box_.innerHTML = divBars(120, cw);
+    const extra = hero_.offsetHeight - card_.offsetHeight;
+    if (extra > 4) box_.innerHTML = divBars(Math.min(700, 120 + extra), cw);
+  };
+  fitDiv(); if (host._fitDiv) window.removeEventListener('resize', host._fitDiv);
+  let ft; host._fitDiv = () => { if (!document.body.contains(host) || !$('#divCardEl', host)) { window.removeEventListener('resize', host._fitDiv); return; } clearTimeout(ft); ft = setTimeout(fitDiv, 120); }; window.addEventListener('resize', host._fitDiv);
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });

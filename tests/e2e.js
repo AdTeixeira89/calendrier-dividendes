@@ -875,6 +875,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { state.settings.news = false; saveState(); renderPage(); }); await p.waitForTimeout(200); eq(await p.locator('#newsBox').count(), 0, 'désactivable'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('accueil : la carte Dividendes a la même hauteur que la carte Valeur du portefeuille (côte à côte) ; empilées sur mobile sans débordement', async () => {
+    const p = await device({ guest: true, seed: PSEED(3), viewport: { width: 1280, height: 1000 } }); await p.open(); await p.waitForSelector('#divCardEl'); await p.waitForTimeout(300);
+    const hs = await p.evaluate(() => [document.querySelector('.hero').offsetHeight, document.querySelector('#divCardEl').offsetHeight]); ok(Math.abs(hs[0] - hs[1]) <= 6, 'hauteurs égales : ' + hs.join(' / ')); await shot(p, 'home-equal');
+    await p.setViewportSize({ width: 1000, height: 1000 }); await p.waitForTimeout(500); const h2 = await p.evaluate(() => [document.querySelector('.hero').offsetHeight, document.querySelector('#divCardEl').offsetHeight]); ok(Math.abs(h2[0] - h2[1]) <= 6, 'après redimensionnement : ' + h2.join(' / '));
+    const m = await device({ guest: true, seed: PSEED(3), mobile: true, viewport: { width: 390, height: 844 } }); await m.open(); await m.waitForSelector('#divCardEl'); await m.waitForTimeout(300);
+    const mw = await m.evaluate(() => [document.documentElement.scrollWidth, innerWidth, document.querySelector('#divCardEl').offsetHeight]); ok(mw[0] <= mw[1] + 1, 'pas de défilement horizontal : ' + mw.join('/')); ok(mw[2] < 520, 'carte empilée de hauteur normale : ' + mw[2]);
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {
     const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple réelle', quantity: 3, avgCost: 90 }), H(1, { ticker: 'OLD', displayTicker: 'OLD', isin: 'FR0000120271', name: 'Ancienne 2019', quantity: 5, avgCost: 10, source: 'degiro', derived: true })];

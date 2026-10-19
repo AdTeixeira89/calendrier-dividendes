@@ -346,7 +346,7 @@ function axisFmt(v, cur) {
 
 /* Barres empilées. layers : [{ name, color, values[], dashed? }] */
 function stackedBars(o) {
-  const W = 640, H = o.h || 230, L = 44, R = 8, T = 10, B = 26;
+  const W = o.w || 640, H = o.h || 230, L = o.w ? 36 : 44, R = 8, T = 10, B = 26;
   const n = o.labels.length, mask = !!o.mask;
   const totals = o.labels.map((_, i) => o.layers.reduce((s, l) => s + (l.values[i] || 0), 0));
   const max = niceMax(Math.max.apply(null, totals.concat([0.01])));
@@ -366,7 +366,7 @@ function stackedBars(o) {
     });
     svg += '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(lab) + '</text>';
     // zone de survol / de toucher sur toute la hauteur de la colonne
-    const lines = [lab].concat(mask ? ['Montants masqués'] : o.layers.filter((l) => (l.values[i] || 0) > 0).map((l) => l.name + ' : ' + fmtMoney(l.values[i], o.cur)).concat(o.layers.filter((l) => (l.values[i] || 0) > 0).length > 1 ? ['Total : ' + fmtMoney(totals[i], o.cur)] : (totals[i] > 0 ? [] : ['Aucun versement'])));
+    const lines = [o.tipLabels ? o.tipLabels[i] : lab].concat(mask ? ['Montants masqués'] : o.layers.filter((l) => (l.values[i] || 0) > 0).map((l) => l.name + ' : ' + fmtMoney(l.values[i], o.cur)).concat(o.layers.filter((l) => (l.values[i] || 0) > 0).length > 1 ? ['Total : ' + fmtMoney(totals[i], o.cur)] : (totals[i] > 0 ? [] : ['Aucun versement'])));
     svg += '<rect class="hit" x="' + (L + bw * i) + '" y="' + T + '" width="' + bw + '" height="' + (H - T - B + 18) + '" fill="transparent" data-tip="' + esc(lines.join('\n')) + '"/>';
   });
   svg += '</svg>';
