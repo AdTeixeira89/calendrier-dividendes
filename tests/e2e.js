@@ -726,7 +726,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     RELAY.old = false;
     for (const w of [360, 390]) {
       const p = await device({ guest: true, mobile: true, viewport: { width: w, height: 800 } }); await p.open(); await dgOpen(p, DG_CSV);
-      const over = async (what) => { const o = await p.evaluate(() => { const bad = []; document.querySelectorAll('.modal, .modal *, #page *').forEach((e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.right > innerWidth + 1 && !e.closest('.tbl-wrap') && !e.closest('svg')) bad.push(e.tagName + '.' + e.className); }); return { sw: document.documentElement.scrollWidth, iw: innerWidth, bad: bad.slice(0, 4) }; }); ok(o.sw <= o.iw + 1 && !o.bad.length, what + ' à ' + w + ' px : ' + JSON.stringify(o)); };
+      const over = async (what) => { const o = await p.evaluate(() => { const bad = []; document.querySelectorAll('.modal, .modal *, #page *').forEach((e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.right > innerWidth + 1 && !e.closest('.tbl-wrap') && !e.closest('.ticker-track') && !e.closest('svg')) bad.push(e.tagName + '.' + e.className); }); return { sw: document.documentElement.scrollWidth, iw: innerWidth, bad: bad.slice(0, 4) }; }); ok(o.sw <= o.iw + 1 && !o.bad.length, what + ' à ' + w + ' px : ' + JSON.stringify(o)); };
       await over('modale d\'import'); await dgConfirm(p); await waitIdle(p);
       for (const [tab, label] of [['ops', 'opérations'], ['closed', 'clôturées'], ['positions', 'positions']]) { await p.evaluate((t) => { view.port.tab = t; go('portfolio'); renderPage(); }, tab); await p.waitForTimeout(250); await over(label); }
       await p.evaluate(() => go('home')); await p.waitForTimeout(400); if (process.env.SHOTS && w === 360) await p.screenshot({ path: process.env.SHOTS + '/mobile-home.png', fullPage: true }); await over('accueil'); eq(p.errors, [], 'aucune erreur JS');
@@ -885,6 +885,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.setViewportSize({ width: 1000, height: 1000 }); await p.waitForTimeout(500); const h2 = await p.evaluate(() => [document.querySelector('.hero').offsetHeight, document.querySelector('#divCardEl').offsetHeight]); ok(Math.abs(h2[0] - h2[1]) <= 6, 'après redimensionnement : ' + h2.join(' / '));
     const m = await device({ guest: true, seed: PSEED(3), mobile: true, viewport: { width: 390, height: 844 } }); await m.open(); await m.waitForSelector('#divCardEl'); await m.waitForTimeout(300);
     const mw = await m.evaluate(() => [document.documentElement.scrollWidth, innerWidth, document.querySelector('#divCardEl').offsetHeight]); ok(mw[0] <= mw[1] + 1, 'pas de défilement horizontal : ' + mw.join('/')); ok(mw[2] < 520, 'carte empilée de hauteur normale : ' + mw[2]);
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('accueil : bandeau compact des prochains dividendes tout en haut (au-dessus de la valeur du portefeuille), défilant, détail au survol, clic = calendrier', async () => {
+    const p = await device({ guest: true, seed: PSEED(3), viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForSelector('.ticker.compact'); await shot(p, 'home-ticker');
+    const g = await p.evaluate(() => { const t = document.querySelector('.ticker.compact').getBoundingClientRect(), h = document.querySelector('.hero').getBoundingClientRect(); return [t.top, t.height, h.top, document.querySelectorAll('.ticker.compact .tk-chip').length]; });
+    ok(g[0] < g[2], 'bandeau au-dessus de la carte Valeur du portefeuille'); ok(g[1] <= 60, 'compact : ' + Math.round(g[1]) + ' px'); ok(g[3] >= 1, g[3] + ' pastille(s) de versement');
+    ok(/[A-Z0-9]/.test(await p.locator('.ticker.compact .tk-chip').first().innerText()) && /€|\$/.test(await p.locator('.ticker.compact .tk-chip').first().innerText()), 'pastille : ticker et montant');
+    await p.locator('.ticker.compact .tk-chip').first().hover(); await p.waitForTimeout(250); ok(await p.locator('.tip').isVisible(), 'détail au survol');
+    await p.locator('.ticker.compact .tk-chip').first().click(); await p.waitForTimeout(300); eq(await p.evaluate(() => view.page), 'dividends', 'clic : calendrier des dividendes');
+    const m = await device({ guest: true, seed: PSEED(3), mobile: true, viewport: { width: 390, height: 844 } }); await m.open(); await m.waitForSelector('.ticker.compact');
+    const mw = await m.evaluate(() => [document.documentElement.scrollWidth, innerWidth, document.querySelector('.ticker.compact').getBoundingClientRect().height]); ok(mw[0] <= mw[1] + 1 && mw[2] <= 60, 'mobile : pas de débordement, compact : ' + mw.join('/'));
     eq(p.errors, [], 'aucune erreur JS');
   });
 

@@ -494,3 +494,9 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .news-row:first-of-type{border-top:0} .news-row:hover .news-t{text-decoration:underline}
 .news-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px} .news-h small{margin-left:auto}
 .news-t{display:block;font-size:13.5px;line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
+
+/* Accueil : bandeau compact des prochains dividendes, tout en haut, défilant */
+.ticker.compact{display:flex;align-items:center;gap:10px;margin:0 0 12px;min-height:38px}
+.ticker.compact .tk-lbl{flex:none;font-size:10.5px;line-height:1.15;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.ticker.compact .ticker-track{flex:1;min-width:0;padding:2px 0}
+@media (max-width:640px){ .ticker.compact .tk-lbl{display:none} }

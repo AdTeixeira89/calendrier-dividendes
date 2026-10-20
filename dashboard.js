@@ -97,6 +97,7 @@ function renderHome(host) {
     : '<div class="empty" style="padding:18px 8px"><h3>Données insuffisantes</h3><p>Renseignez le prix de revient de vos positions et actualisez les cours pour voir leurs performances.</p></div>') + '</section>';
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>') +
+    '<section class="ticker compact" aria-label="Prochains dividendes"><span class="tk-lbl">Prochains<br>dividendes</span>' + (next.length ? tickerHtml(next, mask) : '<span class="muted" style="font-size:13px">Aucun versement attendu dans les 4 prochains mois.</span>') + '</section>' +
     '<div class="home-wrap' + (newsOn() ? ' with-side' : '') + '"><div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>' +
     (newsOn() ? '<aside class="home-side" id="newsBox" aria-label="Actualités de vos actifs"></aside>' : '') + '</div>';
   if (newsOn()) drawNews($('#newsBox', host));
@@ -114,6 +115,8 @@ function renderHome(host) {
   };
   fitDiv(); if (host._fitDiv) window.removeEventListener('resize', host._fitDiv);
   let ft; host._fitDiv = () => { if (!document.body.contains(host) || !$('#divCardEl', host)) { window.removeEventListener('resize', host._fitDiv); return; } clearTimeout(ft); ft = setTimeout(fitDiv, 120); }; window.addEventListener('resize', host._fitDiv);
+  const trk = $('#tickerTrack', host); if (trk) startTickerScroll(trk);
+  $$('.tk-chip', host).forEach((c) => c.addEventListener('click', () => { view.divTab = 'calendar'; go('dividends'); }));
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
