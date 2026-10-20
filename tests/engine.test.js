@@ -263,4 +263,16 @@ console.log(n + ' tests passed');
     assert.strictEqual(E.xirr(mkHist([{ date: '2025-09-01', f: 1000 }], 1100), ref).rate, null); assert.ok(/un an/.test(E.xirr(mkHist([{ date: '2025-09-01', f: 1000 }], 1100), ref).reason));
     assert.strictEqual(E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }], 1100, true), ref).rate, null); assert.strictEqual(E.xirr(mkHist([{ date: '2024-01-01', f: 1000 }], 1100, false, false), ref).rate, null);
   });
+  t('TRI (XIRR) sur les seules positions exploitables : positions rétrospectives ou sans cours exclues et comptées à part, jamais inventées', () => {
+    const cvAt = (a, c) => a; const td2 = new Date(2026, 9, 14);
+    const hh2 = (id, o) => Object.assign({ id, ticker: id, displayTicker: id, name: id.toUpperCase(), type: 'stock', currency: 'EUR', quantity: 0, avgCost: null, account: 'a', dividend: {} }, o);
+    const mk = (id, date, type, qty, price) => ({ id: id + date, holdingId: id, date, type, qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'degiro' });
+    // A : achetée il y a plus de 2 ans, cours ×1,21 ; B : sans opérations (rétrospective) ; C : avec opérations mais sans cours aujourd'hui
+    const A = hh2('a', { quantity: 10, price: 121, hist: { from: '2024-09', c: [100, 110, 115, 121] } }), B = hh2('b', { quantity: 5, price: 50, hist: { from: '2026-01', c: [50, 50] } }), Cc = hh2('c', { quantity: 3, price: 0 });
+    const s = { holdings: [A, B, Cc], archive: [], payments: [], transactions: [mk('a', '2024-09-10', 'buy', 10, 100), mk('c', '2025-01-10', 'buy', 3, 10)] };
+    const h = E.portfolioHistory(s, cvAt, { months: 0, today: td2 }), x = E.xirr(h, td2);
+    assert.ok(x.rate !== null && x.scope, 'calculé sur le sous-ensemble : ' + JSON.stringify(x)); assert.deepStrictEqual([x.scope.held, x.scope.total], [1, 3]); assert.ok(x.scope.excluded.includes('B') && x.scope.excluded.includes('C'), 'exclues : ' + x.scope.excluded);
+    assert.ok(x.rate > 0.05 && x.rate < 0.15, '1 000 € → 1 210 € en ~2 ans ≈ 10 %/an : ' + x.rate);
+    const s2 = { holdings: [B], archive: [], payments: [], transactions: [] }; assert.strictEqual(E.xirr(E.portfolioHistory(s2, cvAt, { months: 0, today: td2 }), td2).rate, null, 'aucune opération : données insuffisantes');
+  });
 })();

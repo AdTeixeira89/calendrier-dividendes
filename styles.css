@@ -500,3 +500,5 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
 .ticker.compact .tk-lbl{flex:none;font-size:10.5px;line-height:1.15;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .ticker.compact .ticker-track{flex:1;min-width:0;padding:2px 0}
 @media (max-width:640px){ .ticker.compact .tk-lbl{display:none} }
+
+.xirr-chip small{font-size:10px;color:var(--muted);font-weight:500}

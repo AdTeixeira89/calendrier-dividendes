@@ -146,7 +146,7 @@ Limites à connaître : l'export *Transactions* de DEGIRO ne contient ni dépôt
 - *Split / regroupement* : quantité × ratio, coût inchangé. *Sortie hors transaction* : quantité et coût à zéro, sans résultat réalisé inventé.
 - Dividendes, dépôts, retraits, frais de connexion et conversions de devises ne sont jamais traités comme des achats ou des ventes.
 
-**Rendement annuel moyen (accueil)** : TRI / XIRR sur les flux datés (chaque achat en sortie, chaque vente en entrée, en devise de base au taux du mois) + valeur actuelle, **dividendes exclus**. « Données insuffisantes » si l'historique couvre moins d'un an, si une position n'a pas d'historique d'opérations cohérent, ou si des cours manquent. La courbe PERFORMANCES, elle, est pondérée dans le temps (Dietz modifié par intervalle).
+**Rendement annuel moyen (accueil)** : TRI / XIRR sur les flux datés (chaque achat en sortie, chaque vente en entrée, en devise de base au taux du mois) + valeur actuelle, **dividendes exclus**. Si toutes les positions sont exploitables, le calcul porte sur tout le portefeuille ; sinon il est fait **sur les seules positions dont l'historique d'opérations est cohérent et dont le cours est disponible** (positions soldées incluses), et l'indicateur précise « sur N / M positions » (les exclues sont listées dans l'infobulle, jamais estimées). « Données insuffisantes » (avec la raison affichée sous le titre) si l'historique couvre moins d'un an ou si aucune position n'est exploitable. La courbe PERFORMANCES, elle, est pondérée dans le temps (Dietz modifié par intervalle).
 
 ## Export CSV (tableur)
 

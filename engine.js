@@ -485,7 +485,7 @@
     const ptr = list.map(() => 0);
     const qtyAt = (x, i, d) => { if (!x.txMode) return x.q0; while (ptr[i] < x.cumul.length && x.cumul[ptr[i]].date <= d) ptr[i]++; return ptr[i] ? Math.max(0, x.cumul[ptr[i] - 1].q) : 0; };
     const costAt = (x, d) => { if (!x.txMode || !x.rowsAt) return null; let c = 0; for (let k = 0; k < x.rowsAt.length; k++) { if (x.rowsAt[k].date <= d) c = x.rowsAt[k].costAfter; else break; } return c; };
-    const missingEver = {};
+    const missingEver = {}, lastVals = {};
     const points = sample.map((d) => {
       const live = d === todayS, ymm = d.slice(0, 7);
       let value = 0, cost = 0, costKnown = true, partial = false; const miss = [], parts = [];
@@ -493,6 +493,7 @@
         const q0 = qtyAt(x, i, d); if (!(q0 > 1e-9)) return;
         const q = q0 * (x.txMode ? splitAfter(x.adjSplits, d) : 1);                // base actuelle des fractionnements du marché (cours ajustés)
         const p = x.price(d, live && x.live), cv = p > 0 ? convertAt(q * p, x.cur, ymm) : null;
+        if (d === todayS) lastVals[x.id] = cv;
         if (cv === null) { partial = true; miss.push(x.name); missingEver[x.name] = missingEver[x.name] || { name: x.name, first: d, reason: p > 0 ? 'taux de change indisponible' : (x.hasHist ? 'cours indisponible à cette date' : 'aucun cours historique') }; return; }
         value += cv; parts.push([x.name, cv]);
         const c = costAt(x, d); if (c === null) costKnown = false; else cost += c;
@@ -506,6 +507,17 @@
     const flows = [];
     list.forEach((x) => { if (!x.txMode || !x.rowsAt) return; x.rowsAt.forEach((r) => { if (r.amt != null) flows.push({ date: r.date, f: (r.type === 'buy' ? 1 : -1) * r.amt }); }); });
     flows.sort((a, b) => (a.date < b.date ? -1 : 1));
+    // sous-ensemble pour le rendement annuel (TRI) quand tout n'est pas exploitable : positions avec historique d'opérations cohérent ET valorisées aujourd'hui
+    // (+ positions soldées) ; les autres sont exclues des flux ET de la valeur terminale, et comptées à part.
+    const xs = { flows: [], endValue: 0, held: 0, total: list.filter((x) => x.live).length, excluded: [] };
+    list.forEach((x) => {
+      if (!x.live) { if (x.txMode && x.rowsAt) x.rowsAt.forEach((r) => { if (r.amt != null) xs.flows.push({ date: r.date, f: (r.type === 'buy' ? 1 : -1) * r.amt }); }); return; }
+      const v = lastVals[x.id];
+      if (!x.txMode || !x.rowsAt) { xs.excluded.push(x.name); return; }
+      if (v === undefined) { /* position à zéro aujourd'hui : ses flux comptent, valeur terminale nulle */ } else if (v === null) { xs.excluded.push(x.name); return; } else { xs.endValue += v; xs.held++; }
+      x.rowsAt.forEach((r) => { if (r.amt != null) xs.flows.push({ date: r.date, f: (r.type === 'buy' ? 1 : -1) * r.amt }); });
+    });
+    xs.flows.sort((a, b) => (a.date < b.date ? -1 : 1));
     // performance pondérée dans le temps
     const perf = { points: [], from: null, pct: null };
     let lastPartial = -1; points.forEach((p, i) => { if (p.partial) lastPartial = i; });
@@ -526,7 +538,7 @@
     const summary = { startDate: first.date, endDate: last.date, startValue: first.value, endValue: last.value, netFlows, marketGain: last.value - first.value - netFlows, perfPct: perf.pct, partialStart: first.partial, partialEnd: last.partial,
       investedEnd: last.cost, firstTx: firstTxAll === '9999-99-99' ? null : firstTxAll };
     const retro = list.some((x) => !x.txMode);
-    return { points, coverage, perf, summary, retro, empty: false, allTx: list.every((x) => x.txMode), flows };
+    return { points, coverage, perf, summary, retro, empty: false, allTx: list.every((x) => x.txMode), flows, xirrSet: xs };
   }
 
 
@@ -564,17 +576,23 @@
   function xirr(hist, today) {
     const fail = (reason) => ({ rate: null, reason });
     if (!hist || hist.empty || !hist.flows || !hist.flows.length) return fail('aucune opération');
-    if (!hist.allTx) return fail('historique d\'opérations incomplet pour ' + hist.coverage.retro.length + ' position(s)');
-    const last = hist.points[hist.points.length - 1]; if (!last || last.partial) return fail('cours manquants');
-    const flows = hist.flows.slice().sort((a, b) => (a.date < b.date ? -1 : 1)), t0 = flows[0].date, tN = toISO(today || new Date());
+    const last = hist.points[hist.points.length - 1];
+    const strict = hist.allTx && last && !last.partial;
+    let flows0 = hist.flows, endV = last ? last.value : 0, scope = null;
+    if (!strict) {                                               // repli : seulement les positions exploitables (historique d'opérations cohérent et cours disponible)
+      const xs = hist.xirrSet;
+      if (!xs || !xs.flows.length || !xs.held) return fail(!hist.allTx ? 'historique d\'opérations incomplet pour ' + hist.coverage.retro.length + ' position(s)' : 'cours manquants');
+      flows0 = xs.flows; endV = xs.endValue; scope = { held: xs.held, total: xs.total, excluded: xs.excluded };
+    }
+    const flows = flows0.slice().sort((a, b) => (a.date < b.date ? -1 : 1)), t0 = flows[0].date, tN = toISO(today || new Date());
     const day = (d) => { const a = d.split('-').map(Number); return Date.UTC(a[0], a[1] - 1, a[2]) / 86400000; };
     const span = day(tN) - day(t0); if (span < 365) return fail('moins d\'un an d\'historique');
-    const cfs = flows.map((f) => ({ t: (day(f.date) - day(t0)) / 365, v: -f.f })).concat([{ t: span / 365, v: last.value }]);
+    const cfs = flows.map((f) => ({ t: (day(f.date) - day(t0)) / 365, v: -f.f })).concat([{ t: span / 365, v: endV }]);
     const f = (r) => cfs.reduce((s, c) => s + c.v / Math.pow(1 + r, c.t), 0);
     let lo = -0.95, hi = 10, flo = f(lo), fhi = f(hi);
     if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return fail('calcul impossible');
     for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2, fm = f(mid); if (Math.abs(fm) < 1e-9) { lo = hi = mid; break; } if (flo * fm <= 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; } }
-    return { rate: (lo + hi) / 2, from: t0, years: span / 365, flows: flows.length };
+    return { rate: (lo + hi) / 2, from: t0, years: span / 365, flows: flows.length, scope };
   }
 
   /* ---------- performance par actif et globale (PRU) ---------- */
