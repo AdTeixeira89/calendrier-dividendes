@@ -900,6 +900,30 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('rentabilité réelle : selon le portefeuille sélectionné et la période du graphique ; gain = marché + dividendes, apports nets séparés ; périodes raccourcies signalées', async () => {
+    const now = new Date(), ym = (k) => { const d = new Date(now.getFullYear(), now.getMonth() - k, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+    const from = ym(33), c = Array(12).fill(100).concat(Array(12).fill(120), Array(10).fill(132));
+    const seed = SEED(0); seed.accounts = [{ id: 'main', name: 'Mon portefeuille' }, { id: 'dg', name: 'DEGIRO' }];
+    const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'degiro', derived: true, addedAt: '2024-01-01', dividend: { none: true } };
+    seed.holdings = [Object.assign({}, base, { id: 'a1', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 20, avgCost: 110, price: 132, account: 'dg', hist: { from, c } }),
+      Object.assign({}, base, { id: 'b1', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', quantity: 10, avgCost: 50, price: 50, account: 'main', hist: { from, c: Array(34).fill(50) } })];
+    const T = (id, h, k, day, qty, price) => ({ id, holdingId: h, date: ym(k) + '-' + day, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'degiro' });
+    seed.transactions = [T('t1', 'a1', 33, '10', 10, 100), T('t2', 'a1', 16, '10', 10, 120), T('t3', 'b1', 20, '10', 10, 50)];
+    seed.payments = [{ id: 'd1', holdingId: 'a1', ticker: 'AAA', name: 'Alpha', payDate: ym(3) + '-15', qty: 20, gross: 60, net: 50, currency: 'EUR', source: 'manual', verified: true }, { id: 'd2', holdingId: 'a1', ticker: 'AAA', name: 'Alpha', payDate: ym(5) + '-15', qty: 20, gross: 400, net: 400, currency: 'EUR', source: 'auto', verified: false }];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.waitForSelector('.perf-strip');
+    const strip = async () => (await p.locator('.hero .perf-strip').innerText() + ' || ' + await p.locator('.hero .perf-line').innerText()).replace(/\s+/g, ' ');
+    await p.selectOption('#acctSel', 'dg'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="0"]'); await p.waitForTimeout(300); let t = await strip();
+    ok(/Performance · Tout/i.test(t) && /\+\s?490\s?€/i.test(t) && /Apports nets\s+\+2\s?200\s?€/i.test(t) && /Dividendes perçus\s+\+50\s?€/i.test(t), 'DEGIRO, depuis le début : gain 440 (marché) + 50 (dividendes) = 490, apports 2 200 séparés : ' + t.slice(0, 400));
+    ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(/dividendes « à vérifier » non comptés/i.test(t), 'dividende à vérifier signalé, non compté');
+    await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t) && /Apports nets\s+0\s?€/i.test(t), 'DEGIRO, 1 an : 2 400 → 2 640 + 50 de dividendes = 290, aucun apport : ' + t.slice(0, 300));
+    ok(/\+1[12],\d\s?%/i.test(t), 'pourcentage hors apports (~ +10 % marché + dividende) : ' + t.slice(0, 200));
+    await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(300); t = await strip(); ok(/raccourcie/i.test(t), '5 ans : historique plus court signalé : ' + t.slice(-250)); ok(await p.locator('#perSeg [data-per="60"].dim').count() === 1, 'bouton 5 ans atténué (historique plus court)');
+    await p.selectOption('#acctSel', 'all'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip();
+    ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t), 'tous les portefeuilles, 1 an : Alpha +290, Beta 0 → 290 : ' + t.slice(0, 300));
+    await p.selectOption('#acctSel', 'main'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an\s+0\s?€/i.test(t) || /0\s?€/i.test(t.slice(0, 60)), 'Mon portefeuille (Beta à cours constant) : performance nulle malgré l\'achat : ' + t.slice(0, 200));
+    await shot(p, 'perf-strip'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {
     const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple réelle', quantity: 3, avgCost: 90 }), H(1, { ticker: 'OLD', displayTicker: 'OLD', isin: 'FR0000120271', name: 'Ancienne 2019', quantity: 5, avgCost: 10, source: 'degiro', derived: true })];

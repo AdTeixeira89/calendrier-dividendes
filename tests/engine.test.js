@@ -275,4 +275,26 @@ console.log(n + ' tests passed');
     assert.ok(x.rate > 0.05 && x.rate < 0.15, '1 000 € → 1 210 € en ~2 ans ≈ 10 %/an : ' + x.rate);
     const s2 = { holdings: [B], archive: [], payments: [], transactions: [] }; assert.strictEqual(E.xirr(E.portfolioHistory(s2, cvAt, { months: 0, today: td2 }), td2).rate, null, 'aucune opération : données insuffisantes');
   });
+  t('RENTABILITÉ DE PÉRIODE : gain = marché + dividendes, apports neutralisés (TWR), périodes tronquées à l\'historique, jamais d\'achat compté comme gain', () => {
+    const cvAt = (a) => a, td2 = new Date(2026, 9, 14);
+    const c = Array(12).fill(100).concat(Array(12).fill(120), Array(10).fill(132));              // 2024-01 … 2026-10
+    const A = { id: 'a', ticker: 'A', displayTicker: 'A', name: 'A', type: 'stock', currency: 'EUR', quantity: 20, price: 132, avgCost: 110, account: 'a', dividend: {}, hist: { from: '2024-01', c } };
+    const mk = (date, qty, price) => ({ id: 't' + date, holdingId: 'a', date, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'degiro' });
+    const s = { holdings: [A], archive: [], payments: [], transactions: [mk('2024-01-10', 10, 100), mk('2025-06-10', 10, 120)] };
+    const all = E.periodReturn(E.portfolioHistory(s, cvAt, { months: 0, today: td2 }), [], td2);
+    assert.ok(all.ok); assert.strictEqual(all.V1, 2640); assert.strictEqual(all.netFlows, 2200, 'apports = achats'); assert.ok(Math.abs(all.totalGain - 440) < 1e-6, 'gain = 2 640 − 2 200 : ' + all.totalGain);
+    assert.ok(Math.abs(all.pct - 0.32) < 1e-6, '+20 % puis +10 % = +32 % malgré l\'apport de juin 2025 : ' + all.pct); assert.ok(all.annualized !== null && all.annualized > 0.08 && all.annualized < 0.12, 'TRI : ' + all.annualized);
+    const y1 = E.periodReturn(E.portfolioHistory(s, cvAt, { months: 12, today: td2 }), [], td2);
+    assert.ok(y1.ok && y1.netFlows === 0 && Math.abs(y1.totalGain - 240) < 1e-6 && Math.abs(y1.pct - 0.10) < 1e-6, '12 mois : 2 400 → 2 640 = +10 % : ' + JSON.stringify([y1.from, y1.V0, y1.totalGain, y1.pct]));
+    const y5 = E.periodReturn(E.portfolioHistory(s, cvAt, { months: 60, today: td2 }), [], td2, { from: '2021-10-14' });
+    assert.ok(y5.ok && Math.abs(y5.pct - 0.32) < 1e-6 && y5.truncated && y5.from < '2024-02-01', '5 ans demandés, historique depuis 2024 : calcul depuis le début effectif, signalé : ' + y5.from);
+    const withDiv = E.periodReturn(E.portfolioHistory(s, cvAt, { months: 12, today: td2 }), [{ date: '2026-03-01', v: 50 }, { date: '2020-01-01', v: 999 }], td2);
+    assert.ok(Math.abs(withDiv.totalGain - 290) < 1e-6 && withDiv.dividends === 50, 'dividende dans la période seulement : ' + withDiv.totalGain); assert.ok(withDiv.pct > 0.118 && withDiv.pct < 0.123, 'dividende = rendement : ' + withDiv.pct);
+    // un apport pur ne crée AUCUNE performance ; une vente n'est pas une perte
+    const flat = { holdings: [Object.assign({}, A, { quantity: 20, price: 100, hist: { from: '2024-01', c: Array(34).fill(100) } })], archive: [], payments: [], transactions: [mk('2024-01-10', 10, 100), mk('2025-06-10', 10, 100)] };
+    const fr = E.periodReturn(E.portfolioHistory(flat, cvAt, { months: 0, today: td2 }), [], td2); assert.ok(Math.abs(fr.pct) < 1e-9 && Math.abs(fr.totalGain) < 1e-6, 'cours constant : performance nulle malgré 2 000 € versés : ' + fr.pct);
+    const sold = { holdings: [Object.assign({}, A, { quantity: 10 })], archive: [], payments: [], transactions: [mk('2024-01-10', 20, 100), Object.assign(mk('2025-06-10', 10, 120), { type: 'sell', amountAcct: 1200 })] };
+    const sr = E.periodReturn(E.portfolioHistory(sold, cvAt, { months: 0, today: td2 }), [], td2); assert.ok(sr.sells === 1200 && sr.buys === 2000 && Math.abs(sr.totalGain - (1320 + 1200 - 2000)) < 1e-6, 'gain = valeur 1 320 + vente 1 200 − achats 2 000 = 520 : ' + sr.totalGain);
+    assert.strictEqual(E.periodReturn(E.portfolioHistory({ holdings: [], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td2 }), [], td2).ok, false, 'rien à mesurer');
+  });
 })();

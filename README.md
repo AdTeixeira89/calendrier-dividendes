@@ -63,6 +63,15 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Rentabilité réelle (portefeuille × période)
+
+Sous la courbe de l'Accueil, une bande « **Performance · {période}** » suit le **portefeuille sélectionné** (ou « Tous les portefeuilles ») et la **période du graphique** (1 M, 3 M, 6 M, 1 an, 5 ans, Tout) :
+- **Performance** en € et en % = plus-value de marché + dividendes perçus. Le % est **pondéré dans le temps** : chaque achat ou vente est neutralisé, donc un versement n'est jamais pris pour un gain, ni un retrait pour une perte (un cours constant donne 0 % même après 2 000 € versés).
+- **Plus-value de marché** (variation de valeur − apports nets), **Dividendes perçus** (versements *vérifiés*, nets ; les dividendes « à vérifier » sont signalés à part, non comptés), **Apports nets** (achats − ventes, affichés séparément, ni gain ni perte).
+- **Annualisé** (TRI sur les flux réels) dès que la période dépasse un an ; valeur de départ → d'arrivée et dates exactes affichées.
+- **Périodes disponibles** : si l'historique est plus court que la période choisie (ex. « 5 ans » avec 2 ans de données), le calcul part du début réel, le dit, et le bouton est atténué ; il démarre aussi à la première date où toutes les positions sont valorisées (jamais de cours inventé). Positions sans historique d'opérations : quantité actuelle supposée constante, signalé.
+- Calcul : `Engine.periodReturn` (testé : apports, retraits, dividendes, périodes tronquées).
+
 ## Actualités de vos actifs
 
 Panneau « Actualités » à droite de l'Accueil (sous les cartes sur mobile) : articles **Yahoo Finance** (gratuit, sans clé, via le relais) qui citent **vos** titres — les 12 plus importants. Seuls les articles dont les titres liés incluent votre actif sont gardés (les panoramas de marché à plus de 3 titres sont écartés), liens https uniquement, cache 1 h. La couverture est surtout américaine : les titres sans article sont signalés, rien n'est inventé ni résumé. Les titres sont **traduits automatiquement en français** (service public de traduction de Google appelé depuis le relais (MyMemory en secours, y compris directement depuis le navigateur si le relais ne traduit pas), sans clé ; seuls les titres sont envoyés, l'original reste en infobulle, titre d'origine conservé si la traduction échoue). Cases dans Paramètres pour désactiver les actualités ou la traduction ; nécessite de **redéployer `relay/worker.js`** (routes `/news` et `/translate`).

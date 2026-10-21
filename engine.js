@@ -595,6 +595,50 @@
     return { rate: (lo + hi) / 2, from: t0, years: span / 365, flows: flows.length, scope };
   }
 
+  /* ---------- RENTABILITÉ RÉELLE d'une période (portefeuille sélectionné × période choisie) ----------
+     hist : Engine.portfolioHistory (points = valeur des positions, flows = achats (+) / ventes (−) en devise de base) ; dividends : [{ date, v }] versements perçus (devise de base).
+     Gain total = (valeur finale − valeur initiale − apports nets) + dividendes : un achat n'est JAMAIS un gain, une vente n'est JAMAIS une perte.
+     % = performance pondérée dans le temps (TWR) : chaînage des sous-périodes entre deux dates de la courbe, en neutralisant l'effet de chaque apport / retrait ;
+     un dividende perçu compte comme rendement de la sous-période où il tombe. Annualisé = TRI (XIRR) sur les flux réels, si la période dépasse un an.
+     Début effectif : le calcul démarre à la première date de la période où toutes les positions détenues sont valorisées et où le portefeuille est investi (jamais de cours inventé). */
+  function periodReturn(hist, dividends, today, req) {
+    const fail = (reason) => ({ ok: false, reason });
+    if (!hist || hist.empty || !hist.points || hist.points.length < 2) return fail('aucune donnée');
+    const pts = hist.points, flows = hist.flows || [], divs = (dividends || []).filter((d) => d && d.date && isFinite(d.v));
+    let e = pts.length - 1; while (e > 0 && pts[e].partial) e--;
+    if (e < 1) return fail('cours manquants à la date de fin');
+    let lastPartial = -1; for (let i = 0; i <= e; i++) if (pts[i].partial) lastPartial = i;
+    let s = lastPartial + 1; if (s >= e) return fail('cours manquants sur la période');
+    const flowIn = (a, b) => flows.filter((f) => f.date > a && f.date <= b), divIn = (a, b) => divs.filter((d) => d.date > a && d.date <= b);
+    while (s < e && !(pts[s].value > 1e-9) && !flowIn(pts[s].date, pts[s + 1].date).length) s++;       // avant le premier investissement : rien à mesurer
+    if (s >= e) return fail('aucun investissement sur la période');
+    const d0 = pts[s].date, d1 = pts[e].date, span = Math.max(1, dayNum(d1) - dayNum(d0));
+    const V0 = pts[s].value, V1 = pts[e].value;
+    const fl = flowIn(d0, d1), buys = fl.filter((f) => f.f > 0).reduce((a, f) => a + f.f, 0), sells = Math.abs(fl.filter((f) => f.f < 0).reduce((a, f) => a + f.f, 0)), F = buys - sells;
+    const dv = divIn(d0, d1), D = dv.reduce((a, d) => a + d.v, 0);
+    // pondération dans le temps
+    let idx = 1, wsum = 0;
+    fl.forEach((f) => { wsum += f.f * ((dayNum(d1) - dayNum(f.date)) / span); });
+    for (let k = s + 1; k <= e; k++) {
+      const a = pts[k - 1].date, b = pts[k].date, sp = Math.max(1, dayNum(b) - dayNum(a));
+      let Fk = 0, Wk = 0; flowIn(a, b).forEach((f) => { Fk += f.f; Wk += f.f * ((dayNum(b) - dayNum(f.date)) / sp); });
+      const Dk = divIn(a, b).reduce((x, d) => x + d.v, 0), den = pts[k - 1].value + Wk;
+      if (den > 1e-9) idx *= 1 + (pts[k].value - pts[k - 1].value - Fk + Dk) / den;
+    }
+    const marketGain = V1 - V0 - F, totalGain = marketGain + D, base = V0 + wsum;
+    // TRI annualisé (période > 1 an) : −valeur initiale, −achats / +ventes, +dividendes, +valeur finale
+    let annualized = null; const days = dayNum(d1) - dayNum(d0);
+    if (days >= 365) {
+      const cfs = [{ t: 0, v: -V0 }].concat(fl.map((f) => ({ t: (dayNum(f.date) - dayNum(d0)) / 365, v: -f.f })), dv.map((d) => ({ t: (dayNum(d.date) - dayNum(d0)) / 365, v: d.v })), [{ t: days / 365, v: V1 }]);
+      const f = (r) => cfs.reduce((x, c) => x + c.v / Math.pow(1 + r, c.t), 0);
+      let lo = -0.95, hi = 10, flo = f(lo), fhi = f(hi);
+      if (isFinite(flo) && isFinite(fhi) && flo * fhi <= 0) { for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2, fm = f(mid); if (Math.abs(fm) < 1e-9) { lo = hi = mid; break; } if (flo * fm <= 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; } } annualized = (lo + hi) / 2; }
+    }
+    const reqFrom = req && req.from ? req.from : null;
+    return { ok: true, from: d0, to: d1, days, V0, V1, buys, sells, netFlows: F, marketGain, dividends: D, dividendCount: dv.length, totalGain, pct: idx - 1, pctOnCapital: base > 1e-9 ? totalGain / base : null, annualized,
+      truncated: !!(reqFrom && dayNum(d0) - dayNum(reqFrom) > 35), reqFrom, endPartial: e < pts.length - 1, retro: !!hist.retro, retroNames: (hist.coverage && hist.coverage.retro) || [] };
+  }
+
   /* ---------- performance par actif et globale (PRU) ---------- */
   function performance(state, convert, ids) {
     const rows = []; let value = 0, cost = 0, gain = 0, valAll = 0;
@@ -666,7 +710,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
   };

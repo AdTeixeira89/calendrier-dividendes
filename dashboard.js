@@ -74,10 +74,40 @@ function renderHome(host) {
     + (sc ? ' Calculé sur ' + sc.held + ' position(s) sur ' + sc.total + ' : seules celles dont l\'historique d\'opérations est cohérent et dont le cours est disponible (exclues : ' + sc.excluded.slice(0, 8).join(', ') + (sc.excluded.length > 8 ? '…' : '') + ').' : '');
   const xirrWhy = xi.rate === null ? ({ 'aucune opération': 'importez votre historique', 'cours manquants': 'cours indisponibles' }[xi.reason] || (/un an/.test(xi.reason) ? 'moins d\'un an d\'opérations' : /incomplet/.test(xi.reason) ? 'historique d\'opérations incomplet' : xi.reason)) : '';
   const xirrChip = '<div class="xirr-chip" tabindex="0" data-tip="' + esc(xirrTitle) + '"><span>Rendement annuel moyen</span>' + (xi.rate === null ? '<b class="muted">Données insuffisantes</b><small>' + esc(xirrWhy) + '</small>' : sens('<b class="' + (xi.rate >= 0 ? 'pos' : 'neg') + '">' + fmtPct(xi.rate, 1, true) + ' / an</b>') + (sc ? '<small>sur ' + sc.held + ' / ' + sc.total + ' positions</small>' : '')) + '</div>';
+  /* --- Rentabilité réelle de la période choisie pour le portefeuille affiché : gain = marché + dividendes, apports neutralisés --- */
+  const per = view.home.period, perLbl = (HOME_PERIODS.find((q) => q[0] === per) || [0, 'Tout'])[1], acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);
+  const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
+  const divAll = (state.payments || []).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
+    const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
+    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false };
+  }).filter((d_) => d_.v !== null);
+  const pr = Engine.periodReturn(hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
+  const availFrom = (() => { const ha = histFor(0); return ha && !ha.empty ? (ha.summary && ha.summary.firstTx) || (ha.points[0] && ha.points[0].date) : null; })();
+  const perBtn = (q) => { const rf = q[0] > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - q[0], today.getDate())) : null; const short = !!(rf && availFrom && Date.parse(availFrom) - Date.parse(rf) > 35 * 86400000);
+    return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
+  const WHY = { 'aucune donnée': 'pas encore d\'historique de cours (actualisez les données)', 'cours manquants à la date de fin': 'cours du jour indisponibles', 'cours manquants sur la période': 'cours historiques manquants sur la période', 'aucun investissement sur la période': 'aucun investissement sur cette période' };
+  const sgn = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? '+' : '−') + money(Math.abs(v_), 0), cl = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? 'pos' : 'neg');
+  let perfStrip;
+  if (pr.ok) {
+    const unv = divAll.filter((d_) => d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0), nt = [];
+    nt.push('Du ' + esc(fmtDate(pr.from)) + ' au ' + esc(fmtDate(pr.to)) + ' · ' + esc(acctLbl) + ' · valeur ' + sens(money(pr.V0, 0) + ' → ' + money(pr.V1, 0)) + (pr.annualized !== null ? ' · annualisé ' + sens('<b class="' + cl(pr.annualized) + '">' + fmtPct(pr.annualized, 1, true) + ' / an</b>') : ''));
+    if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
+    if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
+    if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
+    if (unv > 0.5) nt.push('+ ' + sens(money(unv, 0)) + ' de dividendes « à vérifier » non comptés (validez-les dans Dividendes → Historique).');
+    const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte : le pourcentage est pondéré dans le temps, l\'effet de chaque versement est neutralisé.';
+    perfStrip = '<div class="perf-strip" aria-label="Rentabilité de la période">' +
+      '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>' + sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' hors apports</small></div>' +
+      '<div class="ind"><span>Plus-value de marché</span>' + sens('<b class="' + cl(pr.marketGain) + '">' + sgn(pr.marketGain) + '</b>') + '<small>variation des cours</small></div>' +
+      '<div class="ind"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '<small>' + pr.dividendCount + ' versement(s) vérifié(s)</small></div>' +
+      '<div class="ind" tabindex="0" data-tip="Argent ajouté (achats) moins argent retiré (ventes) sur la période : ce n\'est ni un gain ni une perte."><span>Apports nets</span>' + sens('<b>' + sgn(pr.netFlows) + '</b>') + '<small>' + sens(money(pr.buys, 0) + ' versés · ' + money(pr.sells, 0) + ' retirés') + '</small></div></div>' +
+      '<div class="perf-line muted">' + nt.join('<br>') + '</div>';
+  } else perfStrip = '<div class="perf-strip off"><div class="ind"><span>Performance · ' + esc(perLbl) + '</span><b class="muted">—</b><small>Non calculable : ' + esc(WHY[pr.reason] || pr.reason) + '</small></div></div>';
+
   const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count ? money(pv.total, 0) : '—') + '</div>' +
     '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
-    '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map((p) => '<button type="button" data-per="' + p[0] + '" class="' + (view.home.period === p[0] ? 'on' : '') + '">' + p[1] + '</button>').join('') + '</div></div>' +
-    '<div class="chart-wrap">' + chart + xirrChip + '</div>' + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
+    '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
+    '<div class="chart-wrap">' + chart + xirrChip + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
 
   /* --- 2. « Dividendes » (raccourci) --- */
   const next = Engine.nextEvents(state, today, 120, ids), first = next[0];
