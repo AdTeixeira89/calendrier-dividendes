@@ -131,20 +131,18 @@ function renderHome(host) {
 
   host.innerHTML = pageHead('Accueil', esc(marketLine()) + ' · montants en ' + esc(baseCur()), '<button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + mask + '" title="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '" aria-label="' + (mask ? 'Afficher les chiffres' : 'Masquer les chiffres') + '">' + icon(mask ? 'eyeoff' : 'eye') + '</button>') +
     '<section class="ticker compact" aria-label="Prochains dividendes"><span class="tk-lbl">Prochains<br>dividendes</span>' + (next.length ? tickerHtml(next, mask) : '<span class="muted" style="font-size:13px">Aucun versement attendu dans les 4 prochains mois.</span>') + '</section>' +
-    '<div class="home-wrap' + (newsOn() ? ' with-side' : '') + '"><div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="grid home-top">' + hero + divCard + '</div>' + perfCard + '</div>' +
-    (newsOn() ? '<aside class="home-side" id="newsBox" aria-label="Actualités de vos actifs"></aside>' : '') + '</div>';
+    '<div class="home-body' + (mask ? ' hide-nums' : '') + '"><div class="home-top2"><div class="home-left">' + hero + '</div>' +
+    '<div class="home-right"><div class="home-right-in">' + divCard + (newsOn() ? '<aside class="home-news" id="newsBox" aria-label="Actualités de vos actifs"></aside>' : '') + '</div></div></div>' + perfCard + '</div>';
   if (newsOn()) drawNews($('#newsBox', host));
 
-  // la carte « Dividendes » prend la même hauteur que la carte « Valeur du portefeuille » (côte à côte) : le graphique des dividendes s'agrandit en conséquence
+  // colonne de droite (Dividendes + Actualités, l'une sous l'autre) : même hauteur que la carte « Valeur du portefeuille ». Les actualités défilent dans leur carte ;
+  // sans actualités, le graphique des dividendes s'agrandit pour remplir la hauteur.
   const fitDiv = () => {
-    const hero_ = $('.hero', host), card_ = $('#divCardEl', host), box_ = $('#divChart', host); if (!hero_ || !card_ || !box_) return;
-    box_.innerHTML = divBars(150);
-    if (!window.matchMedia('(min-width:900px)').matches) return;
-    // échelle 1:1 (texte lisible, initiales des mois) : le graphique garde ses proportions et gagne la hauteur manquante
-    const cw = Math.round(box_.clientWidth); if (cw < 120) return;
+    const card_ = $('#divCardEl', host), box_ = $('#divChart', host), right_ = $('.home-right', host); if (!card_ || !box_ || !right_) return;
+    const cw = Math.round(box_.clientWidth); if (cw < 120) { box_.innerHTML = divBars(150); return; }
     box_.innerHTML = divBars(120, cw);
-    const extra = hero_.offsetHeight - card_.offsetHeight;
-    if (extra > 4) box_.innerHTML = divBars(Math.min(700, 120 + extra), cw);
+    if (newsOn() || !window.matchMedia('(min-width:900px)').matches) return;
+    let h_ = 120; for (let i = 0; i < 4; i++) { const extra = right_.clientHeight - card_.offsetHeight; if (Math.abs(extra) <= 2) break; h_ = Math.max(120, Math.min(900, h_ + extra)); box_.innerHTML = divBars(h_, cw); }
   };
   fitDiv(); if (host._fitDiv) window.removeEventListener('resize', host._fitDiv);
   let ft; host._fitDiv = () => { if (!document.body.contains(host) || !$('#divCardEl', host)) { window.removeEventListener('resize', host._fitDiv); return; } clearTimeout(ft); ft = setTimeout(fitDiv, 120); }; window.addEventListener('resize', host._fitDiv);
@@ -203,7 +201,7 @@ async function newsTranslate(d) {
   if (!todo.some((n) => n.fr)) { d.trStatus = relayErr && /404|invalide/i.test(relayErr.message) ? 'oldrelay' : 'unavailable'; return; }   // rien n'est mémorisé : réessayé au prochain affichage
   try { const keys = Object.keys(memo); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach((k) => { delete memo[k]; }); localStorage.setItem('dca_tr', JSON.stringify(memo)); localStorage.setItem('dca_news', JSON.stringify({ at: newsMem.at, key: newsMem.key, data: d })); } catch (e) { /* ignoré */ }
 }
-function newsCard(inner) { return '<section class="card card-pad"><div class="card-head"><h3>Actualités</h3><span class="muted" style="font-size:12px">vos actifs · Yahoo Finance</span></div>' + inner + '</section>'; }
+function newsCard(inner) { return '<section class="card card-pad news-card"><div class="card-head"><h3>Actualités</h3><span class="muted" style="font-size:12px">vos actifs · Yahoo Finance</span></div><div class="news-scroll">' + inner + '</div></section>'; }
 async function drawNews(box) {
   if (!box) return;
   const hs = newsSymbols(); if (!hs.length) { box.innerHTML = newsCard('<p class="muted" style="font-size:13px">Aucun actif avec un ticker.</p>'); return; }
