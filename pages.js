@@ -38,6 +38,7 @@ function wireDo(host) {
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
     else if (a === 'prefill') runPrefill();
+    else if (a === 'div-history') runDividendHistory();
     else if (a === 'validate-all') runValidateAll();
   }));
 }
@@ -367,8 +368,8 @@ function paymentColumns() {
     { key: 'net', label: 'Net', essential: true, align: 'r', sort: (p) => p.net, html: (p) => p.net == null ? '<span class="muted" title="Net inconnu">—</span>' : '<b class="pos">' + c(p, p.net) + '</b>' },
     { key: 'ex', label: 'Détachement', sort: (p) => p.exDate || '', html: (p) => esc(fmtDate(p.exDate)) },
     { key: 'currency', label: 'Devise', sort: (p) => p.currency, html: (p) => esc(p.currency) },
-    { key: 'status', label: 'Statut', essential: true, sort: (p) => (p.verified === false ? 1 : 0), html: (p) => statusBadge('received', p.verified === false) },
-    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', auto: 'Historique de marché' }[p.source] || p.source || '—') }
+    { key: 'status', label: 'Statut', essential: true, sort: (p) => (p.verified === false ? 1 : 0), html: (p) => (p.estimated ? '<span class="badge warn" title="Reconstitué d\'après vos opérations et l\'historique de marché : date de paiement et retenues non confirmées">Estimé</span>' : statusBadge('received', p.verified === false)) },
+    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', auto: 'Historique de marché', 'market-history': 'Historique de marché (estimé)' }[p.source] || p.source || '—') }
   ];
 }
 function txRows() {
@@ -419,7 +420,7 @@ function renderHistory(host) {
     '<select id="hMonth" aria-label="Mois" style="width:auto"><option value="all">Tous les mois</option>' + MOIS.map((m, i) => '<option value="' + pad2(i + 1) + '">' + m + '</option>').join('') + '</select>' +
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
     (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Vérifiés</option><option value="unverified">À vérifier</option></select>' : '') +
-    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
+    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Rechercher les dividendes passés</button><button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
     (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais), ou acceptez-les tels quels : <button class="btn sm" type="button" data-do="validate-all" style="margin-left:6px">Tout valider</button></div>' : '') +
     '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Le net marqué * est incomplet : les versements sans net connu sont comptés en brut.</p>' : '');
   $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset; if (isPay) $('#hStatus', host).value = h.status;

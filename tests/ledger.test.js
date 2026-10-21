@@ -342,6 +342,22 @@ t('DIAGNOSTIC : anomalie ignorée = masquée et non comptée, rétablissable ; e
   s.ignored = { [it.sig]: { at: '2026-10-16T10:00:00Z' } }; const d2 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(!d2.items.some((i) => i.code === 'qty_year')); assert.strictEqual(d2.counts.error, 0); assert.strictEqual(d2.ignored.length, 1);
   s.holdings[0].quantity = 2025; const d3 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(d3.items.some((i) => i.code === 'qty_year'), 'cause différente : réapparaît'); assert.strictEqual(d3.ignored.length, 0);
 });
+t('DIVIDENDES DU RELEVÉ DE COMPTE : brut, retenue et net réels, rattachés par ISIN ; doublons ignorés ; une estimation de marché du même versement est remplacée ; sans ligne d\'impôt le net reste inconnu', () => {
+  const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre',
+    '10-01-2024,09:31,10-01-2024,APPLE INC.,US0378331005,"Achat 10 APPLE INC.@170 USD (US0378331005)",1.1,EUR,"-1545,41",EUR,"100,00",s1',
+    '15-05-2024,00:00,15-05-2024,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"103,00",',
+    '15-05-2024,00:00,15-05-2024,APPLE INC.,US0378331005,Impôt sur dividende,,USD,"-0,39",EUR,"102,00",',
+    '20-08-2024,00:00,20-08-2024,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"104,60",',
+    '05-02-2024,00:00,05-02-2024,INCONNU SA,FR0000000000,Dividende,,EUR,"1,00",EUR,"105,00",',
+    '08-02-2024,00:00,08-02-2024,,,Dépôt flatex Deposit,,EUR,"500,00",EUR,"603,00",'].join('\n');
+  const { res } = parse(csv); const g = L.groupDividends(res.divs).sort((a, b) => (a.date < b.date ? -1 : 1));
+  assert.deepStrictEqual(g.map((x) => [x.isin, x.date, x.cur, x.gross, x.tax, x.net]), [['FR0000000000', '2024-02-05', 'EUR', 1, null, null], ['US0378331005', '2024-05-15', 'USD', 2.6, 0.39, 2.21], ['US0378331005', '2024-08-20', 'USD', 2.6, null, null]], 'retenue du même jour retranchée ; sans ligne d\'impôt : net null (jamais inventé)');
+  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10 }], archive: [], payments: [{ id: 'est', holdingId: 'h', exDate: '2024-05-10', payDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', estimated: true, source: 'market-history', verified: true }, { id: 'man', holdingId: 'h', payDate: '2024-08-21', gross: 2.6, currency: 'USD', source: 'manual', verified: true }] };
+  const snap = JSON.stringify(st), r = L.brokerDividendPayments(st, g, uid); assert.strictEqual(JSON.stringify(st), snap, 'pure : rien n\'est modifié');
+  assert.deepStrictEqual(r.add.map((x) => [x.payDate, x.gross, x.net, x.source, x.exDate, x.qty]), [['2024-05-15', 2.6, 2.21, 'degiro', '2024-05-10', 10]], 'montant réel ajouté, détachement et quantité repris de l\'estimation remplacée');
+  assert.deepStrictEqual(r.replace, ['est']); assert.strictEqual(r.dups.length, 1, 'versement déjà saisi à 1 jour d\'écart : ignoré'); assert.strictEqual(r.unmatched.length, 1, 'titre inconnu : non rattaché');
+  st.payments.push.apply(st.payments, r.add); assert.strictEqual(L.brokerDividendPayments(st, g, uid).add.length, 0, 'réimport : aucun doublon');
+});
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(
     hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),

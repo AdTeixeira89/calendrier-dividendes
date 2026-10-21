@@ -92,4 +92,10 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.deepStrictEqual(await c.translateDirect(['Apple', 'KO', 'Quota', 'Same']), ["L'action de Apple", null, null, null], 'échec, quota ou texte identique = non traduit');
   console.log('ok   traduction de secours (navigateur) : quota et erreurs = original conservé');
 })();
+(async () => {
+  const ts = (d) => Math.floor(Date.parse(d) / 1000);
+  const c = M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => ({ status: 200, ok: true, json: async () => (u.includes('/search') ? { quotes: [{ symbol: 'ULVR.L', quoteType: 'EQUITY' }] } : { chart: { result: [{ meta: { currency: 'GBp' }, events: { dividends: { 1: { amount: 120, date: ts('2026-05-01') }, 0: { amount: 100, date: ts('2025-11-01') }, 2: { amount: 0, date: ts('2026-08-01') } } } }] } }) }) });
+  const r = await c.fetchDividends('ULVR.L'); assert.deepStrictEqual(r.items, [['2025-11-01', 1], ['2026-05-01', 1.2]], 'pence → livres, triés, montants nuls écartés'); assert.strictEqual(r.currency, 'GBP');
+  console.log('ok   historique complet des dividendes : pence convertis, triés, montants nuls écartés');
+})();
 

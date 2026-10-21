@@ -178,7 +178,7 @@
 
   function parseOps(rows, det, opt) {
     opt = opt || {};
-    const out = { ops: [], bad: [], ambiguous: [], other: [], corp: [], meta: { decimal: ',', dateOrder: 'dmy', acctCur: det.acctCur || 'EUR', rows: 0, signedQty: true } };
+    const out = { ops: [], bad: [], ambiguous: [], other: [], corp: [], divs: [], meta: { decimal: ',', dateOrder: 'dmy', acctCur: det.acctCur || 'EUR', rows: 0, signedQty: true } };
     if (det.headerIdx < 0 && det.cols.date === undefined) return out;
     const cols = det.cols, body = rows.slice(det.headerIdx + 1), base = det.headerIdx + 1;
     const numCols = [cols.qty, cols.price, cols.localValue, cols.valueAcct, cols.total, cols.change, cols.fx].concat(cols.fees).filter((c) => c !== undefined);
@@ -208,6 +208,8 @@
         const m = desc.match(TRADE_DESC);
         if (!m) {
           const kind0 = otherKind(desc); out.other.push({ line, kind: kind0, desc, date, raw });
+          // dividendes et retenues à la source du relevé de compte du courtier : source CONFIRMÉE (montant brut, retenue, devise réels)
+          if ((kind0 === 'dividende' || kind0 === 'retenue') && /dividend|dividende/.test(norm(desc))) { const a = num(g(r, 'change')), isTax = /impot|\btax\b|retenue|withholding|quellensteuer/.test(norm(desc)); if (!isNaN(a) && a !== 0 && (isin || name)) out.divs.push({ line, date, isin, name, kind: isTax ? 'tax' : 'dividend', amount: a, cur: (cols.changeCur !== undefined ? g(r, 'changeCur') : '').replace(/\s/g, '').toUpperCase() || det.acctCur || 'EUR' }); }
           if (kind0 === 'opération sur titres') { const rm = desc.match(/(\d+(?:[.,]\d+)?)\s*(?:pour|for|:|\/|contre|voor|zu)\s*(\d+(?:[.,]\d+)?)/i); out.corp.push({ line, date, isin, name, desc, ratio: rm ? parseNumber(rm[1], dec) / parseNumber(rm[2], dec) : null, source: 'csv' }); }
           return;
         }
@@ -274,7 +276,7 @@
     });
     assignIds(out.ops);
     const oc = {}; out.other.forEach((x) => { oc[x.kind] = (oc[x.kind] || 0) + 1; });
-    out.report = { read: out.ops.length + out.bad.length + out.ambiguous.length + out.other.length, recognized: out.ops.length, bad: out.bad.length, ambiguous: out.ambiguous.length, other: oc, corp: out.corp.length };
+    out.report = { divs: out.divs.length, read: out.ops.length + out.bad.length + out.ambiguous.length + out.other.length, recognized: out.ops.length, bad: out.bad.length, ambiguous: out.ambiguous.length, other: oc, corp: out.corp.length };
     return out;
   }
   /* Identifiant stable : empreinte du contenu + rang d'occurrence (deux lignes strictement identiques
@@ -710,7 +712,41 @@
         negative: rows.filter((r) => r.calc !== null && r.calc < -EPS).length, zeroHeld: items.filter((i) => i.code === 'zero_held').length } };
   }
 
+  /* Dividendes du relevé de compte → versements : brut (ligne « Dividende »), retenue (ligne « Impôt sur dividende » du même titre et du même jour), net = brut − retenue.
+     Aucune retenue n'est inventée : sans ligne d'impôt, le net reste inconnu (null). */
+  function groupDividends(divs) {
+    const m = new Map();
+    (divs || []).forEach((d) => {
+      const k = (d.isin || norm(d.name)) + '|' + d.date + '|' + d.cur;
+      const g = m.get(k) || { isin: d.isin, name: d.name, date: d.date, cur: d.cur, gross: 0, tax: 0, hasTax: false, lines: [] };
+      if (d.kind === 'dividend') g.gross += d.amount; else { g.tax += Math.abs(d.amount); g.hasTax = true; }
+      g.lines.push(d.line); m.set(k, g);
+    });
+    return Array.from(m.values()).filter((g) => g.gross > 0).map((g) => ({ isin: g.isin, name: g.name, date: g.date, cur: g.cur, gross: r2(g.gross), tax: g.hasTax ? r2(g.tax) : null, net: g.hasTax ? r2(g.gross - g.tax) : null, lines: g.lines }));
+  }
+
+  /* Versements issus du relevé du courtier (source confirmée) : rattachés aux positions par ISIN, sans doublon (même versement déjà enregistré) ;
+     une estimation de marché (source « market-history ») du même détachement est remplacée par le montant réel. Rien d'autre n'est modifié. */
+  function brokerDividendPayments(state, groups, uid) {
+    const add = [], dups = [], unmatched = [], replace = []; const alias = state.isinAlias || {};
+    const insts = (state.holdings || []).concat(state.archive || []);
+    const dayN = (d) => Date.parse(d) / 86400000;
+    (groups || []).forEach((g) => {
+      const key = g.isin ? canon(alias, g.isin) : null;
+      const h = insts.find((x) => (key && canon(alias, holdingIsin(x)) === key) || (!key && g.name && norm(x.name) === norm(g.name)));
+      if (!h) { unmatched.push(g); return; }
+      const mine = (state.payments || []).filter((p) => p.holdingId === h.id);
+      const extId = 'dgd:' + hash32([h.id, g.date, g.cur, g.gross].join('|'), 2166136261).toString(36);
+      const same = mine.find((p) => p.extId === extId || (!p.estimated && (p.payDate || p.exDate) && Math.abs(dayN(p.payDate || p.exDate) - dayN(g.date)) <= 4 && p.currency === g.cur && Math.abs(Number(p.gross) - g.gross) <= Math.max(0.05, 0.02 * g.gross)));
+      if (same) { dups.push(g); return; }
+      const est = mine.filter((p) => p.estimated && p.source === 'market-history' && p.exDate && dayN(p.exDate) <= dayN(g.date) && dayN(g.date) - dayN(p.exDate) <= 75 && (p.currency !== g.cur || Math.abs(Number(p.gross) - g.gross) <= 0.35 * g.gross));
+      if (est.length === 1) replace.push(est[0].id);
+      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: est.length === 1 ? est[0].exDate : null, qty: est.length === 1 ? est[0].qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId });
+    });
+    return { add, dups, unmatched, replace };
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
+    groupDividends, brokerDividendPayments, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

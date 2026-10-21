@@ -66,11 +66,20 @@ Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protég
 ## Rentabilité réelle (portefeuille × période)
 
 Sous la courbe de l'Accueil, une bande « **Performance · {période}** » suit le **portefeuille sélectionné** (ou « Tous les portefeuilles ») et la **période du graphique** (1 M, 3 M, 6 M, 1 an, 5 ans, Tout) :
-- **Performance** en € et en % = plus-value de marché + dividendes perçus. Le % est **pondéré dans le temps** : chaque achat ou vente est neutralisé, donc un versement n'est jamais pris pour un gain, ni un retrait pour une perte (un cours constant donne 0 % même après 2 000 € versés).
+- **Performance** en € = plus-value de marché + dividendes perçus. Le calcul sous-jacent est **pondéré dans le temps** : chaque achat ou vente est neutralisé, donc un versement n'est jamais pris pour un gain, ni un retrait pour une perte (un cours constant donne 0 € de performance même après 2 000 € versés). Le ratio « % hors apports » a été retiré de l'affichage (valeur jugée incorrecte à la vérification) ; le rendement annualisé (TRI) reste affiché sous la bande.
 - **Plus-value de marché** (variation de valeur − apports nets), **Dividendes perçus** (versements *vérifiés*, nets ; les dividendes « à vérifier » sont signalés à part, non comptés), **Apports nets** (achats − ventes, affichés séparément, ni gain ni perte).
 - **Annualisé** (TRI sur les flux réels) dès que la période dépasse un an ; valeur de départ → d'arrivée et dates exactes affichées.
 - **Périodes disponibles** : si l'historique est plus court que la période choisie (ex. « 5 ans » avec 2 ans de données), le calcul part du début réel, le dit, et le bouton est atténué ; il démarre aussi à la première date où toutes les positions sont valorisées (jamais de cours inventé). Positions sans historique d'opérations : quantité actuelle supposée constante, signalé.
 - Calcul : `Engine.periodReturn` (testé : apports, retraits, dividendes, périodes tronquées).
+
+## Historique des dividendes reçus (reconstitué)
+
+**Dividendes → Historique → « Rechercher les dividendes passés »** : pour vos actions et ETF *distribuants* (les ETF capitalisants sont exclus, aucun dividende), l'application récupère l'historique des dividendes en espèces (données de marché Yahoo via le relais, y compris les distributions exceptionnelles) et le croise avec **vos opérations importées** :
+- **Éligibilité** : quantité détenue à la **clôture de la veille de la date de détachement** (un achat le jour du détachement n'ouvre pas droit au dividende, une vente ce jour-là le conserve), achats / ventes / livraisons / splits pris en compte. Un titre **sans historique d'opérations** (ou incohérent avec la quantité actuelle) est signalé « non calculable » : sa date d'achat n'est **jamais supposée** (ancien « Pré-remplir » conservé tel quel).
+- **Liste de vérification** avant tout enregistrement : titre, détachement, quantité éligible, montant par titre, brut, retenue, net, fiabilité. Tout est « **Estimé** » : la date de paiement réelle n'est pas fournie par la source (le détachement est utilisé et indiqué) ; la retenue et le net ne sont calculés **que si vous avez renseigné un taux de retenue** pour l'actif, sinon ils restent inconnus (compté en brut). Cases à décocher, ajout annulable.
+- **Doublons évités** : un versement déjà enregistré (même détachement, ou même mois / mois suivant avec un montant par titre voisin) est ignoré ; aucun versement existant n'est modifié ni supprimé.
+- **Source confirmée** : l'import du **relevé de compte DEGIRO** ajoute (case dédiée) les dividendes **réels** : date de paiement, brut, retenue à la source (ligne « Impôt sur dividende » du même jour) et net, rattachés par ISIN, sans doublon. Une estimation de marché du même versement est alors remplacée par le montant réel. Sans ligne d'impôt, le net reste inconnu.
+- Les dividendes estimés validés comptent dans les revenus et la performance, et sont signalés (badge « Estimé », note sous la bande de performance).
 
 ## Actualités de vos actifs
 

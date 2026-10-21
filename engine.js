@@ -709,10 +709,69 @@
     return out;
   }
 
+  /* ---------- HISTORIQUE DES DIVIDENDES REÇUS (reconstitué) ----------
+     Quantité éligible à une date de détachement = titres détenus à la CLÔTURE DE LA VEILLE (un achat le jour du détachement n'ouvre pas droit au dividende ;
+     une vente ce jour-là le conserve), d'après le grand livre des opérations (achats, ventes, livraisons, splits validés), ramenée à la base actuelle des
+     fractionnements du marché (les montants Yahoo sont ajustés des splits). Sans historique d'opérations cohérent avec la quantité actuelle, la date
+     d'acquisition est INCONNUE : le titre est signalé, jamais supposé détenu depuis toujours. */
+  function heldQtyFn(state, h) {
+    const cq = num(h.quantity), tol = 1e-6 * Math.max(1, cq);
+    if (!Ledger) return { ok: false, reason: 'module de calcul indisponible' };
+    const { entries, txs } = Ledger.entriesFor(state, h);
+    if (!txs.length) return { ok: false, reason: 'aucune opération importée : date d\'acquisition inconnue' };
+    const mkt = (h.splits || []).filter((x) => x && x.date && x.ratio > 0);
+    const corpSplits = entries.filter((e) => e.type === 'split'), near = (d1, d2) => Math.abs(Date.parse(d1) - Date.parse(d2)) < 5 * 86400000;
+    const mktOnly = mkt.filter((x) => !corpSplits.some((c) => near(c.date, x.date)));
+    const withM = Ledger.run(entries.concat(mktOnly.map((x) => ({ date: x.date, time: '', type: 'split', qty: 0, ratio: x.ratio, amt: null })))), noM = Ledger.run(entries);
+    const useM = Math.abs(withM.qty - cq) <= tol, useN = Math.abs(noM.qty - cq) <= tol;
+    if (!useM && !useN) return { ok: false, reason: 'historique d\'opérations incohérent avec la quantité actuelle (' + fmtQ_(noM.qty) + ' calculée, ' + fmtQ_(cq) + ' enregistrée)' };
+    const rows = (useM ? withM : noM).rows, first = rows.length ? rows[0].date : null;
+    return { ok: true, first, qtyBefore: (dateISO) => { let q = 0; for (let i = 0; i < rows.length; i++) { if (rows[i].date < dateISO) q = rows[i].qtyAfter; else break; } return Math.max(0, q) * splitAfter(mkt, dateISO); } };
+  }
+  const fmtQ_ = (x) => String(Math.round(x * 1e4) / 1e4);
+
+  /* Propositions de dividendes historiques pour les positions détenues. h.divHist = { at, items: [[exDate, montant par titre (devise de cotation)]] } (relais Yahoo).
+     Ne modifie rien ; renvoie les versements à valider, les doublons évités et les titres non calculables avec la raison. */
+  function dividendProposals(state, today, uid, opt) {
+    opt = opt || {}; const todayS = toISO(today || new Date());
+    const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [] };
+    const pays = state.payments || [];
+    const ymOf_ = (d) => d.slice(0, 7), nextYm = (d) => { const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7)); return m === 12 ? (y + 1) + '-01' : y + '-' + pad2(m + 1); };
+    (state.holdings || []).filter((h) => !opt.ids || opt.ids.has(h.id)).forEach((h) => {
+      const name = h.name || h.displayTicker || h.ticker;
+      if (isAccumulating(h)) { out.accumulating.push(name); return; }
+      if (!h.divHist || !Array.isArray(h.divHist.items)) { out.notFetched.push(name); return; }
+      if (!h.divHist.items.length) { out.noData.push(name); return; }
+      const f = heldQtyFn(state, h); if (!f.ok) { out.unverifiable.push({ id: h.id, name, reason: f.reason }); return; }
+      const mine = pays.filter((p) => p.holdingId === h.id);
+      const rate = taxRate(h);
+      h.divHist.items.forEach((it) => {
+        const ex = it[0], amt = num(it[1]); if (!ex || !(amt > 0) || ex > todayS) return;
+        const qty = f.qtyBefore(ex);
+        if (!(qty > 1e-9)) { out.notEligible++; return; }                    // pas détenu la veille du détachement (acheté après, ou déjà vendu)
+        // doublon : un versement déjà enregistré pour ce titre au même détachement, ou dans le même mois / le mois suivant avec un montant par titre voisin
+        const dup = mine.some((p) => {
+          if (p.exDate && p.exDate === ex) return true;
+          const d = p.payDate || p.exDate; if (!d) return false;
+          if (!(ymOf_(d) === ymOf_(ex) || ymOf_(d) === nextYm(ex))) return false;
+          const ps = num(p.perShare) > 0 ? num(p.perShare) : (num(p.qty) > 0 ? num(p.gross) / num(p.qty) : null);
+          return ps === null || Math.abs(ps - amt) <= 0.25 * amt;
+        });
+        const gross = Math.round(amt * qty * 100) / 100;
+        const row = { id: uid ? uid() : null, holdingId: h.id, ticker: h.displayTicker || h.ticker, name, exDate: ex, payDate: null, qty: Math.round(qty * 1e6) / 1e6, perShare: amt, gross,
+          tax: rate === null ? null : Math.round(gross * rate) / 100, net: rate === null ? null : Math.round(gross * (100 - rate)) / 100, fees: null, currency: h.currency || 'EUR',
+          source: 'market-history', estimated: true, verified: true };
+        (dup ? out.already : out.proposals).push(row);
+      });
+    });
+    out.proposals.sort((a, b) => (a.exDate < b.exDate ? 1 : -1));
+    return out;
+  }
+
   root.Engine = {
     valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
-    forecast12, nextEvents, distribution, paymentKey, prefillPayments, toISO, parse, iso
+    forecast12, nextEvents, distribution, paymentKey, prefillPayments, heldQtyFn, dividendProposals, toISO, parse, iso
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Engine;
 })(typeof self !== 'undefined' ? self : this);

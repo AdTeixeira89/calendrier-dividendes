@@ -135,6 +135,7 @@ function renderDegiroModal(rows, enc, fileName, hIdx, ctx) {
     '<div id="dgSummary" class="dg-summary"></div>' +
     '<div class="sec">Actifs du fichier</div><div id="dgInst"></div>' +
     '<label class="chk"><input type="checkbox" id="dgZero" checked><span>Importer aussi les <b>mouvements de titres sans montant</b> (actions gratuites, droits, retraits, échanges) <small>— sans eux, certaines positions restent à tort ouvertes ou négatives</small></span></label>' +
+    '<label class="chk hide" id="dgDivRow"><input type="checkbox" id="dgDiv" checked><span>Ajouter aussi les <b>dividendes du relevé de compte</b> (montants réels du courtier : brut, retenue à la source, net) <small>— un dividende déjà enregistré n\'est jamais dupliqué ; une estimation de marché du même versement est remplacée par le montant réel</small></span></label>' +
     '<label class="chk"><input type="checkbox" id="dgFill" checked><span>Compléter uniquement les informations <b>manquantes</b> des positions existantes (PRU vide, ISIN absent)</span></label>' +
     '<details class="dg-cols" id="dgPrevBox"><summary>Aperçu des opérations reconnues</summary><div id="dgPrev"></div></details>' +
     '<details class="dg-cols" id="dgIssuesBox"><summary id="dgIssuesSum">Lignes à vérifier</summary><div id="dgIssues"></div></details>' +
@@ -165,7 +166,7 @@ function renderDegiroModal(rows, enc, fileName, hIdx, ctx) {
   const refresh = () => {
     const det = detNow(), res = Ledger.parseOps(rows, det, { zeroMode: $('#dgZero', m).checked ? 'import' : 'skip' }), acc = $('#dgAcc', m).value;
     const pl = Ledger.plan(state, res.ops, { account: acc === '__new__' ? '__new__' : acc, reference: buildRef(acc === '__new__' ? '__new__' : acc) });
-    cur = { det, res, pl, acc, ctx, fileName, rows: rows.length };
+    cur = { det, res, pl, acc, ctx, fileName, rows: rows.length, divGroups: Ledger.groupDividends(res.divs || []) };
     drawDegiro(m, cur);
     return cur;
   };
@@ -179,7 +180,7 @@ function renderDegiroModal(rows, enc, fileName, hIdx, ctx) {
   };
   $$('select', m).forEach((s) => { if (s.id !== 'dgH') s.addEventListener('change', () => refresh()); });
   $('#dgZero', m).addEventListener('change', () => refresh());
-  m.addEventListener('change', (e) => { if (e.target.matches('[data-inc],[data-align],#dgFill')) drawDegiro(m, cur, true); });
+  m.addEventListener('change', (e) => { if (e.target.matches('[data-inc],[data-align],#dgFill,#dgDiv')) drawDegiro(m, cur, true); });
   refresh();
   $('#dgGo', m).onclick = () => confirmDegiro(m, cur);
 }
@@ -200,7 +201,7 @@ function degiroTotals(cur, ch) {
   const sum = (f) => inc.reduce((s, i) => s + f(i), 0);
   const warnOps = sum((i) => i.warnCount), nChk = inc.filter((i) => i.status === 'check' || (i.status === 'archive' && i.check)).length;
   return {
-    detected: res.ops.length, newTx: sum((i) => i.newOps.length), dups: pl.instruments.reduce((s, i) => s + i.dupOps.length, 0), corp: res.corp.length,
+    detected: res.ops.length, divGroups: (cur.divGroups || []).length, newTx: sum((i) => i.newOps.length), dups: pl.instruments.reduce((s, i) => s + i.dupOps.length, 0), corp: res.corp.length,
     newPos: inc.filter((i) => i.status === 'create' || i.status === 'reopen').length, kept: pl.instruments.filter((i) => i.status === 'holding').length,
     aligned: inc.filter((i) => ch.align[i.key]).length, recomputed: inc.filter((i) => i.recompute).length, filled: ch.fill ? inc.filter((i) => i.status === 'holding' && (i.fill.avgCost || i.fill.isin || i.fill.name)).length : 0,
     closed: inc.filter((i) => i.status === 'closed').length, check: nChk, review: warnOps + res.ambiguous.length + res.bad.length + nChk, diverg: pl.instruments.filter((i) => i.divergence)
@@ -239,7 +240,7 @@ function drawDegiro(m, cur, keepChoices) {
   const refMode = pl.reference && pl.reference.mode;
   $('#dgSummary', m).innerHTML = '<ul>' + li(t.detected, 'transaction(s) détectée(s)') + li(t.dups, 'déjà connue(s) / doublon(s) ignoré(s)') + li(t.newTx, 'nouvelle(s) à ajouter', 'pos') + li(res.ops.filter((o) => o.zero).length, 'mouvement(s) de titres sans montant importé(s) (livraisons gratuites, retraits : quantité modifiée, coût inchangé, aucun résultat inventé)') + li(t.corp - res.ops.filter((o) => o.zero).length, 'autre(s) opération(s) sur titres détectée(s) (split, échange…) : listées, jamais appliquées sans votre validation') +
     li(t.newPos, 'position(s) nouvelle(s) à créer') + li(t.kept, 'position(s) existante(s) conservée(s)' + (t.recomputed ? ' (dont <b>' + t.recomputed + ' recalculée(s)</b> depuis les transactions : positions issues de l\'import)' : '') + (t.filled ? ' (dont ' + t.filled + ' complétée(s) d\'une information manquante)' : '') + (t.aligned ? ', <b>' + t.aligned + ' alignée(s) : quantité et PRU remplacés sur votre demande</b>' : '')) +
-    li(t.closed, 'position(s) vendue(s) en totalité, non ajoutée(s) au portefeuille actuel') + li(t.check, 'actif(s) à vérifier, conservés dans l\'historique mais non ajoutés au portefeuille actuel', t.check ? 'warn-t' : '') + li(t.review, 'opération(s)/ligne(s) nécessitant une vérification', t.review ? 'warn-t' : '') + '</ul>' +
+    (t.divGroups ? li(t.divGroups, 'dividende(s) du relevé de compte (source confirmée : brut, retenue, net réels), ajoutés si la case est cochée', 'pos') : '') + li(t.closed, 'position(s) vendue(s) en totalité, non ajoutée(s) au portefeuille actuel') + li(t.check, 'actif(s) à vérifier, conservés dans l\'historique mais non ajoutés au portefeuille actuel', t.check ? 'warn-t' : '') + li(t.review, 'opération(s)/ligne(s) nécessitant une vérification', t.review ? 'warn-t' : '') + '</ul>' +
     (!refMode ? '<div class="notice warn" style="margin-top:6px">Aucune position réelle de référence : une position calculée est créée sans contre-vérification (risque d\'anciennes positions fantômes après un changement d\'ISIN ou un split). Chargez le relevé de portefeuille DEGIRO pour fiabiliser.</div>' : '') +
     (t.diverg.length ? '<div class="notice warn" style="margin-top:6px">Divergences de quantité : ' + t.diverg.map((i) => '<b>' + esc(i.name || i.isin) + '</b> (application ' + fmtQ(i.divergence.app) + ', historique ' + fmtQ(i.divergence.file) + ')').join(' · ') + '. Rien n\'est modifié sans votre accord.</div>' : '') +
     (missing ? '<div class="notice warn" style="margin-top:6px">Colonnes essentielles non reconnues : <b>' + esc(det.missing.join(', ')) + '</b>. Indiquez-les dans « Colonnes reconnues ».</div>' : '') +
@@ -255,14 +256,16 @@ function drawDegiro(m, cur, keepChoices) {
     pl.instruments.filter((i) => i.status === 'check' || (i.status === 'archive' && i.check)).map((i) => ({ line: i.ops[0].line, k: 'À vérifier', msg: (i.name || i.isin) + ' : ' + ((i.check && i.check.msg) || i.reasons.join(' ')) })));
   $('#dgIssuesSum', m).innerHTML = 'Lignes à vérifier (' + issues.length + ')'; $('#dgIssues', m).innerHTML = issues.length ? '<div class="tbl-wrap" style="max-height:200px"><table class="tbl"><tbody>' + issues.slice(0, 200).map((x) => '<tr><td class="r">l. ' + x.line + '</td><td><span class="badge warn">' + x.k + '</span></td><td>' + esc(x.msg) + '</td></tr>').join('') + '</tbody></table></div>' + (issues.length > 200 ? '<div class="hint">200 premières lignes affichées.</div>' : '') : '<div class="muted">Aucune.</div>';
   if (!m.dataset.drawn) { m.dataset.drawn = '1'; $('#dgIssuesBox', m).open = pl.instruments.some((i) => i.status === 'check') || res.bad.length > 0 || res.corp.length > 0; }
-  const goBtn = $('#dgGo', m); goBtn.disabled = missing > 0 || (t.newTx === 0 && t.aligned === 0 && t.recomputed === 0 && t.filled === 0 && t.newPos === 0 && t.closed === 0 && t.check === 0 && !(pl.instruments.some((i) => i.status === 'archive' && !!i.check !== !!(i.ref && i.ref.ref.check))));
-  goBtn.textContent = goBtn.disabled ? 'Rien à importer' : 'Importer (' + t.newTx + ' opération' + (t.newTx > 1 ? 's' : '') + ')';
+  const dRow = $('#dgDivRow', m); if (dRow) dRow.classList.toggle('hide', !t.divGroups);
+  const addDivs = t.divGroups > 0 && $('#dgDiv', m) && $('#dgDiv', m).checked;
+  const goBtn = $('#dgGo', m); goBtn.disabled = missing > 0 || (!addDivs && t.newTx === 0 && t.aligned === 0 && t.recomputed === 0 && t.filled === 0 && t.newPos === 0 && t.closed === 0 && t.check === 0 && !(pl.instruments.some((i) => i.status === 'archive' && !!i.check !== !!(i.ref && i.ref.ref.check))));
+  goBtn.textContent = goBtn.disabled ? 'Rien à importer' : 'Importer (' + t.newTx + ' opération' + (t.newTx > 1 ? 's' : '') + (addDivs ? ' + ' + t.divGroups + ' dividende' + (t.divGroups > 1 ? 's' : '') : '') + ')';
 }
 
 async function confirmDegiro(m, cur) {
   const ch = degiroChoices(m, cur.pl), t = degiroTotals(cur, ch);
   const body = '<ul class="dg-conf"><li><b>' + t.newTx + '</b> opération(s) ajoutée(s) à l\'historique (' + t.dups + ' doublon(s) ignoré(s))</li><li><b>' + t.newPos + '</b> position(s) créée(s) avec leur PRU calculé</li><li><b>' + t.closed + '</b> position(s) soldée(s) archivée(s) (non affichée(s) dans le portefeuille actuel)</li>' +
-    (t.check ? '<li><b>' + t.check + '</b> actif(s) à vérifier : opérations conservées, <b>aucune position créée</b></li>' : '') +
+    (t.check ? '<li><b>' + t.check + '</b> actif(s) à vérifier : opérations conservées, <b>aucune position créée</b></li>' : '') + (t.divGroups && $('#dgDiv', m).checked ? '<li><b>' + t.divGroups + '</b> dividende(s) du relevé de compte : montants réels (brut, retenue, net), doublons ignorés</li>' : '') +
     '<li><b>' + t.kept + '</b> position(s) existante(s) conservée(s)' + (t.filled ? ', ' + t.filled + ' complétée(s) d\'une information manquante' : '') + (t.aligned ? ', <b>' + t.aligned + ' alignée(s) sur l\'historique (quantité et PRU remplacés)</b>' : '') + '</li></ul>' +
     '<p>Le fichier d\'origine est conservé comme source d\'import et une copie de vos données est gardée : vous pourrez <b>annuler cet import</b> (Paramètres → Sauvegarde, ou le bouton « Annuler » qui s\'affiche ensuite).</p>';
   const box = $('#dgConfirm', m);
@@ -275,6 +278,13 @@ async function confirmDegiro(m, cur) {
   const refChoice = $('#dgRef', m).value;
   if (refChoice === 'file' && cur.ctx.pendingRef) state.reference = Object.assign({ account: accId }, cur.ctx.pendingRef);
   const r = Ledger.apply(state, cur.pl, ch, { uid, account: accId });
+  // dividendes du relevé de compte : source confirmée (versements existants intacts ; seule une estimation de marché du même versement est remplacée)
+  let divRes = null;
+  if (cur.divGroups && cur.divGroups.length && $('#dgDiv', m) && $('#dgDiv', m).checked) {
+    divRes = Ledger.brokerDividendPayments(state, cur.divGroups, uid);
+    if (divRes.replace.length) state.payments = state.payments.filter((p) => !divRes.replace.includes(p.id));
+    state.payments.push.apply(state.payments, divRes.add);
+  }
   // la source d'import (CSV d'origine) et son rapport restent enregistrés ; les anciens fichiers bruts sont allégés (3 derniers conservés)
   state.imports = state.imports || [];
   state.imports.push({ id: uid(), at: new Date().toISOString(), name: cur.fileName, size: cur.ctx.size || 0, rows: cur.rows, account: accId, report: Object.assign({}, cur.res.report, { newTx: r.tx, dups: t.dups, created: r.created.length, archived: r.archived.length, checked: r.checked.length, corp: cur.res.corp.map((x) => ({ date: x.date, isin: x.isin, name: x.name, desc: x.desc, ratio: x.ratio, zero: !!x.zero })) }),
@@ -282,7 +292,7 @@ async function confirmDegiro(m, cur) {
   state.imports.slice(0, -3).forEach((x) => { delete x.raw; });
   saveState(); closeModal();
   view.port.tab = 'ops'; view.ops.asset = 'all';
-  const parts = [r.tx + ' opération(s)']; if (r.created.length) parts.push(r.created.length + ' position(s) créée(s)'); if (r.archived.length) parts.push(r.archived.length + ' soldée(s) archivée(s)'); if (r.checked.length) parts.push(r.checked.length + ' à vérifier'); if (r.filled) parts.push(r.filled + ' complétée(s)'); if (r.aligned) parts.push(r.aligned + ' alignée(s)');
+  const parts = [r.tx + ' opération(s)']; if (divRes && divRes.add.length) parts.push(divRes.add.length + ' dividende(s) confirmé(s)'); if (r.created.length) parts.push(r.created.length + ' position(s) créée(s)'); if (r.archived.length) parts.push(r.archived.length + ' soldée(s) archivée(s)'); if (r.checked.length) parts.push(r.checked.length + ' à vérifier'); if (r.filled) parts.push(r.filled + ' complétée(s)'); if (r.aligned) parts.push(r.aligned + ' alignée(s)');
   go('portfolio'); renderPage();
   toast('Import terminé : ' + parts.join(' · ') + '.', { ms: 14000, action: { label: 'Annuler l\'import', fn: undoLastImport } });
   enrichAfterImport(r.created, r.archived.concat(r.checked));

@@ -297,4 +297,24 @@ console.log(n + ' tests passed');
     const sr = E.periodReturn(E.portfolioHistory(sold, cvAt, { months: 0, today: td2 }), [], td2); assert.ok(sr.sells === 1200 && sr.buys === 2000 && Math.abs(sr.totalGain - (1320 + 1200 - 2000)) < 1e-6, 'gain = valeur 1 320 + vente 1 200 − achats 2 000 = 520 : ' + sr.totalGain);
     assert.strictEqual(E.periodReturn(E.portfolioHistory({ holdings: [], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td2 }), [], td2).ok, false, 'rien à mesurer');
   });
+  t('DIVIDENDES PASSÉS : éligibilité d\'après les opérations (veille du détachement), doublons évités, titres sans historique non supposés détenus, ETF capitalisants exclus, net jamais inventé', () => {
+    const td2 = new Date(2026, 9, 14), uid = (() => { let n = 0; return () => 'n' + (++n); })();
+    const H = (id, o) => Object.assign({ id, ticker: id.toUpperCase(), displayTicker: id.toUpperCase(), name: id.toUpperCase(), type: 'stock', currency: 'EUR', quantity: 0, account: 'a', dividend: {} }, o);
+    const T = (id, h, date, type, qty) => ({ id: id, holdingId: h, date, type, qty, price: 10, fees: 0, currency: 'EUR', amountAcct: qty * 10, acctCur: 'EUR', source: 'degiro' });
+    const A = H('a', { quantity: 12, dividend: { taxRate: 30 }, divHist: { at: '2026-10-01', items: [['2024-11-01', 0.5], ['2025-03-01', 0.5], ['2025-06-10', 0.5], ['2025-09-01', 0.5], ['2026-02-01', 0.5]] } });
+    const B = H('b', { quantity: 5, divHist: { at: '2026-10-01', items: [['2025-03-01', 1]] } });                       // aucune opération importée
+    const C = H('c', { type: 'etf_acc', quantity: 3, divHist: { at: '2026-10-01', items: [['2025-03-01', 1]] } });
+    const D = H('d', { quantity: 99, divHist: { at: '2026-10-01', items: [['2025-03-01', 1]] } });                      // opérations incohérentes avec 99
+    const E_ = H('e', { quantity: 4 });                                                                                  // dividendes non récupérés
+    const s = { holdings: [A, B, C, D, E_], archive: [], transactions: [T('1', 'a', '2025-01-10', 'buy', 10), T('2', 'a', '2025-06-10', 'buy', 5), T('3', 'a', '2025-12-01', 'sell', 3), T('4', 'd', '2025-01-10', 'buy', 5)],
+      payments: [{ id: 'p', holdingId: 'a', exDate: null, payDate: '2025-03-20', qty: 10, perShare: 0.5, gross: 5, currency: 'EUR', verified: true }] };
+    const snap = JSON.stringify(s), r = E.dividendProposals(s, td2, uid);
+    assert.strictEqual(JSON.stringify(s), snap, 'aucune modification de l\'état');
+    assert.deepStrictEqual(r.proposals.map((x) => [x.exDate, x.qty, x.gross]).sort(), [['2025-06-10', 10, 5], ['2025-09-01', 15, 7.5], ['2026-02-01', 12, 6]].sort(), 'quantité à la veille du détachement : l\'achat du jour du détachement (2025-06-10) ne compte pas, la vente de décembre oui');
+    assert.deepStrictEqual(r.already.map((x) => x.exDate), ['2025-03-01'], 'versement déjà enregistré (paiement le 20 mars) : ignoré'); assert.strictEqual(r.notEligible, 1, 'dividende de 2024 antérieur à l\'achat : non éligible');
+    assert.ok(r.proposals.every((x) => x.net === Math.round(x.gross * 70) / 100 && x.estimated && x.source === 'market-history' && x.payDate === null), 'net seulement si une retenue est renseignée ; date de paiement non inventée');
+    assert.deepStrictEqual(r.unverifiable.map((x) => x.name).sort(), ['B', 'D'], 'sans historique d\'opérations ou incohérent : non calculé'); assert.ok(/inconnue/.test(r.unverifiable.find((x) => x.name === 'B').reason) && /incohérent/.test(r.unverifiable.find((x) => x.name === 'D').reason));
+    assert.deepStrictEqual(r.accumulating, ['C']); assert.deepStrictEqual(r.notFetched, ['E']);
+    s.holdings[0].dividend = {}; assert.ok(E.dividendProposals(s, td2, uid).proposals.every((x) => x.net === null && x.tax === null), 'sans retenue renseignée : net inconnu, jamais inventé');
+  });
 })();

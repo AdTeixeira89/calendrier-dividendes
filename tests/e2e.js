@@ -920,12 +920,46 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/Performance · Tout/i.test(t) && /\+\s?490\s?€/i.test(t) && /Apports nets\s+\+2\s?200\s?€/i.test(t) && /Dividendes perçus\s+\+50\s?€/i.test(t), 'DEGIRO, depuis le début : gain 440 (marché) + 50 (dividendes) = 490, apports 2 200 séparés : ' + t.slice(0, 400));
     ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(/dividendes « à vérifier » non comptés/i.test(t), 'dividende à vérifier signalé, non compté');
     await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t) && /Apports nets\s+0\s?€/i.test(t), 'DEGIRO, 1 an : 2 400 → 2 640 + 50 de dividendes = 290, aucun apport : ' + t.slice(0, 300));
-    ok(/\+1[12],\d\s?%/i.test(t), 'pourcentage hors apports (~ +10 % marché + dividende) : ' + t.slice(0, 200));
+    ok(!/hors apports/i.test(t) && !/Performance · 1 an\s+\+\s?290\s?€\s+[+−-]?\d+,\d\s?%/i.test(t), 'le ratio « % hors apports » n\'est plus affiché : ' + t.slice(0, 200));
     await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(300); t = await strip(); ok(/raccourcie/i.test(t), '5 ans : historique plus court signalé : ' + t.slice(-250)); ok(await p.locator('#perSeg [data-per="60"].dim').count() === 1, 'bouton 5 ans atténué (historique plus court)');
     await p.selectOption('#acctSel', 'all'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip();
     ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t), 'tous les portefeuilles, 1 an : Alpha +290, Beta 0 → 290 : ' + t.slice(0, 300));
     await p.selectOption('#acctSel', 'main'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an\s+0\s?€/i.test(t) || /0\s?€/i.test(t.slice(0, 60)), 'Mon portefeuille (Beta à cours constant) : performance nulle malgré l\'achat : ' + t.slice(0, 200));
     await shot(p, 'perf-strip'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('dividendes passés : recherche d\'après les opérations importées, liste de vérification, éligibilité à la veille du détachement, doublons évités, titres sans historique non supposés détenus, ajout annulable', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
+    seed.holdings = [Object.assign({}, base, { id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, avgCost: 150, price: 190 }), Object.assign({}, base, { id: 'air', ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Air Liquide', currency: 'EUR', quantity: 5, avgCost: 140, price: 175 }),
+      Object.assign({}, base, { id: 'iwda', ticker: 'IWDA.AS', displayTicker: 'IWDA.AS', name: 'iShares World', type: 'etf_acc', currency: 'EUR', quantity: 2, avgCost: 80, price: 90 })];
+    seed.transactions = [{ id: 't1', holdingId: 'aapl', date: '2026-01-15', type: 'buy', qty: 10, price: 150, fees: 0, currency: 'USD', amountAcct: 1400, acctCur: 'EUR', source: 'degiro' }];
+    seed.payments = [{ id: 'pre', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', payDate: '2026-05-14', exDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', source: 'manual', verified: true }];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
+    await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo', { timeout: 20000 }); const t = (await p.locator('.modal').innerText()).replace(/\n/g, ' | ');
+    ok(/À valider\s*\|?\s*2/.test(t) || /2\s*\|?\s*À valider/i.test(t), 'AAPL : détachements du 9 févr. et du 10 août éligibles (le 11 mai est déjà enregistré, celui de 2025 antérieur à l\'achat) : ' + t.slice(0, 600));
+    ok(/Estimé/.test(t) && /date non fournie/.test(t), 'estimé, date de paiement non inventée'); ok(/Air Liquide[^|]*aucune opération importée/.test(t) || /Air Liquide.*date d'acquisition inconnue/.test(t), 'titre sans opérations : non calculable, non supposé détenu'); ok(/iShares World.*ETF capitalisant/.test(t), 'ETF capitalisant exclu');
+    ok(/Déjà enregistrés \(ignorés\)\s*\|?\s*1/i.test(t) || /1\s*\|?\s*Déjà enregistrés/i.test(t), 'doublon détecté'); eq(await p.locator('[data-dh]').count(), 2, '2 lignes proposées');
+    await p.uncheck('[data-dh="0"]'); await p.waitForTimeout(100); ok(/1<\/b> versement|1\s+versement\(s\) sélectionné/.test(await p.locator('#dhTotal').innerHTML() + await p.locator('#dhTotal').innerText()), 'compteur de sélection');
+    await p.check('[data-dh="0"]'); eq((await storeOf(p)).payments.length, 1, 'rien n\'est enregistré avant validation'); await p.click('#dhGo'); await p.waitForTimeout(400);
+    let st = await storeOf(p); eq(st.payments.length, 3, '2 versements ajoutés, l\'existant intact'); const add = st.payments.filter((x) => x.source === 'market-history'); eq(add.map((x) => [x.exDate, x.qty, x.gross, x.net, x.payDate]).sort(), [['2026-02-09', 10, 2.5, null, null], ['2026-08-10', 10, 2.6, null, null]].sort(), 'quantité 10, montants bruts, net et date de paiement non inventés'); eq(st.payments.find((x) => x.id === 'pre').gross, 2.6, 'versement existant inchangé');
+    ok(/Estimé/.test(await p.locator('#tblHost').innerText()), 'badge « Estimé » dans l\'historique');
+    await p.click('[data-do=div-history]'); await p.waitForSelector('.modal .notice, #dhGo', { timeout: 20000 }); ok(/Aucun dividende nouveau/.test(await p.locator('.modal').innerText()), 'relance : plus rien à ajouter (aucun doublon)'); await p.keyboard.press('Escape');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('import du relevé de compte DEGIRO : dividendes réels (brut, retenue, net) ajoutés après validation, rattachés par ISIN, doublons ignorés, estimation de marché remplacée ; annulable', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 10, avgCost: 150, price: 190, account: 'main', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: {} }];
+    seed.payments = [{ id: 'est', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: '2026-05-11', payDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', source: 'market-history', estimated: true, verified: true }, { id: 'man', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', payDate: '2026-08-14', qty: 10, gross: 2.6, currency: 'USD', source: 'manual', verified: true }];
+    const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre', '14-05-2026,00:00,14-05-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"103,00",', '14-05-2026,00:00,14-05-2026,APPLE INC.,US0378331005,Impôt sur dividende,,USD,"-0,39",EUR,"102,61",',
+      '14-08-2026,00:00,14-08-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"105,00",', '14-02-2026,00:00,14-02-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,50",EUR,"107,50",'].join('\n');
+    const p = await device({ guest: true, seed }); await p.open(); await dgOpen(p, csv);
+    ok(/3\s+dividende\(s\) du relevé de compte/.test((await p.locator('#dgSummary').innerText()).replace(/\n/g, ' ')), 'dividendes du relevé détectés : ' + (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ').slice(0, 300));
+    ok(await p.locator('#dgDivRow').isVisible(), 'case dividendes visible'); await dgConfirm(p); await idle(p); const st = await storeOf(p);
+    const dg = st.payments.filter((x) => x.source === 'degiro').map((x) => [x.payDate, x.gross, x.tax, x.net]).sort(); eq(dg, [['2026-02-14', 2.5, null, null], ['2026-05-14', 2.6, 0.39, 2.21]].sort(), 'montants réels : retenue et net seulement quand le courtier les fournit');
+    ok(!st.payments.some((x) => x.id === 'est'), 'estimation de marché du même versement remplacée'); ok(st.payments.some((x) => x.id === 'man'), 'versement saisi à la main conservé (doublon du 14 août ignoré)'); eq(st.payments.length, 3, '3 versements : 14 févr., 14 mai (réel), 14 août (saisie)');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {

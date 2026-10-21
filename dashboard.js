@@ -79,7 +79,7 @@ function renderHome(host) {
   const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
   const divAll = (state.payments || []).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
     const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
-    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false };
+    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false, estimated: !!p_.estimated };
   }).filter((d_) => d_.v !== null);
   const pr = Engine.periodReturn(hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
   const availFrom = (() => { const ha = histFor(0); return ha && !ha.empty ? (ha.summary && ha.summary.firstTx) || (ha.points[0] && ha.points[0].date) : null; })();
@@ -94,10 +94,12 @@ function renderHome(host) {
     if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
     if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
     if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
+    const est = divAll.filter((d_) => d_.estimated && !d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0);
+    if (est > 0.5) nt.push('dont ' + sens(money(est, 0)) + ' de dividendes <b>estimés</b> d\'après l\'historique de marché (retenue et date de paiement non confirmées).');
     if (unv > 0.5) nt.push('+ ' + sens(money(unv, 0)) + ' de dividendes « à vérifier » non comptés (validez-les dans Dividendes → Historique).');
     const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte : le pourcentage est pondéré dans le temps, l\'effet de chaque versement est neutralisé.';
     perfStrip = '<div class="perf-strip" aria-label="Rentabilité de la période">' +
-      '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>' + sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' hors apports</small></div>' +
+      '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>gain de marché + dividendes</small></div>' +
       '<div class="ind"><span>Plus-value de marché</span>' + sens('<b class="' + cl(pr.marketGain) + '">' + sgn(pr.marketGain) + '</b>') + '<small>variation des cours</small></div>' +
       '<div class="ind"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '<small>' + pr.dividendCount + ' versement(s) vérifié(s)</small></div>' +
       '<div class="ind" tabindex="0" data-tip="Argent ajouté (achats) moins argent retiré (ventes) sur la période : ce n\'est ni un gain ni une perte."><span>Apports nets</span>' + sens('<b>' + sgn(pr.netFlows) + '</b>') + '<small>' + sens(money(pr.buys, 0) + ' versés · ' + money(pr.sells, 0) + ' retirés') + '</small></div></div>' +

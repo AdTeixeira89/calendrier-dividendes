@@ -201,6 +201,18 @@
       return { symbol, splits: splitList(res) };
     }
 
+    /* Historique complet des dividendes en espèces d'un titre (Yahoo : date de détachement + montant par titre, devise de cotation). La date de PAIEMENT n'est pas fournie. */
+    async function fetchDividends(input, nameHint) {
+      const symbol = await resolveSymbol(input, nameHint);
+      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=max&interval=1mo');
+      const res = data.chart && data.chart.result && data.chart.result[0];
+      if (!res) throw new Error('Symbole inconnu.');
+      const meta = res.meta || {}, pence = meta.currency === 'GBp' || meta.currency === 'GBX';
+      const items = Object.keys((res.events && res.events.dividends) || {}).map((k) => res.events.dividends[k]).filter((d) => d && d.amount > 0 && d.date)
+        .map((d) => [new Date(d.date * 1000).toISOString().slice(0, 10), Math.round((pence ? d.amount / 100 : d.amount) * 1e6) / 1e6]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      return { symbol, currency: pence ? 'GBP' : (meta.currency || null), items };
+    }
+
     async function fetchNews(symbol) {
       const data = await call('/news?symbol=' + encodeURIComponent(symbol));
       return parseNews(data, symbol);
@@ -227,7 +239,7 @@
       }));
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchNews, translate, translateDirect };
+    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchDividends, fetchNews, translate, translateDirect };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
