@@ -63,6 +63,13 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Actualisation (tirer vers le bas / bouton)
+
+- **Téléphone** : en haut de n'importe quelle page, **tirez vers le bas** puis relâchez (indicateur « Tirez / Relâchez pour actualiser »). Le geste ne se déclenche qu'en haut de page, au-delà d'un seuil, et jamais depuis un tableau, un graphique, une fenêtre ou un champ de saisie.
+- **Bouton discret** : l'icône ↻ de la barre du haut fait la même chose (ordinateur compris) ; un point apparaît dessus quand une mise à jour de l'application est disponible.
+- **Une actualisation** : 1. si une **nouvelle version** est publiée (numéro de cache de `sw.js` > `APP_BUILD` de `refresh.js`), l'application se met à jour et se recharge ; 2. sinon cours, historique, dividendes Yahoo des actifs affichés (via le relais) ; 3. taux de change ; 4. actualités ; 5. synchronisation du compte. Bilan affiché en une ligne ; hors-ligne : message, rien n'est modifié.
+- La version est aussi vérifiée discrètement au démarrage et au retour sur l'application. **À chaque publication, `SHELL` (sw.js) et `APP_BUILD` (refresh.js) doivent être incrémentés ensemble** (`node tests/version.test.js` le vérifie).
+
 ## Rentabilité réelle (portefeuille × période)
 
 Sous la courbe de l'Accueil, une bande « **Performance · {période}** » suit le **portefeuille sélectionné** (ou « Tous les portefeuilles ») et la **période du graphique** (1 M, 3 M, 6 M, 1 an, 5 ans, Tout) :

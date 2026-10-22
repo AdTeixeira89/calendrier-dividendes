@@ -491,7 +491,7 @@ function buildShell() {
   const tabs = Object.keys(PAGES).map((k) => '<button type="button" data-go="' + k + '">' + icon(PAGES[k].icon) + '<span>' + (PAGES[k].short || PAGES[k].label) + '</span></button>').join('');
   $('#app').innerHTML = '<aside class="sidebar"><div class="brand"><img src="logo.svg" alt="">Dividendes</div>' + nav + '<div class="spacer"></div>' +
     '<div class="side-foot"><div id="syncChipSide"></div><div class="muted" style="font-size:12px;padding:0 4px" id="whoSide"></div></div></aside>' +
-    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">Dividendes</span></div><span class="grow"></span>' +
+    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">Dividendes</span></div><span class="grow"></span><button class="rf-btn" type="button" data-rf-btn aria-label="Actualiser">' + icon('refresh') + '</button>' +
     '<label class="sr" for="acctSel">Portefeuille</label><select id="acctSel" style="min-height:36px"></select><span id="syncChipTop"></span></header>' +
     '<main id="page" tabindex="-1"></main></div><nav class="tabbar" aria-label="Navigation">' + tabs + '</nav>';
   $$('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
@@ -706,7 +706,7 @@ function startApp() {
     window.addEventListener('online', () => { if (Cloud.user()) { pullIfChanged(); if (state.meta.dirty) scheduleSync(); } });
     window.addEventListener('offline', () => { if (Cloud.user()) setSync('offline', 'Hors-ligne'); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); } });
-    ensureFx(); ensureFxHistory();
+    ensureFx(); ensureFxHistory(); initPullRefresh();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(() => { snapshotForWorker(); checkNotifications(); }).catch(() => {});
     setTimeout(() => { if (state.settings.autoRefresh && state.settings.relayUrl && state.holdings.length && staleMarket()) refreshMarket(null, { silent: true }); }, 2500);
   }

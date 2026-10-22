@@ -1,9 +1,9 @@
 /* Service worker — hors-ligne + rappels de versement */
 importScripts('payouts.js');
 
-const SHELL = 'dividendes-shell-v23';
+const SHELL = 'dividendes-shell-v24';
 const DATA = 'dividendes-data';
-const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'ledger.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'pages.js', 'dashboard.js', 'forms.js', 'history.js', 'check.js', 'settings.js', 'app.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
+const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'ledger.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'pages.js', 'dashboard.js', 'forms.js', 'history.js', 'check.js', 'refresh.js', 'settings.js', 'app.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES).catch(() => {})).then(() => self.skipWaiting()));
@@ -21,7 +21,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {});
