@@ -63,6 +63,14 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Vendre ou clôturer une position
+
+**Mon portefeuille → clic sur la position → « Vendre / clôturer… »**, ou **Supprimer** une position détenue (l'application demande d'abord « Que s'est-il passé ? » : vendue en totalité, vendue en partie, ou ajoutée par erreur → suppression simple) :
+- On indique la **quantité** (toute la position, ou une partie), le **prix de vente par titre**, la **date** et les **frais** éventuels. L'aperçu montre le produit net, le **résultat réalisé** et la quantité restante.
+- Une **opération de vente** est enregistrée : la quantité baisse, le **PRU des titres restants ne change pas**, le résultat réalisé apparaît dans Opérations / Clôturées, et la courbe de valeur, les apports/retraits et la performance de l'accueil en tiennent compte. Vente totale → la position quitte le portefeuille actuel (onglet « Clôturées », prix de sortie conservé) ; ses dividendes restent dans l'historique.
+- **Position saisie sans historique d'achats** : une opération « **Ouverture** » reprend la quantité détenue au **PRU saisi** (demandé s'il manque) ; la date d'achat est facultative — sans elle, le suivi démarre à la date d'ajout de la position dans l'application (rien n'est inventé au-delà). Si vous importez ensuite l'historique complet DEGIRO de ce titre, supprimez l'opération « Ouverture » (Dividendes → Historique → Opérations) pour éviter un doublon ; le contrôle de l'historique le signale.
+- Devise de vente différente de celle du prix de revient : le produit net dans la devise du coût est demandé (sinon le résultat réalisé n'est pas calculable, signalé). Annulable.
+
 ## Actualisation (tirer vers le bas / bouton)
 
 - **Téléphone** : en haut de n'importe quelle page, **tirez vers le bas** puis relâchez (indicateur « Tirez / Relâchez pour actualiser »). Le geste ne se déclenche qu'en haut de page, au-delà d'un seuil, et jamais depuis un tableau, un graphique, une fenêtre ou un champ de saisie.

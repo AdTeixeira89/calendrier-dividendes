@@ -294,7 +294,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     let s = await storeOf(p); eq(s.holdings.length, 1); eq(s.holdings[0].quantity, 8); eq(s.holdings[0].dividend.history.length > 0, true, 'historique de dividendes conservé');
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(150); await p.click('.asset'); await p.waitForSelector('#hType'); await p.selectOption('#hType', 'etf_acc'); ok(await p.locator('#hDivFields.hide').count(), 'champs dividende masqués pour un capitalisant');
     await p.click('#hSave'); await p.waitForTimeout(250); s = await storeOf(p); eq([s.holdings[0].type, s.holdings[0].dividend.none, s.holdings[0].dividend.lastAmount], ['etf_acc', true, null], 'capitalisant : aucun dividende');
-    await p.click('.asset'); await p.click('#hDel'); await p.click('#cdYes'); await p.waitForTimeout(250); eq((await storeOf(p)).holdings.length, 0, 'supprimé');
+    await p.click('.asset'); await p.click('#hDel'); await p.click('[data-c=delete]'); await p.click('#cdYes'); await p.waitForTimeout(250); eq((await storeOf(p)).holdings.length, 0, 'supprimé');
     await p.click('.toast button'); await p.waitForTimeout(250); eq((await storeOf(p)).holdings.length, 1, 'suppression annulée');
   });
 
@@ -984,6 +984,27 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.addInitScript(() => { if (localStorage.getItem('sim_new_version') === '1') { const of = window.fetch.bind(window); window.fetch = (u, o) => (/sw\.js/.test(String(u)) ? Promise.resolve(new Response("const SHELL = 'dividendes-shell-v999';")) : of(u, o)); } }); await p.evaluate(() => { localStorage.setItem('sim_new_version', '1'); const of = window.fetch.bind(window); window.fetch = (u, o) => (/sw\.js/.test(String(u)) ? Promise.resolve(new Response("const SHELL = 'dividendes-shell-v999';")) : of(u, o)); }); await p.evaluate(() => { window.__marker = 1; });
     await p.click('[data-rf-btn]'); await p.waitForFunction(() => window.__marker === undefined, null, { timeout: 10000 }).catch(async () => { throw new Error('pas de rechargement : ' + await p.evaluate(() => JSON.stringify([pullBusy, updateAvail, document.querySelector('#toastRoot').innerText])) + ' ' + JSON.stringify(p.errors)); }); await p.waitForSelector('#page'); ok(true, 'application rechargée à la détection d\'une nouvelle version');
     await p.waitForSelector('[data-rf-btn].has-update', { timeout: 15000 }); ok(true, 'après rechargement, version publiée toujours plus récente (simulation) : pastille de mise à jour sur le bouton, sans boucle');
+  });
+
+  await test('vendre / clôturer une position : prix de sortie, vente partielle ou totale, résultat réalisé, portefeuille ajusté ; la suppression d\'une position demande d\'abord ce qui s\'est passé', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'manual', addedAt: '2025-01-01', account: 'main', dividend: { none: true } };
+    seed.holdings = [Object.assign({}, base, { id: 'v1', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 10, avgCost: 100, price: 130 }), Object.assign({}, base, { id: 'v2', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', quantity: 5, avgCost: 50, price: 60 })];
+    const p = await device({ guest: true, seed }); p.setDefaultTimeout(8000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
+    await p.evaluate(() => openHoldingModal('v1')); await p.waitForSelector('#hSell'); await p.click('#hSell'); await p.waitForSelector('#slPrice');
+    await p.click('#slMode [data-m=part]'); await p.fill('#slQty', '4'); await p.fill('#slPrice', '120'); await p.fill('#slFees', '2'); await p.waitForTimeout(150);
+    const prev = (await p.locator('#slPrev').innerText()).replace(/\n/g, ' | '); await shot(p, 'sell'); ok(/478/.test(prev) && /\+?78/.test(prev) && /6/.test(prev) && /inchangé/.test(prev), 'aperçu : produit 478 €, résultat +78 €, reste 6 : ' + prev);
+    await p.fill('#slQty', '11'); await p.click('#slGo'); ok(/dépasse la quantité détenue/.test(await p.locator('#slErr').innerText()), 'quantité excessive refusée'); await p.fill('#slQty', '4'); await p.click('#slGo'); await p.waitForTimeout(400);
+    let st = await storeOf(p); const h1 = st.holdings.find((x) => x.id === 'v1'); eq([h1.quantity, h1.avgCost], [6, 100], 'quantité 6, PRU inchangé'); eq(st.transactions.map((t) => [t.type, t.qty, t.price, t.opening || false]).sort(), [['buy', 10, 100, true], ['sell', 4, 120, false]].sort(), 'ouverture au PRU saisi + vente');
+    ok(/Vente partielle enregistrée/.test(await p.locator('#toastRoot').innerText()), 'confirmation');
+    // suppression d'une autre position : on demande d'abord ce qui s'est passé
+    await p.evaluate(() => { confirmDeleteHoldings(['v2']); }); await p.waitForSelector('[data-c=all]'); ok(/Que s'est-il passé/.test(await p.locator('.modal').innerText()), 'question posée avant suppression'); await p.click('[data-c=all]'); await p.waitForSelector('#slPrice');
+    await p.fill('#slPrice', '70'); await p.click('#slGo'); await p.waitForTimeout(400); st = await storeOf(p);
+    ok(!st.holdings.some((x) => x.id === 'v2') && st.archive.some((x) => x.id === 'v2' && x.userClosed && x.exitPrice === 70), 'clôture : la position quitte le portefeuille actuel, prix de sortie conservé');
+    await p.evaluate(() => { view.port.tab = 'closed'; go('portfolio'); renderPage(); }); await p.waitForTimeout(300); const cl = await p.locator('#page').innerText(); ok(/Beta/.test(cl) && /\+\s?100/.test(cl), 'onglet Clôturées : Beta, résultat réalisé +100 € (5 × (70 − 50)) : ' + cl.replace(/\n/g, ' | ').slice(0, 300));
+    await p.evaluate(() => { view.port.tab = 'ops'; go('portfolio'); renderPage(); }); await p.waitForTimeout(300); ok(/Ouverture/.test(await p.locator('#tblHost').innerText()), 'opération « Ouverture » signalée');
+    await p.evaluate(() => { confirmDeleteHoldings(['v1']); }); await p.waitForSelector('[data-c=delete]'); await p.click('[data-c=delete]'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(300); ok(!(await storeOf(p)).holdings.some((x) => x.id === 'v1'), 'suppression simple possible (ajout par erreur)');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {

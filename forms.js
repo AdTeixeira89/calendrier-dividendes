@@ -57,7 +57,7 @@ function openHoldingModal(id) {
     fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement.', 'hKind') + '</div>' +
     '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
     fld('Retenue à la source (%)', '<input type="number" id="hTax" min="0" max="100" step="any" inputmode="decimal" value="' + esc(dv.taxRate === null || dv.taxRate === undefined ? '' : dv.taxRate) + '" placeholder="facultatif">', 'Permet d\'estimer le net.', 'hTax') + '</div></div></div>' +
-    '<div class="modal-actions"><div>' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
+    '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
   const sync = () => {
     const acc = $('#hType', m).value === 'etf_acc', none = $('#hPays', m).value === '0';
     $('#hDivBox', m).classList.toggle('hide', false);
@@ -70,6 +70,7 @@ function openHoldingModal(id) {
   $('#hFetch', m).onclick = () => fetchIntoHoldingForm(m);
   wireTickerSearch(m);
   if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
+  if (ex && $('#hSell', m)) $('#hSell', m).onclick = () => { closeModal(); openSellModal(ex.id); };
   $('#hSave', m).onclick = () => saveHoldingForm(m, ex);
 }
 
@@ -149,8 +150,60 @@ function saveHoldingForm(m, ex) {
 /* ===============================================================
    SUPPRESSIONS (position ≠ historique ≠ compte utilisateur)
    =============================================================== */
+/* ---------------------------------------------------------------
+   VENDRE / CLÔTURER UNE POSITION (prix de sortie, vente partielle) : le calcul du portefeuille est ajusté
+   --------------------------------------------------------------- */
+function openSellModal(id, mode) {
+  const h = holdingById(id); if (!h) return;
+  const qty0 = Number(h.quantity) || 0, cur = h.currency || 'EUR', costCur = h.costCurrency || cur, hasTx = state.transactions.some((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell'));
+  const need = { pru: !hasTx && !(Number(h.avgCost) > 0), fx: costCur !== cur };
+  const m = openModal('<h2>Vendre ou clôturer</h2><div class="sub"><b>' + esc(h.name || h.displayTicker || h.ticker) + '</b> · ' + fmtNum(qty0) + ' titre(s)' + (Number(h.avgCost) > 0 ? ' · prix de revient ' + fmtMoney(h.avgCost, costCur) : '') + '. Enregistrez la vente pour que le portefeuille soit ajusté : quantité restante, résultat réalisé, valeur et rendement.</div>' +
+    '<div class="seg" id="slMode" role="group" aria-label="Type de vente" style="margin-bottom:10px"><button type="button" data-m="all" class="' + (mode === 'part' ? '' : 'on') + '">Clôturer toute la position</button><button type="button" data-m="part" class="' + (mode === 'part' ? 'on' : '') + '">J\'en ai vendu une partie</button></div>' +
+    '<div class="row2">' + fld('Quantité vendue', '<input type="text" inputmode="decimal" id="slQty" value="' + (mode === 'part' ? '' : String(qty0)) + '"' + (mode === 'part' ? '' : ' readonly') + '>', 'sur ' + fmtNum(qty0) + ' détenu(s)', 'slQty') +
+    fld('Prix de vente par titre (' + cur + ')', '<input type="text" inputmode="decimal" id="slPrice" placeholder="ex : 123,45" autocomplete="off">', 'prix auquel la vente a été exécutée', 'slPrice') + '</div>' +
+    '<div class="row2">' + fld('Date de la vente', '<input type="date" id="slDate" value="' + todayISO() + '" max="' + todayISO() + '">', '', 'slDate') + fld('Frais de vente (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="slFees" placeholder="0">', 'courtage, taxes sur la vente', 'slFees') + '</div>' +
+    (need.fx ? fld('Produit net reçu en ' + costCur + ' (après frais)', '<input type="text" inputmode="decimal" id="slProceeds" placeholder="montant crédité">', 'le prix de vente est en ' + cur + ' et le prix de revient en ' + costCur + ' : sans ce montant, le résultat réalisé n\'est pas calculable', 'slProceeds') : '') +
+    (!hasTx ? '<div class="notice info" style="margin:6px 0"><span>Cette position n\'a pas d\'historique d\'achats : le <b>prix de revient saisi</b> sert de coût de départ.' + (need.pru ? ' Indiquez-le ci-dessous.' : '') + ' Sans date d\'achat, le suivi de la position démarre à sa date d\'ajout dans l\'application (' + esc(fmtDate(String(h.addedAt || todayISO()).slice(0, 10))) + ').</span></div>' +
+      '<div class="row2">' + fld('Date d\'achat (facultatif)', '<input type="date" id="slBuy" max="' + todayISO() + '">', 'améliore le suivi dans le temps', 'slBuy') + (need.pru ? fld('Prix de revient par titre (' + costCur + ')', '<input type="text" inputmode="decimal" id="slPru" placeholder="requis">', 'nécessaire au calcul du résultat', 'slPru') : '<div></div>') + '</div>' : '') +
+    '<div id="slPrev" class="dg-summary" style="margin-top:8px"></div><div id="slErr" class="notice err hide" style="margin-top:8px"></div>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="slGo">Enregistrer la vente</button></div></div>', {});
+  let md = mode === 'part' ? 'part' : 'all';
+  const val = (i) => { const e = $('#' + i, m); return e ? numOrNull(e.value) : null; };
+  const read = () => ({ qty: md === 'all' ? qty0 : val('slQty'), price: val('slPrice'), fees: val('slFees') || 0, date: $('#slDate', m).value, buyDate: $('#slBuy', m) ? $('#slBuy', m).value || null : null, pru: val('slPru'), proceedsCost: val('slProceeds') });
+  const prev = () => {
+    const x = read(), box = $('#slPrev', m), go = $('#slGo', m); go.textContent = md === 'all' ? 'Clôturer la position' : 'Enregistrer la vente';
+    if (!(x.qty > 0) || !(x.price > 0)) { box.innerHTML = '<span class="muted">Indiquez la quantité et le prix de vente pour voir le résultat.</span>'; return; }
+    const net = x.qty * x.price - (x.fees || 0), pru = Number(h.avgCost) > 0 ? Number(h.avgCost) : x.pru, left = Math.max(0, qty0 - x.qty);
+    box.innerHTML = '<ul><li>Produit de la vente : <b>' + fmtMoney(net, cur) + '</b>' + (x.fees ? ' (frais ' + fmtMoney(x.fees, cur) + ' déduits)' : '') + '</li>' + (pru > 0 && !need.fx ? '<li>Résultat réalisé : <b class="' + (net - x.qty * pru >= 0 ? 'pos' : 'neg') + '">' + (net - x.qty * pru >= 0 ? '+' : '') + fmtMoney(net - x.qty * pru, costCur) + '</b> (' + fmtPct((net - x.qty * pru) / (x.qty * pru), 1, true) + ' sur le coût)</li>' : '') +
+      '<li>' + (left > 1e-8 ? 'Reste en portefeuille : <b>' + fmtNum(left) + '</b> titre(s), prix de revient inchangé' : 'La position quitte le portefeuille actuel (conservée dans « Clôturées » avec son résultat)') + '</li></ul>';
+  };
+  $$('#slMode [data-m]', m).forEach((b) => b.onclick = () => { md = b.dataset.m; $$('#slMode [data-m]', m).forEach((c) => c.classList.toggle('on', c === b)); const q = $('#slQty', m); q.readOnly = md === 'all'; if (md === 'all') q.value = String(qty0); else { q.value = ''; q.focus(); } prev(); });
+  m.addEventListener('input', prev); prev(); setTimeout(() => $('#slPrice', m).focus(), 50);
+  $('#slGo', m).onclick = () => {
+    const x = read(), e = $('#slErr', m); e.classList.add('hide');
+    const prevUndo = state.undo; snapshotForUndo('vente de ' + (h.name || h.ticker));
+    const r = Ledger.recordSale(state, h.id, x, { uid, today: todayISO() });
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); closeModal(); renderPage();
+    const res = r.realized == null ? '' : ' · résultat réalisé ' + (r.realized >= 0 ? '+' : '') + fmtMoney(r.realized, r.cur);
+    toast((r.closed ? 'Position clôturée' : 'Vente partielle enregistrée (reste ' + fmtNum(r.remaining) + ')') + res + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
+}
+
+/* Avant de supprimer UNE position détenue : la position a-t-elle été vendue ? (prix de sortie, vente partielle) → le portefeuille est alors ajusté au lieu de simplement effacer. */
+function askClosingReason(h) {
+  return new Promise((resolve) => {
+    let done = false;
+    const m = openModal('<h2>Que s\'est-il passé ?</h2><div class="sub"><b>' + esc(h.name || h.displayTicker || h.ticker) + '</b> · ' + fmtNum(h.quantity) + ' titre(s). Si la position a été vendue, enregistrez le prix de vente : le résultat réalisé et le calcul du portefeuille seront ajustés.</div>' +
+      '<div class="choice-list"><button class="btn" type="button" data-c="all">Je l\'ai vendue en totalité (clôturer) — indiquer le prix</button><button class="btn" type="button" data-c="part">J\'en ai vendu une partie seulement — indiquer la quantité et le prix</button><button class="btn danger" type="button" data-c="delete">Je l\'ai ajoutée par erreur : supprimer sans enregistrer de vente</button></div>' +
+      '<div class="modal-actions"><span></span><button class="btn" type="button" data-close>Annuler</button></div>', { onClose: () => { if (!done) { done = true; resolve(null); } } });
+    $$('[data-c]', m).forEach((b) => b.onclick = () => { done = true; closeModal(); resolve(b.dataset.c); });
+  });
+}
+
 async function confirmDeleteHoldings(ids) {
   const hs = ids.map(holdingById).filter(Boolean); if (!hs.length) return;
+  if (hs.length === 1 && Number(hs[0].quantity) > 0) { const why = await askClosingReason(hs[0]); if (!why) return; if (why !== 'delete') { openSellModal(hs[0].id, why); return; } }
   const idset = new Set(ids);
   const nPay = state.payments.filter((p) => idset.has(p.holdingId)).length, nTx = state.transactions.filter((t) => idset.has(t.holdingId)).length;
   const c = await confirmDialog({

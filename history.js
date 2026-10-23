@@ -336,7 +336,7 @@ function opRows() {
       const t = r.tx || {}, zero = r.type === 'grant' || r.type === 'retire';
       out.push({ id: t.id || r.corpId || (inst.id + ':' + seq), date: r.date, time: r.time, inst, name: inst.name || inst.displayTicker || inst.ticker, closed: closedIds.has(inst.id), type: r.type, qty: r.type === 'removal' ? (r.removedQty || 0) : r.type === 'split' ? null : r.qty, ratio: r.ratio,
         price: r.tx && !zero ? Number(t.price) : null, cur: t.currency, fees: t.fees, feesCur: t.feesCur || t.acctCur || t.currency,
-        seq, amt: r.type === 'split' || r.type === 'removal' ? null : r.amt, costCur: led.cur, qtyAfter: r.qtyAfter, costAfter: r.costAfter, pruAfter: r.pruAfter, realized: r.realized, realizedPct: r.realizedPct, issue: r.issue, source: t.source || r.source });
+        opening: !!t.opening, seq, amt: r.type === 'split' || r.type === 'removal' ? null : r.amt, costCur: led.cur, qtyAfter: r.qtyAfter, costAfter: r.costAfter, pruAfter: r.pruAfter, realized: r.realized, realizedPct: r.realizedPct, issue: r.issue, source: t.source || r.source });
     });
   });
   return out;
@@ -347,7 +347,7 @@ function opColumns() {
   return [
     { key: 'date', label: 'Date', essential: true, sort: (r) => r.date + ' ' + r.time + ' ' + String(r.seq).padStart(5, '0'), html: (r) => esc(fmtDate(r.date)) + (r.time ? ' <small class="muted">' + esc(r.time) + '</small>' : '') },
     { key: 'asset', label: 'Actif', essential: true, sort: (r) => (r.name || '').toLowerCase(), html: (r) => '<span class="asset">' + avatar(r.inst.displayTicker || r.inst.ticker, r.inst.logo, 'sm', r.inst.isin) + '<span><span class="nm">' + esc(r.name) + '</span><span class="tkr">' + esc(r.inst.isin || r.inst.displayTicker || '') + (r.closed ? ' · clôturée' : '') + '</span></span></span>' },
-    { key: 'type', label: 'Opération', essential: true, sort: (r) => r.type, html: (r) => OP_LABEL[r.type] ? '<span class="badge ' + OP_LABEL[r.type][1] + '">' + OP_LABEL[r.type][0] + (r.type === 'split' && r.ratio ? ' ×' + fmtNum(r.ratio) : '') + '</span>' : esc(r.type) },
+    { key: 'type', label: 'Opération', essential: true, sort: (r) => r.type, html: (r) => r.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi (aucun historique d\'achats) : point de départ du calcul">Ouverture</span>' : OP_LABEL[r.type] ? '<span class="badge ' + OP_LABEL[r.type][1] + '">' + OP_LABEL[r.type][0] + (r.type === 'split' && r.ratio ? ' ×' + fmtNum(r.ratio) : '') + '</span>' : esc(r.type) },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (r) => r.qty, html: (r) => (r.qty == null ? '—' : fmtNum(r.qty)) },
     { key: 'price', label: 'Prix unitaire', align: 'r', sort: (r) => r.price, html: (r) => (r.price == null ? '—' : fmtMoney(r.price, r.cur, { d: 4 })) },
     { key: 'fees', label: 'Frais', align: 'r', sort: (r) => r.fees, html: (r) => (r.fees ? fmtMoney(r.fees, r.feesCur) : '—') },

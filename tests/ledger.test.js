@@ -358,6 +358,25 @@ t('DIVIDENDES DU RELEVÉ DE COMPTE : brut, retenue et net réels, rattachés par
   assert.deepStrictEqual(r.replace, ['est']); assert.strictEqual(r.dups.length, 1, 'versement déjà saisi à 1 jour d\'écart : ignoré'); assert.strictEqual(r.unmatched.length, 1, 'titre inconnu : non rattaché');
   st.payments.push.apply(st.payments, r.add); assert.strictEqual(L.brokerDividendPayments(st, g, uid).add.length, 0, 'réimport : aucun doublon');
 });
+t('VENTE / CLÔTURE enregistrée : vente partielle puis totale d\'une position saisie (opération d\'ouverture au PRU saisi), résultat réalisé, PRU des titres restants inchangé, archivage', () => {
+  let n = 0; const id = () => 'q' + (++n), deps = { uid: id, today: '2026-10-23' };
+  const st = { holdings: [{ id: 'h', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', isin: '', currency: 'EUR', quantity: 10, avgCost: 100, addedAt: '2025-01-01', account: 'a', hist: null }], archive: [], transactions: [], payments: [] };
+  assert.strictEqual(L.recordSale(st, 'h', { qty: 11, price: 1, date: '2026-03-01' }, deps).ok, false, 'plus que la quantité détenue'); assert.strictEqual(L.recordSale(st, 'h', { qty: 1, price: 0, date: '2026-03-01' }, deps).ok, false, 'prix obligatoire');
+  assert.strictEqual(L.recordSale(st, 'h', { qty: 1, price: 1, date: '2027-01-01' }, deps).ok, false, 'date future refusée'); assert.strictEqual(st.transactions.length, 0, 'refus = aucune écriture');
+  const r1 = L.recordSale(st, 'h', { qty: 4, price: 120, fees: 2, date: '2026-03-01' }, deps);
+  assert.ok(r1.ok && !r1.closed && r1.remaining === 6 && r1.openingAdded); assert.ok(Math.abs(r1.realized - 78) < 1e-9, 'produit net 478 − coût 400 = 78 : ' + r1.realized); assert.strictEqual(st.holdings[0].quantity, 6); assert.strictEqual(st.holdings[0].avgCost, 100, 'PRU inchangé');
+  const op = st.transactions.find((x) => x.opening); assert.deepStrictEqual([op.date, op.qty, op.price, op.approx, op.type], ['2025-01-01', 10, 100, true, 'buy'], 'ouverture : quantité détenue au PRU saisi, date d\'ajout (approximative)');
+  const r2_ = L.recordSale(st, 'h', { qty: 6, price: 90, date: '2026-04-01' }, deps);
+  assert.ok(r2_.ok && r2_.closed && r2_.remaining === 0 && Math.abs(r2_.realized - (-60)) < 1e-9, 'clôture : 540 − 600 = −60 : ' + r2_.realized); assert.strictEqual(st.holdings.length, 0); assert.strictEqual(st.archive[0].id, 'h'); assert.strictEqual(st.archive[0].exitPrice, 90);
+  assert.strictEqual(st.transactions.filter((x) => x.opening).length, 1, 'une seule ouverture');
+  const led = L.run(L.entriesFor(st, st.archive[0]).entries); assert.ok(led.qty === 0 && Math.abs(led.realized - 18) < 1e-9 && !led.negative, 'résultat réalisé cumulé 78 − 60 = 18 : ' + led.realized);
+  // position avec historique d\'achats : aucune ouverture ajoutée ; devise de vente différente du coût : résultat non calculable sans produit net
+  const s2 = { holdings: [{ id: 'g', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', currency: 'USD', costCurrency: 'EUR', quantity: 10, avgCost: 90, account: 'a' }], archive: [], payments: [], transactions: [{ id: 'b1', holdingId: 'g', date: '2025-02-01', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'USD', amountAcct: 900, acctCur: 'EUR', source: 'degiro' }] };
+  const r3 = L.recordSale(s2, 'g', { qty: 5, price: 120, date: '2026-05-01' }, deps); assert.ok(r3.ok && !r3.openingAdded && r3.realized === null && r3.warnings.length === 1, 'devises différentes sans produit net : réalisé inconnu, signalé');
+  const r4 = L.recordSale(s2, 'g', { qty: 5, price: 120, date: '2026-06-01', proceedsCost: 520 }, deps); assert.ok(r4.ok && r4.closed && Math.abs(r4.realized - (520 - 450)) < 1e-9, 'avec le produit net en EUR : 520 − 450 = 70 : ' + r4.realized);
+  const s3 = { holdings: [{ id: 'z', ticker: 'Z', name: 'Z', currency: 'EUR', quantity: 3, avgCost: null, addedAt: '2026-01-01', account: 'a' }], archive: [], payments: [], transactions: [] };
+  assert.ok(/Prix de revient inconnu/.test(L.recordSale(s3, 'z', { qty: 1, price: 5, date: '2026-05-01' }, deps).error), 'PRU inconnu : demandé'); assert.strictEqual(L.recordSale(s3, 'z', { qty: 1, price: 5, date: '2026-05-01', pru: 4 }, deps).realized, 1, 'PRU fourni dans la vente');
+});
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(
     hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),

@@ -538,3 +538,5 @@ html{overscroll-behavior-y:contain}
 .rf-btn.has-update::after{content:"";position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
 @keyframes rfspin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){ #ptr.run svg,.rf-btn.spin svg{animation:none} }
+
+.choice-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}.choice-list .btn{justify-content:flex-start;text-align:left;white-space:normal;height:auto;padding:10px 12px}

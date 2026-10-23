@@ -385,7 +385,7 @@ function txRows() {
 function txColumns() {
   return [
     { key: 'date', label: 'Date', essential: true, sort: (t) => t.date, html: (t) => esc(fmtDate(t.date)) },
-    { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.corp ? '<span class="badge info">' + (t.type === 'buy' ? 'Livraison gratuite' : 'Retrait de titres') + '</span>' : t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
+    { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : t.corp ? '<span class="badge info">' + (t.type === 'buy' ? 'Livraison gratuite' : 'Retrait de titres') + '</span>' : t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
     { key: 'asset', label: 'Actif', essential: true, sort: (t) => (t.name || t.ticker || '').toLowerCase(), html: (t) => { const h = holdingById(t.holdingId); return '<span class="asset">' + avatar(t.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(t.name || t.ticker) + '</span><span class="tkr">' + esc(t.ticker) + '</span></span></span>'; } },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (t) => t.qty, html: (t) => fmtNum(t.qty) },
     { key: 'price', label: 'Prix', align: 'r', sort: (t) => t.price, html: (t) => fmtMoney(t.price, t.currency, { d: 4 }) },
