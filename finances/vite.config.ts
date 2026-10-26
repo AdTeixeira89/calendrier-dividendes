@@ -60,6 +60,10 @@ export default defineConfig({
         // pré-mis en cache à l'installation : ils ne sont téléchargés
         // qu'au premier scan de ticket (voir runtimeCaching ci-dessous).
         globIgnores: ['**/inter-{cyrillic,cyrillic-ext,greek,greek-ext,vietnamese}-*.woff2', 'worker.min.js', 'tesseract-core/**', 'tesseract-lang/**'],
+        // Une nouvelle version prend la main dès son installation : une version défectueuse déjà
+        // installée sur un téléphone ne reste jamais en place « en attente » (elle masquerait même la bannière de mise à jour).
+        skipWaiting: true,
+        clientsClaim: true,
         // Réception des notifications push (voir public/push-sw.js).
         importScripts: ['push-sw.js'],
         navigateFallback: 'index.html',
