@@ -66,8 +66,16 @@ function detectSeparator(lines: string[]): string | null {
 }
 
 /** « 24/09/2026 », « 24-09-26 », « 2026-09-24 », avec ou sans heure : date locale à midi, ou null si invalide. */
-export function parseStatementDate(raw: string): Date | null {
+export function parseStatementDate(raw: string, options: { excelSerials?: boolean } = {}): Date | null {
   const text = raw.trim()
+  // Excel stocke parfois une date comme un nombre de jours depuis le 30/12/1899 (cellule non formatée en date).
+  if (options.excelSerials && /^\d{5}(\.\d+)?$/.test(text)) {
+    const serial = Math.floor(Number(text))
+    if (serial >= 32874 && serial <= 73050) {
+      const d = new Date(Date.UTC(1899, 11, 30 + serial))
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12)
+    }
+  }
   let day: number, month: number, year: number
   let match = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)/.exec(text)
   if (match) {
@@ -145,11 +153,11 @@ function findColumns(header: string[]): Columns | null {
 }
 
 /** Sans en-tête reconnu : colonne de dates, colonne la plus textuelle, et une ou deux colonnes de montants. */
-function guessColumns(rows: string[][]): Columns | null {
+function guessColumns(rows: string[][], options: { excelSerials?: boolean } = {}): Columns | null {
   const width = Math.max(...rows.map((r) => r.length))
   const sample = rows.slice(0, 40)
   const share = (test: (cell: string) => boolean, col: number) => sample.filter((r) => test(r[col] ?? '')).length / sample.length
-  const dateCols = Array.from({ length: width }, (_, c) => c).filter((c) => share((v) => parseStatementDate(v) !== null, c) > 0.8)
+  const dateCols = Array.from({ length: width }, (_, c) => c).filter((c) => share((v) => parseStatementDate(v, options) !== null, c) > 0.8)
   const numberCols = Array.from({ length: width }, (_, c) => c).filter((c) => !dateCols.includes(c) && share((v) => v === '' || parseStatementAmount(v) !== null, c) > 0.8 && share((v) => v !== '', c) > 0.1)
   if (dateCols.length === 0 || numberCols.length === 0) return null
   const used = new Set([...dateCols, ...numberCols])
@@ -170,7 +178,16 @@ export function parseBankCsv(text: string): ParseResult {
   if (lines.length < 2) return { ok: false, error: 'Le fichier est vide ou ne contient pas d’opérations.' }
   const separator = detectSeparator(lines)
   if (!separator) return { ok: false, error: 'Format non reconnu : ce fichier ne ressemble pas à un relevé CSV (au moins 3 colonnes attendues).' }
-  const table = lines.map((l) => splitLine(l, separator))
+  return parseBankTable(lines.map((l) => splitLine(l, separator)))
+}
+
+/**
+ * Lit un relevé déjà découpé en lignes et colonnes (CSV ou feuille Excel) : en-tête et colonnes
+ * (date, libellé, montant ou débit / crédit) sont détectés automatiquement.
+ */
+export function parseBankTable(rawTable: string[][], options: { excelSerials?: boolean } = {}): ParseResult {
+  const table = rawTable.filter((cells) => cells.some((c) => c.trim() !== ''))
+  if (table.length < 2) return { ok: false, error: 'Le fichier est vide ou ne contient pas d’opérations.' }
 
   let headerAt = -1
   let columns: Columns | null = null
@@ -178,7 +195,7 @@ export function parseBankCsv(text: string): ParseResult {
     columns = findColumns(table[i]!)
     if (columns) headerAt = i
   }
-  if (!columns) columns = guessColumns(table)
+  if (!columns) columns = guessColumns(table, options)
   if (!columns) {
     return { ok: false, error: 'Colonnes non reconnues : il faut au moins une date, un libellé et un montant (ou débit / crédit).' }
   }
@@ -189,7 +206,7 @@ export function parseBankCsv(text: string): ParseResult {
   const rows: StatementRow[] = []
   let skipped = 0
   for (const cells of body) {
-    const date = parseStatementDate(cells[columns.date] ?? '')
+    const date = parseStatementDate(cells[columns.date] ?? '', options)
     let amount: Cents | null = null
     if (columns.amount !== null) amount = parseStatementAmount(cells[columns.amount] ?? '')
     else {

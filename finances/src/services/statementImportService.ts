@@ -1,3 +1,4 @@
+import { COMMON_SPACE, spaceFields, type Space } from '@/utils/spaces'
 import { Timestamp } from 'firebase/firestore'
 import { guessPaymentMethod } from '@/utils/categorize'
 import type { PreviewRow } from '@/utils/statementImport'
@@ -18,7 +19,9 @@ export interface ImportResult {
  * chaque opération est déduit de son contenu : réimporter un relevé, ou un
  * relevé qui en chevauche un autre, ne crée jamais de doublon.
  */
-export async function importStatement(householdId: string, rows: PreviewRow[], fallbackCategoryId: string, actor: Actor): Promise<ImportResult> {
+/** `space` : où ranger les dépenses importées (communes par défaut, ou l'espace personnel d'un membre). */
+export async function importStatement(householdId: string, rows: PreviewRow[], fallbackCategoryId: string, actor: Actor, space: Space = COMMON_SPACE): Promise<ImportResult> {
+  const target = spaceFields(space, actor.uid)
   const expenses = rows
     .filter((r) => r.kind === 'expense')
     .map((r) => ({
@@ -29,8 +32,8 @@ export async function importStatement(householdId: string, rows: PreviewRow[], f
         categoryId: r.categoryId ?? fallbackCategoryId,
         merchant: r.merchant,
         paymentMethod: guessPaymentMethod(r.label),
-        memberId: actor.uid,
-        scope: 'shared',
+        memberId: target.memberId,
+        scope: target.scope,
         kind: 'one_off',
         note: r.label.slice(0, 280),
         receiptPath: null,

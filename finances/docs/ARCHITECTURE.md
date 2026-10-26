@@ -308,3 +308,9 @@ finances/
 - S'appliquent : listes et totaux, graphiques (accueil, analyse, rythme des dépenses), budget commun, alertes (app et fonction quotidienne), bilan mensuel (envoyé le 6), export. Les **revenus** restent par mois civil.
 - **Exception : les dépenses récurrentes** (type « Récurrente », abonnements, mensualités de prêt, reprises automatiques) comptent toujours dans le **mois civil de leur date de prélèvement** : le prélèvement du 5 octobre est une dépense d'octobre (`expenseMonthKey`, `isRecurringExpense`). Les lectures couvrent donc du 1er du mois au 6 suivant puis filtrent.
 - Inchangés : les dates des dépenses, la création des récurrentes / mensualités de prêt / reprises (par mois civil, à leur date), la détection de doublons à l'import.
+
+## 6 nonies. Import de relevé Excel
+
+- `utils/statementFile.ts` : le format est détecté d'après le contenu (ZIP = .xlsx, binaire OLE = .xls refusé avec explication, sinon CSV). Les classeurs sont lus par `read-excel-file`, chargé à la demande ; la première feuille ressemblant à un relevé est utilisée.
+- `utils/bankStatement.ts` : `parseBankTable` (commun CSV / Excel) détecte en-tête et colonnes (date, libellé, montant ou débit/crédit) ; les dates stockées en numéros de série Excel sont reconnues.
+- Page d'import : chaque ligne est modifiable (libellé, date, montant, type dépense/revenu, catégorie) avant validation ; espace de destination au choix ; un relevé réimporté ne crée pas de doublon.
