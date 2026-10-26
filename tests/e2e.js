@@ -60,7 +60,7 @@ const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 
 const RELAY = { old: false };    // true : simule l'ancienne version du relais (5 ans mensuels, ignore range / interval)
 function chartSeries(y, interval) {
   if (interval === '1d' && !RELAY.old) {           // quotidien : ~3 ans de séances, cours en hausse régulière jusqu'au dernier cours
-    const out = [], end = Date.UTC(2026, 9, 12); for (let t = end - 1100 * 86400000; t <= end; t += 86400000) { const d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) out.push(t); }
+    const out = [], nowD = new Date(), end = Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth(), nowD.getUTCDate()); for (let t = end - 1100 * 86400000; t <= end; t += 86400000) { const d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) out.push(t); }
     return { timestamp: out.map((t) => t / 1000), indicators: { quote: [{ close: out.map((t, i) => Math.round(y.price * (0.5 + 0.5 * i / (out.length - 1)) * 100) / 100) }] } };
   }
   return { timestamp: Array.from({ length: 25 }, (_, i) => ts(new Date(Date.UTC(2024, 10 + i, 1)).toISOString().slice(0, 10))), indicators: { quote: [{ close: Array.from({ length: 25 }, (_, i) => Math.round(y.price * (0.7 + i * 0.0125) * 100) / 100) }] } };
@@ -1007,6 +1007,29 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('achats multiples saisis à la main (date + nombre d\'actions) : position inchangée, écart signalé, dividendes éligibles selon chaque date, performance de la seule sélection (sans les autres actifs)', async () => {
+    RELAY.old = false;
+    const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'manual', addedAt: '2026-01-01', account: 'main', dividend: { none: true } };
+    const seed = SEED(0); seed.holdings = [Object.assign({}, base, { id: 'a1', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Alpha', quantity: 10, avgCost: 110, price: 100, hist: { from: '2026-01', c: Array(10).fill(100) } }), Object.assign({}, base, { id: 'b1', ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Beta', quantity: 5, avgCost: 100, price: 200, hist: { from: '2026-01', c: [100, 110, 120, 130, 140, 150, 160, 170, 180, 200] } })];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); p.setDefaultTimeout(10000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
+    ok(!/Rendement annuel moyen/i.test(await p.locator('#page').innerText()), 'pas de rendement annuel');
+    await p.evaluate(() => openHoldingModal('a1')); await p.click('#hBuys'); await p.waitForSelector('#byDate');
+    await p.fill('#byDate', '2026-01-15'); await p.fill('#byQty', '4'); await p.fill('#byPrice', '100'); await p.click('#byAdd'); await p.waitForFunction(() => /il manque 6/.test((document.querySelector('.modal') || {}).innerText || ''));
+    ok(/Achats saisis : 4 sur 10/.test((await p.locator('.modal').innerText()).replace(/\s+/g, ' ')) && /il manque 6/.test(await p.locator('.modal').innerText()), 'écart signalé : il manque 6 titres'); eq(await p.inputValue('#byQty'), '6', 'quantité manquante préremplie');
+    await p.fill('#byDate', '2026-04-01'); await p.fill('#byPrice', '120'); await p.click('#byAdd'); await p.waitForTimeout(500); await p.waitForSelector('#byDate'); await shot(p, 'buys'); ok(/cohérent avec la quantité détenue/.test(await p.locator('.modal').innerText()), 'cohérent avec la quantité détenue'); await p.click('.modal [data-close]'); await p.waitForTimeout(300);
+    let st = await storeOf(p); const a1 = st.holdings.find((x) => x.id === 'a1'); eq([a1.quantity, a1.avgCost], [10, 110], 'quantité et PRU de la position inchangés'); eq(st.transactions.filter((t) => t.holdingId === 'a1').map((t) => [t.date, t.qty, t.price]).sort(), [['2026-01-15', 4, 100], ['2026-04-01', 6, 120]], 'deux achats datés');
+    // performance de la seule sélection
+    await p.check('[data-selrow="a1"]'); await p.waitForSelector('#selPerf .sel-perf'); await p.click('#selPerSeg [data-sper="0"]'); await p.waitForTimeout(300); await shot(p, 'selperf'); const sp = (await p.locator('#selPerf').innerText()).replace(/\s+/g, ' ');
+    ok(/Performance de la sélection/.test(sp) && /1 position sélectionnée/.test(sp) && /sans les autres actifs/.test(sp), 'carte de la sélection : ' + sp.slice(0, 200)); ok(/Performance · Tout\s*[−-]\s?120\s?€/i.test(sp), 'Alpha seul : valeur 1 000 − coût 1 120 = −120 € (Beta, en forte hausse, exclue) : ' + sp.slice(0, 400)); ok(/[−-]\d+,\d\s?%/.test(sp) && /pondéré dans le temps/.test(sp), 'pourcentage affiché car historique complet : ' + sp.slice(0, 400));
+    await p.check('[data-selrow="b1"]'); await p.waitForTimeout(300); const sp2 = (await p.locator('#selPerf').innerText()).replace(/\s+/g, ' '); ok(/2 positions sélectionnées/.test(sp2) && /pourcentage non affiché/.test(sp2), 'Beta sans historique d\'achats : pourcentage non affiché, jamais un chiffre trompeur : ' + sp2.slice(0, 300));
+    await p.uncheck('[data-selrow="a1"]'); await p.uncheck('[data-selrow="b1"]'); await p.waitForTimeout(200); eq(await p.locator('#selPerf .sel-perf').count(), 0, 'sans sélection : pas de carte');
+    // dividendes passés : Alpha calculable d'après les achats saisis, Beta à compléter
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo'); const rows = await p.locator('.modal tbody tr').allInnerTexts();
+    ok(rows.length === 3 && rows.every((r) => /Alpha/.test(r)), '3 versements éligibles pour Alpha : ' + rows.map((r) => r.replace(/\s+/g, ' ')).join(' / ')); ok(/10/.test(rows[0]) && /4/.test(rows[2]), 'quantité éligible : 4 au 9 févr., 10 ensuite : ' + rows.map((r) => r.replace(/\s+/g, ' ').slice(0, 60)).join(' / '));
+    await p.click('[data-buys="b1"]'); await p.waitForSelector('#byDate'); ok(/Achats de Beta/.test(await p.locator('.modal').innerText()), 'lien « Saisir les achats » depuis la liste des titres non calculables');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {
     const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple réelle', quantity: 3, avgCost: 90 }), H(1, { ticker: 'OLD', displayTicker: 'OLD', isin: 'FR0000120271', name: 'Ancienne 2019', quantity: 5, avgCost: 10, source: 'degiro', derived: true })];
@@ -1056,11 +1079,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!/Bruts|Nets\b|Par secteur|Par pays|vs PRU|Rendement sur coût|Actifs\b|Prochains dividendes/.test(pg), 'anciennes cases supprimées : ' + pg.slice(0, 600));
     ok(/1\s?450\s?€/.test(pg), 'valeur totale = 10 × 120 + 5 × 50 = 1 450 €'); ok(/PLUS-VALUE TOTALE \| \+200\s?€/i.test(pg), 'plus-value totale = 1 450 − (1 000 + 250) = +200 € : ' + pg.slice(0, 300));
     ok(/PLUS-VALUE JOURNALIÈRE \| \+20\s?€/i.test(pg) && /\+1,69\s?%/.test(pg), 'plus-value journalière = 10 × (120 − 118) = +20 € : l\'achat du jour (Bêta) ne compte pas : ' + pg.slice(0, 500));
-    const expected = Math.pow(1450 / 1250 * 0 + (1200 + 250) / (1000 + 250 * 0), 0); void expected;
-    const xi = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 0, today: new Date() }); return Engine.xirr(h, new Date()); });
-    ok(xi.rate > 0.05 && xi.rate < 0.2, 'TRI calculé : ' + JSON.stringify(xi)); const chip = (await p.locator('.xirr-chip').innerText()).replace(/\n/g, ' ');
-    ok(/Rendement annuel moyen/.test(chip) && new RegExp('\\+' + (xi.rate * 100).toFixed(1).replace('.', ',') + '\\s?%').test(chip), 'encart discret du rendement annuel moyen : ' + chip);
-    const ttl = await p.getAttribute('.xirr-chip', 'data-tip'); ok(/XIRR/.test(ttl) && /dividendes exclus/.test(ttl), 'méthode précisée : ' + ttl);
+    ok(!(await p.locator('.xirr-chip').count()) && !/Rendement annuel moyen|annualisé/i.test(pg), 'le taux de rendement annuel n\'est plus affiché');
     const geo = await p.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), hero = cs.find((c) => c.classList.contains('hero')), div = cs.find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')), perf = cs.find((c) => /^PERFORMANCES/.test((c.querySelector('h3') || {}).textContent || '')); const r = (e) => e.getBoundingClientRect(); return { hero: r(hero), div: r(div), perf: r(perf) }; });
     ok(geo.hero.right <= geo.div.left + 1 && Math.abs(geo.hero.top - geo.div.top) < 4, 'ordinateur : valeur et dividendes côte à côte : ' + JSON.stringify([geo.hero.left, geo.hero.right, geo.div.left, geo.hero.top, geo.div.top]));
     ok(geo.perf.top >= Math.max(geo.hero.bottom, geo.div.bottom) - 1, 'PERFORMANCES en dessous des deux');
@@ -1068,7 +1087,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     // historique < 1 an : données insuffisantes, jamais un chiffre trompeur
     const seed2 = SEED(0); seed2.holdings = [H(0, { name: 'Alpha', quantity: 10, avgCost: 100, price: 120, priceAt: iso(T), hist: { from: ymAgo(6), c: [100, 102, 104, 108, 112, 116, 120] } })];
     seed2.transactions = [{ id: 't1', holdingId: 'h0', date: ymAgo(5) + '-15', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }];
-    const q = await device({ guest: true, seed: seed2 }); await q.open(); await q.waitForSelector('.xirr-chip'); ok(/Données insuffisantes/.test(await q.locator('.xirr-chip').innerText()) && /moins d.un an/.test(await q.getAttribute('.xirr-chip', 'data-tip')), 'moins d\'un an : « Données insuffisantes »');
+    const q = await device({ guest: true, seed: seed2 }); await q.open(); await q.waitForSelector('.hero'); ok(!(await q.locator('.xirr-chip').count()), 'moins d\'un an : aucun indicateur annuel affiché');
     ok(/PLUS-VALUE JOURNALIÈRE \| —/i.test((await q.locator('#page').innerText()).replace(/\n/g, ' | ')), 'sans clôture précédente : « — » (pas de chiffre inventé)');
     // téléphone : pas de débordement
     const m = await device({ guest: true, seed, mobile: true, viewport: { width: 360, height: 800 } }); await m.open(); await m.waitForSelector('.hero');

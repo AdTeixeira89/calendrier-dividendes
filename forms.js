@@ -57,7 +57,7 @@ function openHoldingModal(id) {
     fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement.', 'hKind') + '</div>' +
     '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
     fld('Retenue à la source (%)', '<input type="number" id="hTax" min="0" max="100" step="any" inputmode="decimal" value="' + esc(dv.taxRate === null || dv.taxRate === undefined ? '' : dv.taxRate) + '" placeholder="facultatif">', 'Permet d\'estimer le net.', 'hTax') + '</div></div></div>' +
-    '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
+    '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex ? '<button class="btn" type="button" id="hBuys">Achats…</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
   const sync = () => {
     const acc = $('#hType', m).value === 'etf_acc', none = $('#hPays', m).value === '0';
     $('#hDivBox', m).classList.toggle('hide', false);
@@ -70,6 +70,7 @@ function openHoldingModal(id) {
   $('#hFetch', m).onclick = () => fetchIntoHoldingForm(m);
   wireTickerSearch(m);
   if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
+  if (ex && $('#hBuys', m)) $('#hBuys', m).onclick = () => { closeModal(); openBuysModal(ex.id); };
   if (ex && $('#hSell', m)) $('#hSell', m).onclick = () => { closeModal(); openSellModal(ex.id); };
   $('#hSave', m).onclick = () => saveHoldingForm(m, ex);
 }
@@ -150,6 +151,32 @@ function saveHoldingForm(m, ex) {
 /* ===============================================================
    SUPPRESSIONS (position ≠ historique ≠ compte utilisateur)
    =============================================================== */
+/* ---------------------------------------------------------------
+   ACHATS D'UNE POSITION (plusieurs achats : date + nombre d'actions ; prix et frais facultatifs)
+   Alimente le calcul des dividendes réellement éligibles et de la performance. La quantité et le PRU actuels de la position ne sont jamais modifiés.
+   --------------------------------------------------------------- */
+function openBuysModal(id) {
+  const h = holdingById(id); if (!h) return;
+  const cur = h.currency || 'EUR', sm = Ledger.purchaseSummary(state, h), lbl = { buy: 'Achat', sell: 'Vente', grant: 'Livraison gratuite', retire: 'Retrait' };
+  const rows = sm.rows.map((r) => '<tr><td>' + esc(fmtDate(r.date)) + '</td><td>' + (r.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : esc(lbl[r.type] || r.type)) + '</td><td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + (r.price == null ? '<span class="muted" title="Prix non saisi">—</span>' : fmtMoney(r.price, cur, { d: 4 })) + '</td><td class="muted">' + esc({ degiro: 'DEGIRO', csv: 'Import CSV', manual: 'Saisie' }[r.source] || r.source) + '</td><td class="r">' + (r.manual && (r.type === 'buy') ? '<button class="btn sm ghost" type="button" data-rm="' + esc(r.id) + '" aria-label="Supprimer cet achat">' + icon('trash') + '</button>' : '') + '</td></tr>').join('');
+  const status = sm.negative ? '<div class="notice warn"><span>Les ventes dépassent les achats connus : historique incomplet.</span></div>'
+    : sm.consistent ? '<div class="notice info"><span>✓ <b>' + fmtNum(sm.ledgerQty) + '</b> titre(s) d\'après les achats : cohérent avec la quantité détenue.' + (sm.pruCalc != null ? ' Prix de revient d\'après ces achats : <b>' + fmtMoney(sm.pruCalc, cur) + '</b>' + (Number(h.avgCost) > 0 ? ' (saisi : ' + fmtMoney(h.avgCost, h.costCurrency || cur) + ' — non modifié)' : '') + '.' : ' Au moins un prix manque : le coût et la performance de ce titre ne sont pas calculés précisément.') + '</span></div>'
+    : '<div class="notice warn"><span>Achats saisis : <b>' + fmtNum(sm.ledgerQty) + '</b> sur <b>' + fmtNum(sm.holdingQty) + '</b> titre(s) détenu(s) — ' + (sm.diff > 0 ? '<b>il manque ' + fmtNum(sm.diff) + ' titre(s)</b> (achat manquant ?)' : 'les achats dépassent de ' + fmtNum(-sm.diff) + ' (vente manquante ?)') + '. Tant que ce n\'est pas cohérent, les dividendes et la performance ne sont pas calculés d\'après ces achats.</span></div>';
+  const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Ajoutez chaque achat (date + nombre d\'actions) : ils servent à calculer les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>. Votre quantité actuelle (' + fmtNum(h.quantity) + ') et votre prix de revient ne sont <b>pas modifiés</b>.</div>' + status +
+    (rows ? '<div class="tbl-wrap" style="max-height:220px;margin-top:8px"><table class="tbl"><thead><tr><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th>Source</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted" style="margin:8px 0">Aucun achat enregistré pour cette position.</div>') +
+    '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5"' + (sm.diff > 0 ? ' value="' + sm.diff + '"' : '') + ' autocomplete="off">', sm.diff > 0 ? 'prérempli avec les titres manquants' : '', 'byQty') + '</div>' +
+    '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
+    '<div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
+  $$('[data-rm]', m).forEach((b) => b.onclick = () => { const r = Ledger.removePurchase(state, b.dataset.rm); if (r.ok) { saveState(); openBuysModal(id); } });
+  $('#byAdd', m).onclick = () => {
+    const x = { date: $('#byDate', m).value, qty: numOrNull($('#byQty', m).value), price: numOrNull($('#byPrice', m).value), fees: numOrNull($('#byFees', m).value) || 0 };
+    const r = Ledger.addPurchase(state, id, x, { uid, today: todayISO() });
+    if (!r.ok) { const e = $('#byErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); openBuysModal(id); toast('Achat ajouté.', { ms: 2000 });
+  };
+  setTimeout(() => $('#byDate', m).focus(), 50);
+}
+
 /* ---------------------------------------------------------------
    VENDRE / CLÔTURER UNE POSITION (prix de sortie, vente partielle) : le calcul du portefeuille est ajusté
    --------------------------------------------------------------- */
@@ -345,12 +372,13 @@ function openDividendReview(res, errors) {
     '<td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + fmtMoney(r.perShare, cur(r), { d: 4 }) + '</td><td class="r">' + fmtMoney(r.gross, cur(r)) + '</td><td class="r">' + (r.tax == null ? '<span class="muted" title="Retenue non renseignée : non inventée">—</span>' : fmtMoney(r.tax, cur(r))) + '</td>' +
     '<td class="r">' + (r.net == null ? '<span class="muted" title="Net inconnu : compté en brut">—</span>' : fmtMoney(r.net, cur(r))) + '</td><td><span class="badge warn">Estimé</span><div class="dg-note">données de marché' + (r.net == null ? ' · net inconnu' : '') + '</div></td></tr>').join('') + '</tbody></table></div>'
     : '<div class="notice info">Aucun dividende nouveau à ajouter : ' + (res.already.length ? 'tout ce qui était éligible est déjà enregistré.' : 'aucun versement éligible trouvé pour vos positions d\'après vos opérations importées.') + '</div>';
-  const skipTxt = [].concat(res.unverifiable.map((x) => '<li><b>' + esc(x.name) + '</b> — ' + esc(x.reason) + '</li>'), res.noData.map((n) => '<li><b>' + esc(n) + '</b> — aucun dividende trouvé dans les données de marché</li>'),
+  const skipTxt = [].concat(res.unverifiable.map((x) => '<li><b>' + esc(x.name) + '</b> — ' + esc(x.reason) + ' <button class="btn sm" type="button" data-buys="' + esc(x.id) + '">Saisir les achats</button></li>'), res.noData.map((n) => '<li><b>' + esc(n) + '</b> — aucun dividende trouvé dans les données de marché</li>'),
     res.accumulating.map((n) => '<li><b>' + esc(n) + '</b> — ETF capitalisant : aucun dividende perçu</li>'), res.notFetched.map((n) => '<li><b>' + esc(n) + '</b> — données de dividendes non récupérées</li>'), (errors || []).map((e) => '<li>' + esc(e) + '</li>')).join('');
   const m = openModal('<h2>Dividendes passés à vérifier</h2><div class="sub">D\'après vos opérations importées (quantité détenue la veille de chaque détachement) et l\'historique des dividendes en espèces des données de marché. Ces montants sont des <b>estimations</b> : la date de paiement et les retenues réelles ne sont pas connues. Cochez ceux à comptabiliser.</div>' +
     '<div class="chips-row">' + chip(rows.length, 'À valider', 'pos') + chip(res.already.length, 'Déjà enregistrés (ignorés)', '') + chip(res.notEligible, 'Non éligibles (non détenus)', '') + chip(skipped, 'Titres non calculables', 'warn-t') + '</div>' + body +
     '<div id="dhTotal" class="hint" style="margin-top:8px"></div>' + (skipTxt ? '<details class="dg-cols" open><summary>Titres non calculables ou ignorés (' + skipped + ')</summary><ul style="margin:8px 0 0 18px;max-height:150px;overflow:auto">' + skipTxt + '</ul><div class="hint">Importez l\'historique de transactions DEGIRO pour qu\'un titre sans opérations devienne calculable : sa date d\'achat n\'est jamais supposée.</div></details>' : '') +
     '<div class="modal-actions"><span class="hint">Les versements existants ne sont ni modifiés ni supprimés.</span><div class="btn-row"><button class="btn" type="button" data-close>Fermer</button>' + (rows.length ? '<button class="btn primary" type="button" id="dhGo">Ajouter la sélection</button>' : '') + '</div></div>', { wide: true });
+  $$('[data-buys]', m).forEach((b) => b.onclick = () => { closeModal(); openBuysModal(b.dataset.buys); });
   if (!rows.length) return;
   const sel = () => $$('[data-dh]', m).filter((c) => c.checked).map((c) => rows[Number(c.dataset.dh)]);
   const upd = () => { const ch = sel(), tot = ch.reduce((s, r) => { const v = convert(r.gross, cur(r)); return v === null ? s : s + v; }, 0); $('#dhTotal', m).innerHTML = '<b>' + ch.length + '</b> versement(s) sélectionné(s) · brut estimé <b>' + money(tot) + '</b> (convertis dans la devise d\'affichage)'; $('#dhGo', m).disabled = !ch.length; $('#dhGo', m).textContent = 'Ajouter la sélection (' + ch.length + ')'; };

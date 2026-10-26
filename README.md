@@ -63,6 +63,14 @@ Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctio
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
 
+## Achats multiples saisis à la main et performance de la sélection
+
+- **Achats** : fiche d'une position → **« Achats… »**. On ajoute **autant d'achats que nécessaire**, chacun avec sa **date** et son **nombre d'actions** (prix par action et frais facultatifs). Ils alimentent le grand livre : quantité détenue à chaque date → **dividendes réellement éligibles** à chaque détachement (liste « Rechercher les dividendes passés », avec un lien « Saisir les achats » pour les titres non calculables) et **performance**.
+- **Rien n'est modifié** dans la position : sa quantité actuelle et son prix de revient restent tels quels ; un **écart** entre les achats saisis et la quantité détenue est signalé (« il manque N titres », quantité manquante préremplie) et tant qu'il existe, ni les dividendes ni la performance ne s'appuient sur ces achats. Le PRU calculé d'après les achats est affiché à titre indicatif.
+- **Prix inconnu** : jamais compté à 0 ; le titre est alors valorisé « rétrospectivement » (quantité actuelle) et signalé, pour ne pas fausser les apports.
+- **Performance de la sélection** : Mon portefeuille → cochez une ou plusieurs positions : une carte affiche leur performance **seule** (sans les autres actifs) sur la période choisie : gain de marché + dividendes, apports séparés ; le **pourcentage** n'est affiché que si l'historique d'achats de toutes les positions sélectionnées est complet.
+- **Dividendes estimés vs reçus** : filtre « Effectivement reçus (confirmés) / Estimés (historique de marché) » dans Dividendes → Historique, badge « Estimé » et mention « dont X estimés » sur l'accueil. Le « rendement annuel moyen » n'est plus affiché.
+
 ## Vendre ou clôturer une position
 
 **Mon portefeuille → clic sur la position → « Vendre / clôturer… »**, ou **Supprimer** une position détenue (l'application demande d'abord « Que s'est-il passé ? » : vendue en totalité, vendue en partie, ou ajoutée par erreur → suppression simple) :
@@ -81,9 +89,9 @@ Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protég
 ## Rentabilité réelle (portefeuille × période)
 
 Sous la courbe de l'Accueil, une bande « **Performance · {période}** » suit le **portefeuille sélectionné** (ou « Tous les portefeuilles ») et la **période du graphique** (1 M, 3 M, 6 M, 1 an, 5 ans, Tout) :
-- **Performance** en € = plus-value de marché + dividendes perçus. Le calcul sous-jacent est **pondéré dans le temps** : chaque achat ou vente est neutralisé, donc un versement n'est jamais pris pour un gain, ni un retrait pour une perte (un cours constant donne 0 € de performance même après 2 000 € versés). Le ratio « % hors apports » a été retiré de l'affichage (valeur jugée incorrecte à la vérification) ; le rendement annualisé (TRI) reste affiché sous la bande.
+- **Performance** en € = plus-value de marché + dividendes perçus. Le calcul sous-jacent est **pondéré dans le temps** : chaque achat ou vente est neutralisé, donc un versement n'est jamais pris pour un gain, ni un retrait pour une perte (un cours constant donne 0 € de performance même après 2 000 € versés). Le ratio « % hors apports », le rendement annualisé et le « rendement annuel moyen » ne sont plus affichés (demande de l'utilisateur).
 - **Plus-value de marché** (variation de valeur − apports nets), **Dividendes perçus** (versements *vérifiés*, nets ; les dividendes « à vérifier » sont signalés à part, non comptés), **Apports nets** (achats − ventes, affichés séparément, ni gain ni perte).
-- **Annualisé** (TRI sur les flux réels) dès que la période dépasse un an ; valeur de départ → d'arrivée et dates exactes affichées.
+- Dates exactes et valeur de départ → d'arrivée affichées sous la bande.
 - **Périodes disponibles** : si l'historique est plus court que la période choisie (ex. « 5 ans » avec 2 ans de données), le calcul part du début réel, le dit, et le bouton est atténué ; il démarre aussi à la première date où toutes les positions sont valorisées (jamais de cours inventé). Positions sans historique d'opérations : quantité actuelle supposée constante, signalé.
 - Calcul : `Engine.periodReturn` (testé : apports, retraits, dividendes, périodes tronquées).
 
@@ -179,7 +187,6 @@ Limites à connaître : l'export *Transactions* de DEGIRO ne contient ni dépôt
 - *Split / regroupement* : quantité × ratio, coût inchangé. *Sortie hors transaction* : quantité et coût à zéro, sans résultat réalisé inventé.
 - Dividendes, dépôts, retraits, frais de connexion et conversions de devises ne sont jamais traités comme des achats ou des ventes.
 
-**Rendement annuel moyen (accueil)** : TRI / XIRR sur les flux datés (chaque achat en sortie, chaque vente en entrée, en devise de base au taux du mois) + valeur actuelle, **dividendes exclus**. Si toutes les positions sont exploitables, le calcul porte sur tout le portefeuille ; sinon il est fait **sur les seules positions dont l'historique d'opérations est cohérent et dont le cours est disponible** (positions soldées incluses), et l'indicateur précise « sur N / M positions » (les exclues sont listées dans l'infobulle, jamais estimées). « Données insuffisantes » (avec la raison affichée sous le titre) si l'historique couvre moins d'un an ou si aucune position n'est exploitable. La courbe PERFORMANCES, elle, est pondérée dans le temps (Dietz modifié par intervalle).
 
 ## Export CSV (tableur)
 

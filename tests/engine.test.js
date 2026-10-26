@@ -317,4 +317,13 @@ console.log(n + ' tests passed');
     assert.deepStrictEqual(r.accumulating, ['C']); assert.deepStrictEqual(r.notFetched, ['E']);
     s.holdings[0].dividend = {}; assert.ok(E.dividendProposals(s, td2, uid).proposals.every((x) => x.net === null && x.tax === null), 'sans retenue renseignée : net inconnu, jamais inventé');
   });
+  t('ACHATS MANUELS : dividendes éligibles selon chaque date d\'achat ; prix manquant = performance rétrospective signalée (jamais de coût inventé)', () => {
+    const td2 = new Date(2026, 9, 14), uid = () => 'p';
+    const A = { id: 'a', ticker: 'A', displayTicker: 'A', name: 'A', type: 'stock', currency: 'EUR', quantity: 10, avgCost: 100, price: 120, account: 'a', dividend: {}, hist: { from: '2025-01', c: Array(22).fill(100) }, divHist: { at: '2026-10-01', items: [['2025-02-01', 1], ['2025-08-01', 1], ['2026-02-01', 1]] } };
+    const mk = (id, date, qty, price) => ({ id, holdingId: 'a', date, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: price == null ? null : qty * price, acctCur: 'EUR', source: 'manual' });
+    const s = { holdings: [A], archive: [], payments: [], transactions: [mk('b1', '2025-01-15', 4, 90), mk('b2', '2025-07-15', 6, null)] };
+    const r = E.dividendProposals(s, td2, uid); assert.deepStrictEqual(r.proposals.map((x) => [x.exDate, x.qty]).sort(), [['2025-02-01', 4], ['2025-08-01', 10], ['2026-02-01', 10]].sort(), 'quantité éligible à chaque détachement selon les achats saisis');
+    const h = E.portfolioHistory(s, (a) => a, { months: 0, today: td2 }); assert.ok(h.coverage.unknownCost.includes('A') && h.coverage.retro.includes('A'), 'prix d\'un achat inconnu : titre en mode rétrospectif');
+    const s2 = { holdings: [A], archive: [], payments: [], transactions: [mk('b1', '2025-01-15', 4, 90), mk('b2', '2025-07-15', 6, 110)] }; const h2 = E.portfolioHistory(s2, (a) => a, { months: 0, today: td2 }); assert.ok(h2.allTx && h2.flows.length === 2, 'tous les prix connus : calcul sur les opérations');
+  });
 })();

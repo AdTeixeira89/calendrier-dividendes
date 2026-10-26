@@ -428,7 +428,7 @@
     const byInst = {}; txAll.forEach((t) => { (byInst[t.holdingId] = byInst[t.holdingId] || []).push(t); });
     const sortTx = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0);
 
-    const list = []; const coverage = { total: 0, missing: [], retro: [], noDaily: false };
+    const list = []; const coverage = { total: 0, missing: [], retro: [], unknownCost: [], noDaily: false };
     insts.forEach((it) => {
       const h = it.h, txs = (byInst[h.id] || []).slice().sort(sortTx), isin = Ledger ? Ledger.holdingIsin(h) : '';
       const sign = (t) => (t.type === 'buy' ? 1 : -1);
@@ -438,22 +438,24 @@
       const corpSplits = corp.filter((c) => c.kind === 'split'), near = (d1, d2) => Math.abs(Date.parse(d1) - Date.parse(d2)) < 5 * 86400000;
       const mktOnly = mkt.filter((s) => !corpSplits.some((c) => near(c.date, s.date)));
       const toEntries = (withMkt) => txs.map((t) => {
-        const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees));
-        const c = convertAt(raw, cur, t.date.slice(0, 7));
+        const cur = t.acctCur || t.currency || 'EUR', raw = t.amountAcct != null ? num(t.amountAcct) : (t.price == null || t.price === '' ? null : (t.type === 'buy' ? num(t.qty) * num(t.price) + num(t.fees) : num(t.qty) * num(t.price) - num(t.fees)));
+        const c = raw === null ? null : convertAt(raw, cur, t.date.slice(0, 7));
         return { date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: num(t.qty), amt: t.corp ? 0 : (c === null ? null : c), fees: num(t.fees) };
       }).concat(corp.map((c) => ({ date: c.date, time: '', type: c.kind, qty: 0, ratio: c.ratio, amt: null })), withMkt ? mktOnly.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null })) : []);
       const cq = it.kind === 'holding' ? num(h.quantity) : 0, tol = 1e-6 * Math.max(1, cq);
-      let ledgerRows = null, txMode = false;
+      let ledgerRows = null, txMode = false, unknownCost = false;
       if (txs.length && Ledger) {
         const withM = Ledger.run(toEntries(true)), noM = Ledger.run(toEntries(false));
         txMode = it.kind === 'archive' || Math.abs(withM.qty - cq) <= tol || Math.abs(noM.qty - cq) <= tol;
         if (txMode) ledgerRows = Math.abs(withM.qty - cq) <= tol || it.kind === 'archive' ? withM.rows : noM.rows;
+        // un achat ou une vente sans montant connu (prix non saisi, taux indisponible) fausserait les apports : le titre est alors valorisé « rétrospectivement » (quantités actuelles), jamais avec un coût inventé
+        if (txMode && it.kind === 'holding' && ledgerRows.some((r) => (r.type === 'buy' || r.type === 'sell') && r.amt == null)) { txMode = false; ledgerRows = null; unknownCost = true; }
       }
       if (!txMode && !(it.kind === 'holding' && cq > 0)) return;               // ni opérations exploitables ni position actuelle
       const name = h.name || h.displayTicker || h.ticker || '—';
       const cumul = ledgerRows ? ledgerRows.map((r) => ({ date: r.date, q: r.qtyAfter })) : [];
       coverage.total++;
-      if (!txMode) coverage.retro.push(name);
+      if (!txMode) { coverage.retro.push(name); if (unknownCost) coverage.unknownCost.push(name); }
       list.push({ id: h.id, name, cur: h.currency || 'EUR', kind: it.kind, txMode, cumul, ledgerRows, price: priceLookup(h), live: it.kind === 'holding', hasHist: !!(h.hist && ((h.hist.c && h.hist.c.length) || (h.hist.d && h.hist.d.t.length))), hasDaily: !!(h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length),
         dailyStart: h.hist && h.hist.d && h.hist.d.t && h.hist.d.t.length ? h.hist.d.t[0] : null, q0: cq, firstTx: txs.length ? txs[0].date : null, histFrom: h.hist && h.hist.from ? h.hist.from + '-01' : null,
         rowsAt: ledgerRows, adjSplits: mkt });

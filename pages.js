@@ -211,6 +211,19 @@ function diagBannerHtml() {
   const d = Ledger.diagnose(state, { today: todayISO() }), n = d.counts.error;
   return n ? '<div class="notice warn" style="margin-bottom:12px"><span><b>' + n + ' anomalie(s)</b> dans l\'historique des transactions (position absente de vos positions réelles, quantité négative ou écart de quantité).</span><button class="btn sm" type="button" data-do="check-history">Contrôler l\'historique</button></div>' : '';
 }
+/* Performance des SEULES positions cochées dans les tableaux (sans les autres actifs) : gain de marché + dividendes, apports séparés ; % seulement si l'historique est complet. */
+function selectedPortfolioIds() { const out = new Set(); Object.keys(view.tables || {}).forEach((k) => { if (k.indexOf('portfolio-') === 0 && view.tables[k].sel) view.tables[k].sel.forEach((id) => out.add(id)); }); return out; }
+function drawSelPerf(host) {
+  const box = $('#selPerf', host); if (!box) return;
+  const ids = new Set(Array.from(selectedPortfolioIds()).filter((id) => holdingById(id)));
+  if (!ids.size) { box.innerHTML = ''; return; }
+  const per = view.port.selPer === undefined ? 12 : view.port.selPer, today = new Date(), hist = Engine.portfolioHistory(state, cvAtFor(today), { months: per, today, ids });
+  const names = Array.from(ids).map((id) => { const h = holdingById(id); return h.name || h.displayTicker || h.ticker; }), scope = ids.size + ' position' + (ids.size > 1 ? 's' : '') + ' sélectionnée' + (ids.size > 1 ? 's' : '');
+  const pf = perfStripHtml({ ids, per, scope, hist, today, showPct: true });
+  box.innerHTML = '<section class="card card-pad sel-perf" style="margin-bottom:14px"><div class="card-head"><h3>Performance de la sélection</h3><span class="muted" style="font-size:12px">' + esc(names.slice(0, 4).join(', ')) + (names.length > 4 ? ' et ' + (names.length - 4) + ' autre(s)' : '') + ' · sans les autres actifs</span></div>' +
+    '<div class="seg" id="selPerSeg" role="group" aria-label="Période de la sélection" style="margin:2px 0 4px">' + HOME_PERIODS.map((q) => '<button type="button" data-sper="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + '">' + q[1] + '</button>').join('') + '</div>' + pf.html.replace('<div class="perf-strip"', '<div class="perf-strip" style="border-top:0;padding-top:4px"') + '</section>';
+  $$('#selPerSeg [data-sper]', box).forEach((b) => b.onclick = () => { view.port.selPer = Number(b.dataset.sper); drawSelPerf(host); });
+}
 function renderPortfolio(host) {
   if (view.port.tab === 'ops') return renderOperations(host);
   if (view.port.tab === 'closed') return renderClosed(host);
@@ -231,7 +244,7 @@ function renderPortfolio(host) {
   const cfgs = SECS.map((s) => {
     const rows = all.filter((h) => Engine.category(h) === s[0]);
     return { key: s[0], title: s[1], note: s[2], rows, cfg: { id: 'portfolio-' + s[0], prefId: 'portfolio', forceKeys: s[0] === 'unknown' ? ['category'] : [], columns: s[0] === 'unknown' ? colsU : cols, rows, getId: (h) => h.id, selectable: true, sortKey: 'asset', pageSize: 100, deleteLabel: 'Supprimer la sélection',
-      onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids), footer,
+      onOpen: (id) => openHoldingModal(id), onBulkDelete: (ids) => confirmDeleteHoldings(ids), onSelection: () => drawSelPerf(host), footer,
       empty: '<div class="card empty"><h3>' + (s[0] === 'etf' ? 'Aucun ETF détenu' : 'Aucune action détenue') + '</h3><p>' + (state.holdings.length ? 'Aucun actif de cette catégorie pour les filtres actuels.' : '') + '</p></div>' } };
   }).filter((x) => x.key !== 'unknown' || x.rows.length);
   const secH = (x) => { const pv = Engine.portfolioValue({ holdings: x.rows }, convert, null); return '<section class="port-sec"><div class="port-sec-h"><h2>' + esc(x.title) + '</h2><span class="muted">' + x.rows.length + ' position(s)' + (pv.count ? ' · ' + money(pv.total, 0) : '') + '</span></div>' + (x.note ? '<div class="notice info" style="margin-bottom:8px">' + esc(x.note) + '</div>' : '') + '<div id="tblHost-' + x.key + '"></div></section>'; };
@@ -241,13 +254,13 @@ function renderPortfolio(host) {
     '<div class="toolbar">' + portTabsHtml() + '<input type="search" id="pq" placeholder="Rechercher un actif, un ticker, un ISIN…" value="' + esc(view.port.q) + '">' +
     '<select id="pt" aria-label="Type"><option value="all">Tous les types</option>' + Object.keys(Engine.TYPES).map((k) => '<option value="' + k + '" ' + (view.port.type === k ? 'selected' : '') + '>' + Engine.TYPES[k] + '</option>').join('') + '</select>' +
     '<select id="pd" aria-label="Dividendes"><option value="all">Tous les actifs</option><option value="payer">Versent un dividende</option><option value="none">Sans dividende / capitalisants</option><option value="missing">Données manquantes</option></select>' +
-    '<span class="grow"></span>' + Tbl.menuHtml(cfgs[cfgs.length - 1].cfg) + '</div>' + cfgs.map(secH).join('');
+    '<span class="grow"></span>' + Tbl.menuHtml(cfgs[cfgs.length - 1].cfg) + '</div><div id="selPerf"></div>' + cfgs.map(secH).join('');
   $('#pd', host).value = view.port.div;
   const draw = () => { const a2 = filteredHoldings(); cfgs.forEach((x) => { x.cfg.rows = a2.filter((h) => Engine.category(h) === x.key); Tbl.render($('#tblHost-' + x.key), x.cfg); }); Tbl.inst['portfolio'] = Tbl.inst[cfgs[cfgs.length - 1].cfg.id]; };
   let t; $('#pq', host).oninput = (e) => { view.port.q = e.target.value; clearTimeout(t); t = setTimeout(draw, 160); };
   $('#pt', host).onchange = (e) => { view.port.type = e.target.value; draw(); };
   $('#pd', host).onchange = (e) => { view.port.div = e.target.value; draw(); };
-  wirePortTabs(host); draw(); wireDo(host);
+  wirePortTabs(host); draw(); wireDo(host); drawSelPerf(host);
   // catégorie choisie à la main : enregistrée (typeLocked) et protégée des imports et des actualisations
   host.onchange = (e) => {
     const sel = e.target.closest && e.target.closest('[data-cat]'); if (!sel) return;
@@ -350,7 +363,9 @@ function paymentRows() {
     if (h.year !== 'all' && d.slice(0, 4) !== h.year) return false;
     if (h.month !== 'all' && d.slice(5, 7) !== h.month) return false;
     if (h.asset !== 'all' && p.holdingId !== h.asset) return false;
-    if (h.status === 'verified' && p.verified === false) return false;
+    if (h.status === 'verified' && (p.verified === false || p.estimated)) return false;
+    if (h.status === 'received' && (p.verified === false || p.estimated)) return false;
+    if (h.status === 'estimated' && !p.estimated) return false;
     if (h.status === 'unverified' && p.verified !== false) return false;
     return true;
   });
@@ -388,8 +403,8 @@ function txColumns() {
     { key: 'type', label: 'Opération', essential: true, sort: (t) => t.type, html: (t) => t.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : t.corp ? '<span class="badge info">' + (t.type === 'buy' ? 'Livraison gratuite' : 'Retrait de titres') + '</span>' : t.type === 'buy' ? '<span class="badge received">Achat</span>' : '<span class="badge warn">Vente</span>' },
     { key: 'asset', label: 'Actif', essential: true, sort: (t) => (t.name || t.ticker || '').toLowerCase(), html: (t) => { const h = holdingById(t.holdingId); return '<span class="asset">' + avatar(t.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(t.name || t.ticker) + '</span><span class="tkr">' + esc(t.ticker) + '</span></span></span>'; } },
     { key: 'qty', label: 'Quantité', essential: true, align: 'r', sort: (t) => t.qty, html: (t) => fmtNum(t.qty) },
-    { key: 'price', label: 'Prix', align: 'r', sort: (t) => t.price, html: (t) => fmtMoney(t.price, t.currency, { d: 4 }) },
-    { key: 'amount', label: 'Montant', essential: true, align: 'r', sort: (t) => t.qty * t.price, html: (t) => fmtMoney(t.qty * t.price, t.currency) },
+    { key: 'price', label: 'Prix', align: 'r', sort: (t) => t.price, html: (t) => (t.price == null ? '<span class="muted" title="Prix non saisi">—</span>' : fmtMoney(t.price, t.currency, { d: 4 })) },
+    { key: 'amount', label: 'Montant', essential: true, align: 'r', sort: (t) => (t.price == null ? null : t.qty * t.price), html: (t) => (t.price == null ? '<span class="muted">—</span>' : fmtMoney(t.qty * t.price, t.currency)) },
     { key: 'fees', label: 'Frais', align: 'r', sort: (t) => t.fees, html: (t) => t.fees ? fmtMoney(t.fees, t.currency) : '—' },
     { key: 'currency', label: 'Devise', html: (t) => esc(t.currency) },
     { key: 'source', label: 'Source', html: (t) => esc(t.source === 'csv' ? 'Import CSV' : 'Saisie') }
@@ -419,7 +434,7 @@ function renderHistory(host) {
     '<select id="hYear" aria-label="Année" style="width:auto"><option value="all">Toutes les années</option>' + years.map((y) => '<option value="' + y + '">' + y + '</option>').join('') + '</select>' +
     '<select id="hMonth" aria-label="Mois" style="width:auto"><option value="all">Tous les mois</option>' + MOIS.map((m, i) => '<option value="' + pad2(i + 1) + '">' + m + '</option>').join('') + '</select>' +
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
-    (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Vérifiés</option><option value="unverified">À vérifier</option></select>' : '') +
+    (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Effectivement reçus (confirmés)</option><option value="estimated">Estimés (historique de marché)</option><option value="unverified">À vérifier</option></select>' : '') +
     '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Rechercher les dividendes passés</button><button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
     (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais), ou acceptez-les tels quels : <button class="btn sm" type="button" data-do="validate-all" style="margin-left:6px">Tout valider</button></div>' : '') +
     '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Le net marqué * est incomplet : les versements sans net connu sont comptés en brut.</p>' : '');

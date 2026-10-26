@@ -25,6 +25,40 @@ function dataGaps(hs) {
   return { noPrice, noHist, noSector, noDiv, any: noPrice + noHist + noSector + noDiv > 0 };
 }
 
+
+/* Bande « Performance » d'une période pour un ensemble de positions (ids = null : tout). Gain = plus-value de marché + dividendes perçus ; apports nets séparés.
+   showPct : affiche aussi le pourcentage (pondéré dans le temps) UNIQUEMENT si le calcul est fiable (toutes les positions avec historique d'opérations et prix d'achat connus). */
+function cvAtFor(today) { const nowYM = Engine.ymOf(today); return (a_, c_, y_) => (y_ === nowYM ? convert(a_, c_) : convertAt(a_, c_, y_)); }
+function perfStripHtml(o) {
+  const today = o.today, ids = o.ids, per = o.per, cvAt = cvAtFor(today), perLbl = (HOME_PERIODS.find((q) => q[0] === per) || [0, 'Tout'])[1];
+  const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
+  const divAll = (state.payments || []).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
+    const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
+    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false, estimated: !!p_.estimated };
+  }).filter((d_) => d_.v !== null);
+  const pr = Engine.periodReturn(o.hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
+  const WHY = { 'aucune donnée': 'pas encore d\'historique de cours (actualisez les données)', 'cours manquants à la date de fin': 'cours du jour indisponibles', 'cours manquants sur la période': 'cours historiques manquants sur la période', 'aucun investissement sur la période': 'aucun investissement sur cette période' };
+  const sgn = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? '+' : '−') + money(Math.abs(v_), 0), cl = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? 'pos' : 'neg');
+  if (!pr.ok) return { pr, html: '<div class="perf-strip off"><div class="ind"><span>Performance · ' + esc(perLbl) + '</span><b class="muted">—</b><small>Non calculable : ' + esc(WHY[pr.reason] || pr.reason) + '</small></div></div>' };
+  const unv = divAll.filter((d_) => d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0), nt = [];
+  nt.push('Du ' + esc(fmtDate(pr.from)) + ' au ' + esc(fmtDate(pr.to)) + ' · ' + esc(o.scope) + ' · valeur ' + sens(money(pr.V0, 0) + ' → ' + money(pr.V1, 0)));
+  if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
+  if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
+  if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations complet ou sans prix d\'achat (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
+  const est = divAll.filter((d_) => d_.estimated && !d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0);
+  if (est > 0.5) nt.push('dont ' + sens(money(est, 0)) + ' de dividendes <b>estimés</b> d\'après l\'historique de marché (retenue et date de paiement non confirmées).');
+  if (unv > 0.5) nt.push('+ ' + sens(money(unv, 0)) + ' de dividendes « à vérifier » non comptés (validez-les dans Dividendes → Historique).');
+  const reliable = !pr.retro && !pr.truncated && !pr.endPartial && pr.pct !== null;
+  const sub = o.showPct ? (reliable ? sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' pondéré dans le temps' : 'pourcentage non affiché (historique incomplet)') : 'gain de marché + dividendes';
+  const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte' + (o.showPct ? ' ; le pourcentage est pondéré dans le temps (l\'effet de chaque versement est neutralisé) et n\'est affiché que si l\'historique d\'achats de toutes les positions est complet.' : '.');
+  return { pr, html: '<div class="perf-strip" aria-label="Rentabilité de la période">' +
+    '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>' + sub + '</small></div>' +
+    '<div class="ind"><span>Plus-value de marché</span>' + sens('<b class="' + cl(pr.marketGain) + '">' + sgn(pr.marketGain) + '</b>') + '<small>variation des cours</small></div>' +
+    '<div class="ind"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '<small>' + pr.dividendCount + ' versement(s) validé(s)</small></div>' +
+    '<div class="ind" tabindex="0" data-tip="Argent ajouté (achats) moins argent retiré (ventes) sur la période : ce n\'est ni un gain ni une perte."><span>Apports nets</span>' + sens('<b>' + sgn(pr.netFlows) + '</b>') + '<small>' + sens(money(pr.buys, 0) + ' versés · ' + money(pr.sells, 0) + ' retirés') + '</small></div></div>' +
+    '<div class="perf-line muted">' + nt.join('<br>') + '</div>' };
+}
+
 /* ===============================================================
    ACCUEIL
    =============================================================== */
@@ -34,7 +68,7 @@ function renderHome(host) {
   const nowYM = Engine.ymOf(today), cvAt = (a_, c_, y_) => (y_ === nowYM ? convert(a_, c_) : convertAt(a_, c_, y_));      // mois en cours : taux du jour (comme la valeur affichée en haut)
   const cache = {}, histFor = (m_) => cache[m_] || (cache[m_] = Engine.portfolioHistory(state, cvAt, { months: m_, today, ids }));
   const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), daily = Engine.dailyChange(state, convert, ids, todayS);
-  const xi = Engine.xirr(histFor(0), today), hist = histFor(view.home.period), hs = visibleHoldings();
+  const hist = histFor(view.home.period), hs = visibleHoldings();
   const lbl = (dt, per) => fmtDate(dt, { day: 'numeric', month: 'short', year: per === 0 || per >= 12 ? '2-digit' : undefined });
   const dn = (iso_) => Math.round(Date.UTC(+iso_.slice(0, 4), +iso_.slice(5, 7) - 1, +iso_.slice(8, 10)) / 86400000), tLabel = (per) => (n_) => lbl(new Date(n_ * 86400000).toISOString().slice(0, 10), per);
   const signed = (v, d_) => (v >= 0 ? '+' : '') + money(v, d_ === undefined ? 0 : d_);
@@ -69,47 +103,17 @@ function renderHome(host) {
   const indGain = '<div class="ind"><span>Plus-value totale</span>' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + signed(un.gain) + '</b>') + '<small>' + sens(fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis') + ' · ' + unitNote + '</small>' : '<b>—</b><small>Nécessite un PRU fiable et le cours</small>') + '</div>';
   const indDay = '<div class="ind"><span>Plus-value journalière</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + ' · séance du ' + esc(fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' })) + ' vs clôture précédente' + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + '</small>'
     : '<b>—</b><small>Données insuffisantes (clôture précédente indisponible : actualisez avec le relais à jour)</small>') + '</div>';
-  const sc = xi.rate !== null && xi.scope ? xi.scope : null;
-  const xirrTitle = 'Rendement annualisé pondéré par les flux (TRI / XIRR) : achats et ventes datés + valeur actuelle, dividendes exclus.' + (xi.rate === null ? ' Non calculable : ' + xi.reason + '.' : ' Depuis le ' + fmtDate(xi.from) + ' (' + fmtNum(xi.years, 1) + ' an(s), ' + xi.flows + ' flux).')
-    + (sc ? ' Calculé sur ' + sc.held + ' position(s) sur ' + sc.total + ' : seules celles dont l\'historique d\'opérations est cohérent et dont le cours est disponible (exclues : ' + sc.excluded.slice(0, 8).join(', ') + (sc.excluded.length > 8 ? '…' : '') + ').' : '');
-  const xirrWhy = xi.rate === null ? ({ 'aucune opération': 'importez votre historique', 'cours manquants': 'cours indisponibles' }[xi.reason] || (/un an/.test(xi.reason) ? 'moins d\'un an d\'opérations' : /incomplet/.test(xi.reason) ? 'historique d\'opérations incomplet' : xi.reason)) : '';
-  const xirrChip = '<div class="xirr-chip" tabindex="0" data-tip="' + esc(xirrTitle) + '"><span>Rendement annuel moyen</span>' + (xi.rate === null ? '<b class="muted">Données insuffisantes</b><small>' + esc(xirrWhy) + '</small>' : sens('<b class="' + (xi.rate >= 0 ? 'pos' : 'neg') + '">' + fmtPct(xi.rate, 1, true) + ' / an</b>') + (sc ? '<small>sur ' + sc.held + ' / ' + sc.total + ' positions</small>' : '')) + '</div>';
   /* --- Rentabilité réelle de la période choisie pour le portefeuille affiché : gain = marché + dividendes, apports neutralisés --- */
-  const per = view.home.period, perLbl = (HOME_PERIODS.find((q) => q[0] === per) || [0, 'Tout'])[1], acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);
-  const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
-  const divAll = (state.payments || []).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
-    const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
-    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false, estimated: !!p_.estimated };
-  }).filter((d_) => d_.v !== null);
-  const pr = Engine.periodReturn(hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
+  const per = view.home.period, acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);
+  const perfStrip = perfStripHtml({ ids, per, scope: acctLbl, hist, today, showPct: false }).html;
   const availFrom = (() => { const ha = histFor(0); return ha && !ha.empty ? (ha.summary && ha.summary.firstTx) || (ha.points[0] && ha.points[0].date) : null; })();
   const perBtn = (q) => { const rf = q[0] > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - q[0], today.getDate())) : null; const short = !!(rf && availFrom && Date.parse(availFrom) - Date.parse(rf) > 35 * 86400000);
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
-  const WHY = { 'aucune donnée': 'pas encore d\'historique de cours (actualisez les données)', 'cours manquants à la date de fin': 'cours du jour indisponibles', 'cours manquants sur la période': 'cours historiques manquants sur la période', 'aucun investissement sur la période': 'aucun investissement sur cette période' };
-  const sgn = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? '+' : '−') + money(Math.abs(v_), 0), cl = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? 'pos' : 'neg');
-  let perfStrip;
-  if (pr.ok) {
-    const unv = divAll.filter((d_) => d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0), nt = [];
-    nt.push('Du ' + esc(fmtDate(pr.from)) + ' au ' + esc(fmtDate(pr.to)) + ' · ' + esc(acctLbl) + ' · valeur ' + sens(money(pr.V0, 0) + ' → ' + money(pr.V1, 0)) + (pr.annualized !== null ? ' · annualisé ' + sens('<b class="' + cl(pr.annualized) + '">' + fmtPct(pr.annualized, 1, true) + ' / an</b>') : ''));
-    if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
-    if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
-    if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
-    const est = divAll.filter((d_) => d_.estimated && !d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0);
-    if (est > 0.5) nt.push('dont ' + sens(money(est, 0)) + ' de dividendes <b>estimés</b> d\'après l\'historique de marché (retenue et date de paiement non confirmées).');
-    if (unv > 0.5) nt.push('+ ' + sens(money(unv, 0)) + ' de dividendes « à vérifier » non comptés (validez-les dans Dividendes → Historique).');
-    const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte : le pourcentage est pondéré dans le temps, l\'effet de chaque versement est neutralisé.';
-    perfStrip = '<div class="perf-strip" aria-label="Rentabilité de la période">' +
-      '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>gain de marché + dividendes</small></div>' +
-      '<div class="ind"><span>Plus-value de marché</span>' + sens('<b class="' + cl(pr.marketGain) + '">' + sgn(pr.marketGain) + '</b>') + '<small>variation des cours</small></div>' +
-      '<div class="ind"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '<small>' + pr.dividendCount + ' versement(s) vérifié(s)</small></div>' +
-      '<div class="ind" tabindex="0" data-tip="Argent ajouté (achats) moins argent retiré (ventes) sur la période : ce n\'est ni un gain ni une perte."><span>Apports nets</span>' + sens('<b>' + sgn(pr.netFlows) + '</b>') + '<small>' + sens(money(pr.buys, 0) + ' versés · ' + money(pr.sells, 0) + ' retirés') + '</small></div></div>' +
-      '<div class="perf-line muted">' + nt.join('<br>') + '</div>';
-  } else perfStrip = '<div class="perf-strip off"><div class="ind"><span>Performance · ' + esc(perLbl) + '</span><b class="muted">—</b><small>Non calculable : ' + esc(WHY[pr.reason] || pr.reason) + '</small></div></div>';
 
   const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count ? money(pv.total, 0) : '—') + '</div>' +
     '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
     '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
-    '<div class="chart-wrap">' + chart + xirrChip + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
+    '<div class="chart-wrap">' + chart + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
 
   /* --- 2. « Dividendes » (raccourci) --- */
   const next = Engine.nextEvents(state, today, 120, ids), first = next[0];
@@ -118,8 +122,9 @@ function renderHome(host) {
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const series = Engine.monthlySeries(state, y, mode, convert, today, ids);
   const divBars = (h_, w_) => stackedBars({ w: w_, tipLabels: w_ ? MOIS_C : null, labels: w_ ? MOIS_C.map((m_) => m_.charAt(0).toUpperCase()) : MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: h_, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] });
+  const estY = Engine.sumEvents((state.payments || []).filter((p_) => p_.estimated && p_.verified !== false && (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate) >= y + '-01-01' && (p_.payDate || p_.exDate) <= todayS).map((p_) => ({ currency: p_.currency || 'EUR', gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) })), mode, convert).total;
   const divCard = '<section class="card card-pad" id="divCardEl"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
-    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
+    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (estY > 0.5 ? '<small class="sens" title="Reconstitués d\'après vos opérations et l\'historique de marché : retenue et date de paiement non confirmées">dont ' + money(estY, 0) + ' estimés</small>' : '') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
     '<div><span>À venir</span>' + sens('<b>' + money(yUp.total, 0) + '</b>') + '</div><div><span>Prochain</span><b>' + (first ? esc(first.ticker) + '</b><small>' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '</small>' : '—</b>') + '</div></div>' +
     '<div id="divChart">' + divBars(150) + '</div></section>';
 

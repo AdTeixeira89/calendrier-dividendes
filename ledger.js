@@ -370,6 +370,12 @@
   const priceClose = (a, b) => Math.abs(a - b) <= Math.max(1e-4, Math.abs(b) * 1e-4);
   const qtyEq = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
 
+  /* Montant d'une opération dans la devise du compte : montant enregistré, sinon quantité × prix ± frais ; INCONNU (null) si le prix n'a pas été saisi (jamais 0 par défaut). */
+  function txAmount(t) {
+    if (t.amountAcct != null && t.amountAcct !== '') return Number(t.amountAcct);
+    if (t.price == null || t.price === '' || !isFinite(Number(t.price))) return null;
+    return t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0);
+  }
   /* Opérations sur titres validées (state.corp) d'un instrument → entrées du grand livre. */
   function corpEntries(state, isin) {
     return (state.corp || []).filter((c) => c.validated !== false && isin && c.isin === isin).map((c) => ({ date: c.date, time: '', type: c.kind, qty: 0, ratio: c.ratio, amt: null, corpId: c.id, source: c.source }));
@@ -380,7 +386,7 @@
     const cc = (t) => t.acctCur || t.currency || 'EUR';
     const first = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0], cur = first ? cc(first) : 'EUR';
     const entries = txs.map((t) => {
-      const amt = cc(t) !== cur ? null : (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0)));
+      const amt = cc(t) !== cur ? null : txAmount(t);
       return { id: t.id, date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: t.corp ? 0 : amt, fees: Number(t.fees || 0), tx: t };
     }).concat(corpEntries(state, holdingIsin(inst)));
     return { entries, cur, txs };
@@ -436,7 +442,7 @@
       });
       const fileIds = new Set(list.map((o) => o.extId)), cur0 = last.acctCur;
       // historique connu = opérations du fichier + opérations déjà enregistrées que ce fichier ne contient pas (autre source, ancien export)
-      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? (t.amountAcct != null ? Number(t.amountAcct) : (t.type === 'buy' ? Number(t.qty) * Number(t.price) + Number(t.fees || 0) : Number(t.qty) * Number(t.price) - Number(t.fees || 0))) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
+      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? txAmount(t) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
       const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.zero ? (o.type === 'buy' ? 'grant' : 'retire') : o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
         .concat(extra, corpEntries(st2, isNameKey(key) ? '' : key));
       const led = run(entries);
@@ -640,6 +646,34 @@
     return { ok: true, closed, remaining: closed ? 0 : remaining, realized: row ? row.realized : null, realizedPct: row ? row.realizedPct : null, cur: costCur, warnings, openingAdded: !!opening };
   }
 
+  /* ---------------------------------------------------------------
+     ACHATS SAISIS À LA MAIN (plusieurs achats pour une même action : date + nombre d'actions, prix et frais facultatifs)
+     Ils alimentent le grand livre : quantité détenue à chaque date (dividendes réellement éligibles), coût et performance. Ils ne modifient JAMAIS la quantité
+     ni le prix de revient actuels de la position ; un écart avec la quantité détenue est signalé, pas corrigé.
+     --------------------------------------------------------------- */
+  function purchaseSummary(state, h) {
+    const { entries, cur, txs } = entriesFor(state, h), led = run(entries), cq = Number(h.quantity) || 0;
+    const rows = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((t) => ({ id: t.id, date: t.date, type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), price: t.price == null || t.price === '' ? null : Number(t.price), fees: Number(t.fees || 0), source: t.source || 'manual', opening: !!t.opening, manual: (t.source || 'manual') === 'manual' || !!t.opening }));
+    const buys = rows.filter((r) => r.type === 'buy'), withPrice = buys.filter((r) => r.price > 0);
+    const pruCalc = withPrice.length === buys.length && buys.length ? buys.reduce((a, r) => a + r.qty * r.price + r.fees, 0) / buys.reduce((a, r) => a + r.qty, 0) : null;
+    const diff = r8(cq - led.qty);
+    return { rows, ledgerQty: led.qty, holdingQty: cq, diff, consistent: Math.abs(diff) <= 1e-6 * Math.max(1, cq) && !led.negative, negative: led.negative, pruCalc, costKnown: led.costUnknown === 0, cur };
+  }
+  function addPurchase(state, id, p, deps) {
+    const err = (error) => ({ ok: false, error });
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return err('Position introuvable.');
+    const qty = Number(p.qty), price = p.price == null || p.price === '' ? null : Number(p.price), fees = Number(p.fees) || 0;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) || p.date > deps.today) return err('Date d\'achat invalide (vide ou dans le futur).');
+    if (!(qty > 0)) return err('Indiquez le nombre d\'actions achetées.'); if (price !== null && !(price > 0)) return err('Prix par action invalide (laissez vide si inconnu).'); if (fees < 0) return err('Frais invalides.');
+    const cur = h.currency || 'EUR'; const tx = { id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: price === null ? null : r2(qty * price + fees), acctCur: cur, source: 'manual', ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
+    state.transactions = state.transactions || []; state.transactions.push(tx); return { ok: true, id: tx.id };
+  }
+  function removePurchase(state, txId) {
+    const i = (state.transactions || []).findIndex((t) => t.id === txId); if (i < 0) return { ok: false, error: 'Opération introuvable.' };
+    const t = state.transactions[i]; if ((t.source || 'manual') !== 'manual' && !t.opening) return { ok: false, error: 'Opération importée du courtier : elle ne se supprime pas ici.' };
+    state.transactions.splice(i, 1); return { ok: true };
+  }
+
   /* Archive → position actuelle sur décision de l'utilisateur (quantité et PRU recalculés). */
   function promote(state, id, deps) {
     const a = (state.archive || []).find((x) => x.id === id); if (!a) return { ok: false };
@@ -787,6 +821,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    recordSale, groupDividends, brokerDividendPayments, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, brokerDividendPayments, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

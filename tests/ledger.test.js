@@ -377,6 +377,18 @@ t('VENTE / CLÔTURE enregistrée : vente partielle puis totale d\'une position s
   const s3 = { holdings: [{ id: 'z', ticker: 'Z', name: 'Z', currency: 'EUR', quantity: 3, avgCost: null, addedAt: '2026-01-01', account: 'a' }], archive: [], payments: [], transactions: [] };
   assert.ok(/Prix de revient inconnu/.test(L.recordSale(s3, 'z', { qty: 1, price: 5, date: '2026-05-01' }, deps).error), 'PRU inconnu : demandé'); assert.strictEqual(L.recordSale(s3, 'z', { qty: 1, price: 5, date: '2026-05-01', pru: 4 }, deps).realized, 1, 'PRU fourni dans la vente');
 });
+t('ACHATS MANUELS multiples : date + nombre d\'actions (prix et frais facultatifs), quantité détenue à chaque date, position actuelle inchangée, écart signalé, prix inconnu jamais compté 0', () => {
+  let n = 0; const deps = { uid: () => 'm' + (++n), today: '2026-10-26' };
+  const st = { holdings: [{ id: 'h', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', currency: 'EUR', quantity: 10, avgCost: 100, account: 'a' }], archive: [], transactions: [], payments: [] };
+  const snap = JSON.stringify(st.holdings);
+  assert.strictEqual(L.addPurchase(st, 'h', { date: '2027-01-01', qty: 1 }, deps).ok, false, 'date future'); assert.strictEqual(L.addPurchase(st, 'h', { date: '2024-02-01', qty: 0 }, deps).ok, false, 'quantité obligatoire'); assert.strictEqual(L.addPurchase(st, 'h', { date: '2024-02-01', qty: 1, price: -2 }, deps).ok, false, 'prix négatif'); assert.strictEqual(st.transactions.length, 0);
+  assert.ok(L.addPurchase(st, 'h', { date: '2024-02-01', qty: 4, price: 90, fees: 1 }, deps).ok); let sm = L.purchaseSummary(st, st.holdings[0]);
+  assert.deepStrictEqual([sm.ledgerQty, sm.diff, sm.consistent], [4, 6, false], 'il manque 6 titres : écart signalé'); assert.ok(Math.abs(sm.pruCalc - 90.25) < 1e-9, 'PRU des achats saisis (361 / 4)');
+  assert.ok(L.addPurchase(st, 'h', { date: '2025-03-01', qty: 6 }, deps).ok); sm = L.purchaseSummary(st, st.holdings[0]);
+  assert.deepStrictEqual([sm.ledgerQty, sm.diff, sm.consistent, sm.costKnown, sm.pruCalc], [10, 0, true, false, null], 'quantités cohérentes ; un prix manque : coût inconnu, PRU non calculé (jamais 0)');
+  assert.strictEqual(st.transactions[1].amountAcct, null); assert.strictEqual(L.txAmount(st.transactions[1]), null); assert.strictEqual(JSON.stringify(st.holdings), snap, 'quantité et PRU de la position inchangés');
+  const rm = L.removePurchase(st, st.transactions[1].id); assert.ok(rm.ok && st.transactions.length === 1); assert.strictEqual(L.removePurchase({ transactions: [{ id: 'x', source: 'degiro' }] }, 'x').ok, false, 'opération du courtier : pas supprimable ici');
+});
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(
     hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),
