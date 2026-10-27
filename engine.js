@@ -105,7 +105,7 @@
     const fromISO = toISO(from), toISO_ = toISO(to);
     const holdings = state.holdings || [];
     const byId = {};
-    holdings.forEach((h) => { byId[h.id] = h; });
+    holdings.forEach((h) => { byId[h.id] = h; }); (state.archive || []).forEach((a) => { byId[a.id] = byId[a.id] || a; });
     const keep = (hid) => !filterIds || filterIds.has(hid);
     const events = [];
     const taken = new Set();   // holdingId|YYYY-MM déjà couverts par un versement réel
@@ -735,35 +735,39 @@
   /* Propositions de dividendes historiques pour les positions détenues. h.divHist = { at, items: [[exDate, montant par titre (devise de cotation)]] } (relais Yahoo).
      Ne modifie rien ; renvoie les versements à valider, les doublons évités et les titres non calculables avec la raison. */
   function dividendProposals(state, today, uid, opt) {
-    opt = opt || {}; const todayS = toISO(today || new Date());
-    const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [] };
+    opt = opt || {}; const todayS = toISO(today || new Date()), dN = (d) => Date.parse(d) / 86400000;
+    const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [], pending: 0, atypical: 0, replaces: 0 };
     const pays = state.payments || [];
     const ymOf_ = (d) => d.slice(0, 7), nextYm = (d) => { const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7)); return m === 12 ? (y + 1) + '-01' : y + '-' + pad2(m + 1); };
-    (state.holdings || []).filter((h) => !opt.ids || opt.ids.has(h.id)).forEach((h) => {
+    const insts = (state.holdings || []).map((h) => ({ h, closed: false })).concat(opt.noArchive ? [] : (state.archive || []).map((h) => ({ h, closed: true }))).filter((x) => !opt.ids || opt.ids.has(x.h.id));
+    insts.forEach(({ h, closed }) => {
       const name = h.name || h.displayTicker || h.ticker;
       if (isAccumulating(h)) { out.accumulating.push(name); return; }
-      if (!h.divHist || !Array.isArray(h.divHist.items)) { out.notFetched.push(name); return; }
-      if (!h.divHist.items.length) { out.noData.push(name); return; }
-      const f = heldQtyFn(state, h); if (!f.ok) { out.unverifiable.push({ id: h.id, name, reason: f.reason }); return; }
-      const mine = pays.filter((p) => p.holdingId === h.id);
-      const rate = taxRate(h);
+      if (!h.divHist || !Array.isArray(h.divHist.items)) { if (!closed) out.notFetched.push(name); return; }
+      if (!h.divHist.items.length) { if (!closed) out.noData.push(name); return; }
+      const f = heldQtyFn(state, h); if (!f.ok) { if (!closed || f.reason.indexOf('incohérent') >= 0) out.unverifiable.push({ id: h.id, name, reason: f.reason, closed }); return; }
+      const mineAll = pays.filter((p) => p.holdingId === h.id);
+      const drafts = mineAll.filter((p) => p.source === 'auto' && p.verified === false), mine = mineAll.filter((p) => !(p.source === 'auto' && p.verified === false));   // brouillons « à vérifier » générés avec la quantité ACTUELLE : jamais comptés comme versements existants
+      const rate = taxRate(h), cur = h.divHist.currency || h.currency || 'EUR';
+      const priceAt = (ex) => { const hh = h.hist; if (!hh || !hh.from || !hh.c) return null; const m = (Number(ex.slice(0, 4)) - Number(hh.from.slice(0, 4))) * 12 + Number(ex.slice(5, 7)) - Number(hh.from.slice(5, 7)); const v = hh.c[m]; return v > 0 ? v : null; };
+      const same = (p, ex, amt) => {
+        if (p.exDate && p.exDate === ex) return true;
+        const d = p.payDate || p.exDate; if (!d) return false;
+        if (!(ymOf_(d) === ymOf_(ex) || ymOf_(d) === nextYm(ex))) return false;
+        const ps = num(p.perShare) > 0 ? num(p.perShare) : (num(p.qty) > 0 ? num(p.gross) / num(p.qty) : null);
+        return ps === null || Math.abs(ps - amt) <= 0.25 * amt;
+      };
       h.divHist.items.forEach((it) => {
         const ex = it[0], amt = num(it[1]); if (!ex || !(amt > 0) || ex > todayS) return;
         const qty = f.qtyBefore(ex);
         if (!(qty > 1e-9)) { out.notEligible++; return; }                    // pas détenu la veille du détachement (acheté après, ou déjà vendu)
-        // doublon : un versement déjà enregistré pour ce titre au même détachement, ou dans le même mois / le mois suivant avec un montant par titre voisin
-        const dup = mine.some((p) => {
-          if (p.exDate && p.exDate === ex) return true;
-          const d = p.payDate || p.exDate; if (!d) return false;
-          if (!(ymOf_(d) === ymOf_(ex) || ymOf_(d) === nextYm(ex))) return false;
-          const ps = num(p.perShare) > 0 ? num(p.perShare) : (num(p.qty) > 0 ? num(p.gross) / num(p.qty) : null);
-          return ps === null || Math.abs(ps - amt) <= 0.25 * amt;
-        });
-        const gross = Math.round(amt * qty * 100) / 100;
-        const row = { id: uid ? uid() : null, holdingId: h.id, ticker: h.displayTicker || h.ticker, name, exDate: ex, payDate: null, qty: Math.round(qty * 1e6) / 1e6, perShare: amt, gross,
-          tax: rate === null ? null : Math.round(gross * rate) / 100, net: rate === null ? null : Math.round(gross * (100 - rate)) / 100, fees: null, currency: h.currency || 'EUR',
-          source: 'market-history', estimated: true, verified: true };
-        (dup ? out.already : out.proposals).push(row);
+        const dup = mine.some((p) => same(p, ex, amt));
+        const gross = Math.round(amt * qty * 100) / 100, age = Math.round(dN(todayS) - dN(ex)), px = priceAt(ex);
+        const pending = age < 45, atypical = !!(px && amt / px > 0.4);        // < 45 j depuis le détachement : paiement peut-être pas encore reçu ; montant > 40 % du cours : donnée suspecte
+        const row = { id: uid ? uid() : null, holdingId: h.id, ticker: h.displayTicker || h.ticker, name, closed, exDate: ex, payDate: null, qty: Math.round(qty * 1e6) / 1e6, perShare: amt, gross,
+          tax: rate === null ? null : Math.round(gross * rate) / 100, net: rate === null ? null : Math.round(gross * (100 - rate)) / 100, fees: null, currency: cur,
+          source: 'market-history', estimated: true, verified: true, ageDays: age, pending, atypical, replaceIds: drafts.filter((p) => same(p, ex, amt)).map((p) => p.id) };
+        if (dup) out.already.push(row); else { out.proposals.push(row); if (pending) out.pending++; if (atypical) out.atypical++; out.replaces += row.replaceIds.length; }
       });
     });
     out.proposals.sort((a, b) => (a.exDate < b.exDate ? 1 : -1));

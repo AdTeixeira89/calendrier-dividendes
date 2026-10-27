@@ -343,53 +343,60 @@ async function runPrefill() {
    =============================================================== */
 async function runDividendHistory() {
   if (!state.settings.relayUrl) { toast('Renseignez d\'abord le relais de données (Paramètres) : l\'historique des dividendes vient des données de marché.', { error: true }); return; }
-  const hs = visibleHoldings().filter((h) => !Engine.isAccumulating(h) && h.ticker);
+  const ids = visibleIds();
+  // positions détenues ET positions clôturées (elles ont aussi perçu des dividendes tant qu\'elles étaient détenues)
+  const hs = visibleHoldings().concat((state.archive || []).filter((a) => !ids || ids.has(a.id))).filter((h) => !Engine.isAccumulating(h) && (h.ticker || h.isin));
   if (!hs.length) { toast('Aucune action ou ETF distribuant à analyser.', { ms: 5000 }); return; }
   let cancelled = false;
-  const m = openModal('<h2>Recherche des dividendes passés</h2><div class="sub">Analyse de vos positions, de vos opérations importées et de l\'historique des dividendes (données de marché Yahoo). Rien n\'est enregistré avant votre validation.</div><div class="progress"><i id="dhBar" style="width:0%"></i></div><div id="dhMsg" class="hint" style="margin-top:8px">Préparation…</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Annuler</button></div>', { onClose: () => { cancelled = true; } });
+  const m = openModal('<h2>Recherche des dividendes passés</h2><div class="sub">Analyse de vos positions (détenues et clôturées), de vos achats et ventes datés, puis de l\'historique des dividendes en espèces (données de marché Yahoo). Rien n\'est enregistré avant votre validation.</div><div class="progress"><i id="dhBar" style="width:0%"></i></div><div id="dhMsg" class="hint" style="margin-top:8px">Préparation…</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Annuler</button></div>', { onClose: () => { cancelled = true; } });
   const errors = []; let done = 0; const weekAgo = Date.now() - 7 * 86400000;
   for (const h of hs) {
     if (cancelled) return;
     const msg = $('#dhMsg', m); if (msg) msg.textContent = 'Dividendes de ' + (h.name || h.displayTicker || h.ticker) + ' (' + (done + 1) + ' / ' + hs.length + ')…';
-    if (!h.divHist || !h.divHist.at || Date.parse(h.divHist.at) < weekAgo) {
-      try { const r = await market.fetchDividends(h.ticker, h.name); h.divHist = { at: new Date().toISOString(), symbol: r.symbol, items: r.items }; }
-      catch (e) { errors.push((h.name || h.ticker) + ' : ' + e.message); if (e.rate || e.fatal) { done = hs.length; break; } }
+    if (!h.divHist || !h.divHist.at || Date.parse(h.divHist.at) < weekAgo || !h.divHist.currency) {
+      try { const r = await market.fetchDividends(h.ticker || h.isin, h.name); h.divHist = { at: new Date().toISOString(), symbol: r.symbol, currency: r.currency, items: r.items }; }
+      catch (e) { if (!(state.archive || []).includes(h)) errors.push((h.name || h.ticker) + ' : ' + e.message); if (e.rate || e.fatal) { done = hs.length; break; } }
       await new Promise((r) => setTimeout(r, 250));
     }
     done++; const bar = $('#dhBar', m); if (bar) bar.style.width = Math.round(100 * done / hs.length) + '%';
   }
   if (cancelled) return;
   saveState(); closeModal();
-  openDividendReview(Engine.dividendProposals(state, new Date(), uid, { ids: new Set(visibleHoldings().map((h) => h.id)) }), errors);
+  openDividendReview(Engine.dividendProposals(state, new Date(), uid, { ids: ids || null }), errors);
 }
 
 function openDividendReview(res, errors) {
-  const rows = res.proposals, cur = (r) => r.currency || 'EUR';
+  const rows = res.proposals, cur = (r) => r.currency || 'EUR', yr = new Date().getFullYear();
+  const defOn = (r) => !r.pending && !r.atypical;
   const skipped = res.unverifiable.length + res.noData.length + res.accumulating.length + res.notFetched.length + (errors ? errors.length : 0);
   const chip = (n, label, cls) => '<div class="card stat-chip"><span>' + label + '</span><b class="' + (n ? cls : '') + '">' + n + '</b></div>';
-  const body = rows.length ? '<div class="tbl-wrap" style="max-height:340px"><table class="tbl"><thead><tr><th class="chk-col"><input type="checkbox" id="dhAll" checked aria-label="Tout sélectionner"></th><th>Titre</th><th>Détachement</th><th class="r">Qté éligible</th><th class="r">Par titre</th><th class="r">Brut</th><th class="r">Retenue</th><th class="r">Net</th><th>Fiabilité</th></tr></thead><tbody>' + rows.map((r, i) =>
-    '<tr><td class="chk-col"><input type="checkbox" data-dh="' + i + '" checked aria-label="Ajouter"></td><td><b>' + esc(r.name) + '</b><div class="dg-note">' + esc(r.ticker) + '</div></td><td>' + esc(fmtDate(r.exDate)) + '<div class="dg-note">paiement : date non fournie</div></td>' +
+  const verif = (r) => r.atypical ? '<span class="badge warn">Montant atypique</span><div class="dg-note">supérieur à 40 % du cours : à vérifier</div>' : r.pending ? '<span class="badge warn">Récent</span><div class="dg-note">détaché il y a ' + r.ageDays + ' j : paiement peut-être pas encore reçu</div>' : '<span class="badge info">Détachement passé</span><div class="dg-note">il y a ' + r.ageDays + ' j · détenu à la veille</div>';
+  const body = rows.length ? '<div class="tbl-wrap" style="max-height:340px"><table class="tbl"><thead><tr><th class="chk-col"><input type="checkbox" id="dhAll" checked aria-label="Tout sélectionner"></th><th>Titre</th><th>Détachement</th><th class="r">Qté éligible</th><th class="r">Par titre</th><th class="r">Brut</th><th class="r">Retenue</th><th class="r">Net</th><th>Vérification</th></tr></thead><tbody>' + rows.map((r, i) =>
+    '<tr><td class="chk-col"><input type="checkbox" data-dh="' + i + '" ' + (defOn(r) ? 'checked' : '') + ' aria-label="Ajouter"></td><td><b>' + esc(r.name) + '</b>' + (r.closed ? ' <span class="badge">clôturée</span>' : '') + '<div class="dg-note">' + esc(r.ticker) + (r.replaceIds.length ? ' · remplace ' + r.replaceIds.length + ' brouillon(s) « à vérifier »' : '') + '</div></td><td>' + esc(fmtDate(r.exDate)) + '<div class="dg-note">paiement : date non fournie</div></td>' +
     '<td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + fmtMoney(r.perShare, cur(r), { d: 4 }) + '</td><td class="r">' + fmtMoney(r.gross, cur(r)) + '</td><td class="r">' + (r.tax == null ? '<span class="muted" title="Retenue non renseignée : non inventée">—</span>' : fmtMoney(r.tax, cur(r))) + '</td>' +
-    '<td class="r">' + (r.net == null ? '<span class="muted" title="Net inconnu : compté en brut">—</span>' : fmtMoney(r.net, cur(r))) + '</td><td><span class="badge warn">Estimé</span><div class="dg-note">données de marché' + (r.net == null ? ' · net inconnu' : '') + '</div></td></tr>').join('') + '</tbody></table></div>'
+    '<td class="r">' + (r.net == null ? '<span class="muted" title="Net inconnu : compté en brut">—</span>' : fmtMoney(r.net, cur(r))) + '</td><td>' + verif(r) + '</td></tr>').join('') + '</tbody></table></div>'
     : '<div class="notice info">Aucun dividende nouveau à ajouter : ' + (res.already.length ? 'tout ce qui était éligible est déjà enregistré.' : 'aucun versement éligible trouvé pour vos positions d\'après vos opérations importées.') + '</div>';
   const skipTxt = [].concat(res.unverifiable.map((x) => '<li><b>' + esc(x.name) + '</b> — ' + esc(x.reason) + ' <button class="btn sm" type="button" data-buys="' + esc(x.id) + '">Saisir les achats</button></li>'), res.noData.map((n) => '<li><b>' + esc(n) + '</b> — aucun dividende trouvé dans les données de marché</li>'),
     res.accumulating.map((n) => '<li><b>' + esc(n) + '</b> — ETF capitalisant : aucun dividende perçu</li>'), res.notFetched.map((n) => '<li><b>' + esc(n) + '</b> — données de dividendes non récupérées</li>'), (errors || []).map((e) => '<li>' + esc(e) + '</li>')).join('');
-  const m = openModal('<h2>Dividendes passés à vérifier</h2><div class="sub">D\'après vos opérations importées (quantité détenue la veille de chaque détachement) et l\'historique des dividendes en espèces des données de marché. Ces montants sont des <b>estimations</b> : la date de paiement et les retenues réelles ne sont pas connues. Cochez ceux à comptabiliser.</div>' +
-    '<div class="chips-row">' + chip(rows.length, 'À valider', 'pos') + chip(res.already.length, 'Déjà enregistrés (ignorés)', '') + chip(res.notEligible, 'Non éligibles (non détenus)', '') + chip(skipped, 'Titres non calculables', 'warn-t') + '</div>' + body +
-    '<div id="dhTotal" class="hint" style="margin-top:8px"></div>' + (skipTxt ? '<details class="dg-cols" open><summary>Titres non calculables ou ignorés (' + skipped + ')</summary><ul style="margin:8px 0 0 18px;max-height:150px;overflow:auto">' + skipTxt + '</ul><div class="hint">Importez l\'historique de transactions DEGIRO pour qu\'un titre sans opérations devienne calculable : sa date d\'achat n\'est jamais supposée.</div></details>' : '') +
-    '<div class="modal-actions"><span class="hint">Les versements existants ne sont ni modifiés ni supprimés.</span><div class="btn-row"><button class="btn" type="button" data-close>Fermer</button>' + (rows.length ? '<button class="btn primary" type="button" id="dhGo">Ajouter la sélection</button>' : '') + '</div></div>', { wide: true });
+  const m = openModal('<h2>Dividendes passés à vérifier</h2><div class="sub">Pour chaque titre, l\'application reprend vos <b>achats et ventes datés</b> pour connaître la quantité détenue <b>la veille de chaque détachement</b> (seuls les dividendes auxquels vous aviez droit sont proposés), puis le dividende en espèces versé par titre d\'après les données de marché. Ce sont des <b>estimations</b> (date de paiement et retenues réelles non connues) ; les détachements récents ou atypiques sont décochés. Pour des montants <b>certifiés</b>, importez le relevé de compte DEGIRO : ses dividendes réels remplacent ces estimations.</div>' +
+    '<div class="chips-row">' + chip(rows.filter(defOn).length, 'À valider', 'pos') + chip(res.pending + res.atypical, 'Récents / atypiques (décochés)', 'warn-t') + chip(res.already.length, 'Déjà enregistrés (ignorés)', '') + chip(res.notEligible, 'Non éligibles (non détenus)', '') + chip(skipped, 'Titres non calculables', 'warn-t') + '</div>' + body +
+    '<div id="dhTotal" class="hint" style="margin-top:8px"></div>' + (skipTxt ? '<details class="dg-cols" open><summary>Titres non calculables ou ignorés (' + skipped + ')</summary><ul style="margin:8px 0 0 18px;max-height:150px;overflow:auto">' + skipTxt + '</ul><div class="hint">Importez l\'historique de transactions DEGIRO (ou saisissez les achats) pour qu\'un titre sans opérations devienne calculable : sa date d\'achat n\'est jamais supposée.</div></details>' : '') +
+    '<div class="modal-actions"><span class="hint">Les versements confirmés existants ne sont ni modifiés ni supprimés.</span><div class="btn-row"><button class="btn" type="button" data-close>Fermer</button>' + (rows.length ? '<button class="btn primary" type="button" id="dhGo">Ajouter la sélection</button>' : '') + '</div></div>', { wide: true });
   $$('[data-buys]', m).forEach((b) => b.onclick = () => { closeModal(); openBuysModal(b.dataset.buys); });
   if (!rows.length) return;
   const sel = () => $$('[data-dh]', m).filter((c) => c.checked).map((c) => rows[Number(c.dataset.dh)]);
-  const upd = () => { const ch = sel(), tot = ch.reduce((s, r) => { const v = convert(r.gross, cur(r)); return v === null ? s : s + v; }, 0); $('#dhTotal', m).innerHTML = '<b>' + ch.length + '</b> versement(s) sélectionné(s) · brut estimé <b>' + money(tot) + '</b> (convertis dans la devise d\'affichage)'; $('#dhGo', m).disabled = !ch.length; $('#dhGo', m).textContent = 'Ajouter la sélection (' + ch.length + ')'; };
+  const upd = () => { const ch = sel(), tot = ch.reduce((s, r) => { const v = convert(r.gross, cur(r)); return v === null ? s : s + v; }, 0), rep = ch.reduce((s, r) => s + r.replaceIds.length, 0); $('#dhTotal', m).innerHTML = '<b>' + ch.length + '</b> versement(s) sélectionné(s) · brut estimé <b>' + money(tot) + '</b> (convertis dans la devise d\'affichage)' + (rep ? ' · remplace <b>' + rep + '</b> brouillon(s) « à vérifier » générés avec votre quantité actuelle' : ''); $('#dhGo', m).disabled = !ch.length; $('#dhGo', m).textContent = 'Ajouter la sélection (' + ch.length + ')'; };
   m.addEventListener('change', (e) => { if (e.target.id === 'dhAll') $$('[data-dh]', m).forEach((c) => { c.checked = e.target.checked; }); if (e.target.matches('[data-dh],#dhAll')) upd(); });
   $('#dhGo', m).onclick = () => {
     const ch = sel(); if (!ch.length) return;
     snapshotForUndo('ajout de dividendes historiques');
-    // dernier garde-fou anti-doublon : on recalcule contre l'état actuel juste avant d'écrire
-    const keep = ch.filter((r) => !state.payments.some((p) => p.holdingId === r.holdingId && p.exDate === r.exDate));
-    state.payments.push.apply(state.payments, keep.map((r) => Object.assign({}, r, { id: uid() }))); saveState(); closeModal(); renderPage();
-    toast(keep.length + ' dividende(s) historique(s) ajouté(s) (estimés).', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+    // dernier garde-fou anti-doublon : on recalcule contre l'état actuel juste avant d'écrire ; les brouillons « à vérifier » remplacés sont retirés (annulable)
+    const drop = new Set(); ch.forEach((r) => r.replaceIds.forEach((id) => drop.add(id)));
+    const keep = ch.filter((r) => !state.payments.some((p) => p.holdingId === r.holdingId && p.exDate === r.exDate && !drop.has(p.id)));
+    if (drop.size) state.payments = state.payments.filter((p) => !(drop.has(p.id) && p.source === 'auto' && p.verified === false));
+    state.payments.push.apply(state.payments, keep.map((r) => { const x = Object.assign({}, r, { id: uid() }); delete x.replaceIds; delete x.ageDays; delete x.pending; delete x.atypical; delete x.closed; return x; })); saveState(); closeModal(); renderPage();
+    const tot = Engine.receivedBetween(state, yr + '-01-01', todayISO(), incomeMode(), convert, visibleIds()).verified.total;
+    toast(keep.length + ' dividende(s) historique(s) ajouté(s) (estimés)' + (drop.size ? ', ' + drop.size + ' brouillon(s) remplacé(s)' : '') + ' · perçus en ' + yr + ' : ' + money(tot) + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
   };
   upd();
 }

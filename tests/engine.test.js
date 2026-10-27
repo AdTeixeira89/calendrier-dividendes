@@ -326,4 +326,21 @@ console.log(n + ' tests passed');
     const h = E.portfolioHistory(s, (a) => a, { months: 0, today: td2 }); assert.ok(h.coverage.unknownCost.includes('A') && h.coverage.retro.includes('A'), 'prix d\'un achat inconnu : titre en mode rétrospectif');
     const s2 = { holdings: [A], archive: [], payments: [], transactions: [mk('b1', '2025-01-15', 4, 90), mk('b2', '2025-07-15', 6, 110)] }; const h2 = E.portfolioHistory(s2, (a) => a, { months: 0, today: td2 }); assert.ok(h2.allTx && h2.flows.length === 2, 'tous les prix connus : calcul sur les opérations');
   });
+  t('DIVIDENDES PASSÉS (suite) : positions clôturées incluses, devise du dividende, brouillons « à vérifier » remplacés, détachements récents ou atypiques signalés', () => {
+    const td2 = new Date(2026, 9, 27), uid = () => 'u', iso = (d) => d.toISOString().slice(0, 10);
+    const ago = (n) => iso(new Date(td2.getTime() - n * 86400000));
+    const T = (id, h, date, type, qty) => ({ id, holdingId: h, date, type, qty, price: 10, fees: 0, currency: 'EUR', amountAcct: qty * 10, acctCur: 'EUR', source: 'degiro' });
+    const A = { id: 'a', ticker: 'A', displayTicker: 'A', name: 'A', type: 'stock', currency: 'EUR', quantity: 10, account: 'x', dividend: {}, hist: { from: '2025-01', c: Array(22).fill(100) },
+      divHist: { at: '2026-10-01', currency: 'USD', items: [['2025-05-01', 1], [ago(10), 1], ['2025-09-01', 60], ['2026-03-01', 2]] } };
+    const C = { id: 'c', ticker: 'C', displayTicker: 'C', name: 'Clôturée', currency: 'EUR', account: 'x', closedAt: '2025-06-01', divHist: { at: '2026-10-01', currency: 'EUR', items: [['2024-05-14', 3], ['2025-05-12', 3], ['2026-05-11', 3]] } };
+    const s = { holdings: [A], archive: [C], transactions: [T('1', 'a', '2025-01-10', 'buy', 10), T('2', 'c', '2024-01-10', 'buy', 5), T('3', 'c', '2025-06-01', 'sell', 5)],
+      payments: [{ id: 'draft', holdingId: 'a', exDate: '2026-03-01', source: 'auto', verified: false, qty: 10, perShare: 2, gross: 20, currency: 'EUR' }, { id: 'real', holdingId: 'a', payDate: '2025-05-20', exDate: null, qty: 10, perShare: 1, gross: 10, currency: 'USD', verified: true, source: 'manual' }] };
+    const r = E.dividendProposals(s, td2, uid), by = (n, ex) => r.proposals.find((x) => x.name === n && x.exDate === ex);
+    assert.ok(r.already.some((x) => x.exDate === '2025-05-01'), 'versement réel déjà enregistré : ignoré'); assert.ok(!by('A', '2025-05-01'));
+    assert.strictEqual(by('A', '2026-03-01').replaceIds.join(), 'draft', 'le brouillon « à vérifier » n\'est pas un doublon : il sera remplacé'); assert.strictEqual(by('A', '2026-03-01').currency, 'USD', 'devise du dividende (données de marché), pas celle de la position');
+    assert.strictEqual(by('A', ago(10)).pending, true, 'détaché depuis moins de 45 jours : paiement peut-être pas encore reçu'); assert.strictEqual(by('A', '2026-03-01').pending, false);
+    assert.strictEqual(by('A', '2025-09-01').atypical, true, '60 par titre pour un cours de 100 : atypique');
+    assert.deepStrictEqual(r.proposals.filter((x) => x.closed).map((x) => [x.exDate, x.qty]).sort(), [['2024-05-14', 5], ['2025-05-12', 5]], 'position clôturée : dividendes perçus tant qu\'elle était détenue (pas après la vente)');
+    assert.strictEqual(E.dividendProposals(s, td2, uid, { noArchive: true }).proposals.some((x) => x.closed), false);
+  });
 })();

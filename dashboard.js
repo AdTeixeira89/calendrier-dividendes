@@ -124,7 +124,7 @@ function renderHome(host) {
   const divBars = (h_, w_) => stackedBars({ w: w_, tipLabels: w_ ? MOIS_C : null, labels: w_ ? MOIS_C.map((m_) => m_.charAt(0).toUpperCase()) : MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: h_, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] });
   const estY = Engine.sumEvents((state.payments || []).filter((p_) => p_.estimated && p_.verified !== false && (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate) >= y + '-01-01' && (p_.payDate || p_.exDate) <= todayS).map((p_) => ({ currency: p_.currency || 'EUR', gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) })), mode, convert).total;
   const divCard = '<section class="card card-pad" id="divCardEl"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
-    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (estY > 0.5 ? '<small class="sens" title="Reconstitués d\'après vos opérations et l\'historique de marché : retenue et date de paiement non confirmées">dont ' + money(estY, 0) + ' estimés</small>' : '') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
+    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (state.transactions.some((t_) => t_.type === 'buy') && state.settings.relayUrl && !state.payments.some((p_) => p_.estimated || p_.source === 'degiro') ? '<button class="link-btn" type="button" data-goto="history-fill" style="font-size:11.5px;padding:0">Compléter l\'historique →</button>' : '') + (estY > 0.5 ? '<small class="sens" title="Reconstitués d\'après vos opérations et l\'historique de marché : retenue et date de paiement non confirmées">dont ' + money(estY, 0) + ' estimés</small>' : '') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
     '<div><span>À venir</span>' + sens('<b>' + money(yUp.total, 0) + '</b>') + '</div><div><span>Prochain</span><b>' + (first ? esc(first.ticker) + '</b><small>' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '</small>' : '—</b>') + '</div></div>' +
     '<div id="divChart">' + divBars(150) + '</div></section>';
 
@@ -158,7 +158,7 @@ function renderHome(host) {
   wireDo(host);
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderHome(host); };
   $$('#perSeg [data-per]', host).forEach((b) => b.onclick = () => { view.home.period = Number(b.dataset.per); renderHome(host); });
-  $$('[data-goto]', host).forEach((b) => b.onclick = () => { view.divTab = b.dataset.goto; go('dividends'); });
+  $$('[data-goto]', host).forEach((b) => b.onclick = () => { if (b.dataset.goto === 'history-fill') { view.divTab = 'history'; go('dividends'); setTimeout(runDividendHistory, 400); return; } view.divTab = b.dataset.goto; go('dividends'); });
 }
 
 /* ===============================================================

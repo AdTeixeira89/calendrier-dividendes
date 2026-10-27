@@ -938,7 +938,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
     await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo', { timeout: 20000 }); const t = (await p.locator('.modal').innerText()).replace(/\n/g, ' | ');
     ok(/À valider\s*\|?\s*2/.test(t) || /2\s*\|?\s*À valider/i.test(t), 'AAPL : détachements du 9 févr. et du 10 août éligibles (le 11 mai est déjà enregistré, celui de 2025 antérieur à l\'achat) : ' + t.slice(0, 600));
-    ok(/Estimé/.test(t) && /date non fournie/.test(t), 'estimé, date de paiement non inventée'); ok(/Air Liquide[^|]*aucune opération importée/.test(t) || /Air Liquide.*date d'acquisition inconnue/.test(t), 'titre sans opérations : non calculable, non supposé détenu'); ok(/iShares World.*ETF capitalisant/.test(t), 'ETF capitalisant exclu');
+    ok(/estimations/.test(t) && /date non fournie/.test(t), 'estimé, date de paiement non inventée'); ok(/Air Liquide[^|]*aucune opération importée/.test(t) || /Air Liquide.*date d'acquisition inconnue/.test(t), 'titre sans opérations : non calculable, non supposé détenu'); ok(/iShares World.*ETF capitalisant/.test(t), 'ETF capitalisant exclu');
     ok(/Déjà enregistrés \(ignorés\)\s*\|?\s*1/i.test(t) || /1\s*\|?\s*Déjà enregistrés/i.test(t), 'doublon détecté'); eq(await p.locator('[data-dh]').count(), 2, '2 lignes proposées');
     await p.uncheck('[data-dh="0"]'); await p.waitForTimeout(100); ok(/1<\/b> versement|1\s+versement\(s\) sélectionné/.test(await p.locator('#dhTotal').innerHTML() + await p.locator('#dhTotal').innerText()), 'compteur de sélection');
     await p.check('[data-dh="0"]'); eq((await storeOf(p)).payments.length, 1, 'rien n\'est enregistré avant validation'); await p.click('#dhGo'); await p.waitForTimeout(400);
@@ -1027,6 +1027,27 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo'); const rows = await p.locator('.modal tbody tr').allInnerTexts();
     ok(rows.length === 3 && rows.every((r) => /Alpha/.test(r)), '3 versements éligibles pour Alpha : ' + rows.map((r) => r.replace(/\s+/g, ' ')).join(' / ')); ok(/10/.test(rows[0]) && /4/.test(rows[2]), 'quantité éligible : 4 au 9 févr., 10 ensuite : ' + rows.map((r) => r.replace(/\s+/g, ' ').slice(0, 60)).join(' / '));
     await p.click('[data-buys="b1"]'); await p.waitForSelector('#byDate'); ok(/Achats de Beta/.test(await p.locator('.modal').innerText()), 'lien « Saisir les achats » depuis la liste des titres non calculables');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('dividendes passés complétés : positions détenues ET clôturées, achats datés, brouillon « à vérifier » remplacé, montants perçus de l\'accueil mis à jour', async () => {
+    RELAY.old = false;
+    const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
+    const seed = SEED(0); seed.holdings = [Object.assign({}, base, { id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, avgCost: 150, price: 190 })];
+    seed.archive = [{ id: 'old', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide (ancienne)', currency: 'EUR', account: 'main', closedAt: '2025-06-01', hist: null, userClosed: true }];
+    const T = (id, h, date, type, qty, price) => ({ id, holdingId: h, date, type, qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'degiro' });
+    seed.transactions = [T('t1', 'aapl', '2026-01-15', 'buy', 10, 150), T('o1', 'old', '2024-01-10', 'buy', 5, 100), T('o2', 'old', '2025-06-01', 'sell', 5, 130)];
+    seed.payments = [{ id: 'draft', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: '2026-02-09', payDate: null, qty: 10, perShare: .25, gross: 2.5, currency: 'USD', source: 'auto', verified: false }];
+    const p = await device({ guest: true, seed }); p.setDefaultTimeout(15000); await p.open(); await p.evaluate(() => go('home')); await p.waitForTimeout(400);
+    ok(/Compléter l'historique/.test(await p.locator('#divCardEl').innerText()), 'accueil : lien « Compléter l\'historique »');
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); ok(/Complétez vos dividendes passés/.test(await p.locator('#page').innerText()), 'historique : invitation à compléter');
+    await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo', { timeout: 60000 }); const t = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
+    ok(/Air Liquide \(ancienne\) clôturée/.test(t), 'position clôturée proposée (dividendes perçus tant qu\'elle était détenue) : ' + t.slice(0, 500)); ok(/remplace 1 brouillon/.test(t), 'brouillon « à vérifier » remplacé, pas pris pour un doublon');
+    const rows = await p.locator('.modal tbody tr').allInnerTexts(); ok(rows.filter((r) => /Air Liquide/.test(r)).length === 2, '2 détachements pour l\'ancienne position (2024 et 2025 ; pas 2026 après la vente) : ' + rows.length + ' lignes');
+    ok(/Détachement passé/.test(t) && /il y a \d+ j/.test(t), 'vérification : détachement passé depuis N jours, détenu à la veille');
+    await p.click('#dhGo'); await p.waitForTimeout(500); const st = await storeOf(p); ok(!st.payments.some((x) => x.id === 'draft'), 'brouillon remplacé'); const add = st.payments.filter((x) => x.source === 'market-history');
+    ok(add.length >= 5 && add.every((x) => x.estimated && x.verified && x.payDate === null), add.length + ' dividendes estimés ajoutés, date de paiement non inventée'); ok(add.some((x) => x.holdingId === 'old'), 'rattachés aussi à la position clôturée');
+    ok(/perçus en \d{4}/.test(await p.locator('#toastRoot').innerText()), 'bilan des montants perçus affiché'); await p.evaluate(() => go('home')); await p.waitForTimeout(400); ok(/dont .* estimés/.test(await p.locator('#divCardEl').innerText()), 'accueil : « dont X estimés »');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
