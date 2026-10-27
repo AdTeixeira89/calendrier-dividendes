@@ -5,7 +5,6 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { BudgetSection } from '@/components/finance/BudgetSection'
 import { ExpenseFormSheet, type ExpenseFormInitial } from '@/components/finance/ExpenseFormSheet'
 import { MonthNav } from '@/components/finance/MonthNav'
-import { RecurringExpensesSection } from '@/components/finance/RecurringExpensesSection'
 import { ExpenseRow } from '@/components/finance/ExpenseRow'
 import { ScanReceiptSheet } from '@/components/finance/ScanReceiptSheet'
 import { SpendingPaceChart } from '@/components/finance/SpendingPaceChart'
@@ -123,8 +122,6 @@ export function ExpensesPage() {
           </Link>
         </div>
       )}
-
-      <RecurringExpensesSection space={space} />
 
       <Card title="Transactions" padded={expenses !== undefined && expenses.length === 0}>
         {loading ? null : expenses.length === 0 ? (

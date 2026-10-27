@@ -6,7 +6,7 @@ import type { Cents } from '@/types'
 import { planIsEmpty, type BudgetSplitSettings, type HouseholdSplit } from '@/utils/budgetSplit'
 import { formatCents } from '@/utils/money'
 import styles from './BudgetSplitCard.module.css'
-import accordion from './RecurringExpensesSection.module.css'
+import accordion from './Accordion.module.css'
 import { BudgetSplitSheet } from './BudgetSplitSheet'
 
 interface BudgetSplitCardProps {

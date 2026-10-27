@@ -319,3 +319,7 @@ finances/
 
 - Chaque catégorie choisie ou confirmée lors d'un import est retenue (`settings/categoryRules`, commerçant → catégorie, sans journal, 2 000 entrées max) et proposée d'office aux relevés suivants ; le dernier choix remplace le précédent. Priorité : mémoire > historique des dépenses > règles de commerçants courants.
 - Une ligne importée sans catégorie reconnue ni choisie est rangée en « Autres » avec `categoryPending` : elle n'apprend rien (jusqu'à ce qu'on la modifie).
+
+## 6 undecies. Dépenses récurrentes retirées
+
+Le suivi se fait par import mensuel de relevé : le menu « Dépenses récurrentes », l'option « Même montant chaque mois », le type « Récurrente » (pour les nouvelles dépenses) et les créations automatiques (abonnements, reprises du mois précédent, mensualités de prêt) sont retirés pour ne pas doubler ce que le relevé contient. Les dépenses déjà créées restent ; le code pur (`utils/recurringExpenses`, `recurringCopies`, `debtExpenses`) est conservé, non branché.
