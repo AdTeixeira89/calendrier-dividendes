@@ -314,3 +314,8 @@ finances/
 - `utils/statementFile.ts` : le format est détecté d'après le contenu (ZIP = .xlsx, binaire OLE = .xls refusé avec explication, sinon CSV). Les classeurs sont lus par `read-excel-file`, chargé à la demande ; la première feuille ressemblant à un relevé est utilisée.
 - `utils/bankStatement.ts` : `parseBankTable` (commun CSV / Excel) détecte en-tête et colonnes (date, libellé, montant ou débit/crédit) ; les dates stockées en numéros de série Excel sont reconnues.
 - Page d'import : chaque ligne est modifiable (libellé, date, montant, type dépense/revenu, catégorie) avant validation ; espace de destination au choix ; un relevé réimporté ne crée pas de doublon.
+
+## 6 decies. Mémoire des catégories à l'import
+
+- Chaque catégorie choisie ou confirmée lors d'un import est retenue (`settings/categoryRules`, commerçant → catégorie, sans journal, 2 000 entrées max) et proposée d'office aux relevés suivants ; le dernier choix remplace le précédent. Priorité : mémoire > historique des dépenses > règles de commerçants courants.
+- Une ligne importée sans catégorie reconnue ni choisie est rangée en « Autres » avec `categoryPending` : elle n'apprend rien (jusqu'à ce qu'on la modifie).

@@ -2,7 +2,7 @@ import { Timestamp } from 'firebase/firestore'
 import { describe, expect, it } from 'vitest'
 import type { Category } from '@/types'
 import type { StatementRow } from './bankStatement'
-import { buildHistoryIndex, cleanMerchant, guessIncomeType, guessPaymentMethod, isInternalTransfer, merchantKey, suggestCategory } from './categorize'
+import { buildHistoryIndex, cleanMerchant, guessIncomeType, guessPaymentMethod, isInternalTransfer, merchantKey, rememberCategories, suggestCategory } from './categorize'
 import { buildImportPreview } from './statementImport'
 
 const stamp = Timestamp.now()
@@ -101,5 +101,38 @@ describe('buildImportPreview', () => {
     const existing = [{ id: first!.id, amountCents: 250, date: Timestamp.fromDate(new Date(2026, 9, 3, 12)), merchant: 'Cafe', categoryId: 'autres' }]
     const [again] = buildImportPreview([row(3, 'CARTE CAFE', -250)], { categories, expenses: existing, incomes: [] })
     expect(again).toMatchObject({ flag: 'imported', include: false })
+  })
+})
+
+describe('mémoire des catégories choisies à l’import', () => {
+  const none = buildHistoryIndex([])
+
+  it('propose d’office la catégorie déjà choisie pour ce commerçant, avant les règles et l’historique', () => {
+    const rules = rememberCategories([{ label: 'CARTE X1 03/10 CARREFOUR MARKET', categoryId: 'loisirs' }])
+    expect(suggestCategory('PAIEMENT CB CARREFOUR MARKET 21/11', none, categories, rules)).toEqual({ categoryId: 'loisirs', source: 'memory' })
+    // sans mémoire, la règle des commerçants courants s'applique toujours
+    expect(suggestCategory('PAIEMENT CB CARREFOUR MARKET 21/11', none, categories).categoryId).toBe('alimentation')
+  })
+
+  it('retient le dernier choix, ignore les lignes sans catégorie, retrouve un commerçant au même premier mot', () => {
+    let rules = rememberCategories([{ label: 'CB BOULANGER PARIS', categoryId: 'loisirs' }, { label: 'CB INCONNU', categoryId: null }])
+    expect(Object.keys(rules)).toEqual(['BOULANGER PARIS'])
+    rules = rememberCategories([{ label: 'CB BOULANGER PARIS', categoryId: 'alimentation' }], rules)
+    expect(suggestCategory('CB BOULANGER LYON', none, categories, rules)).toEqual({ categoryId: 'alimentation', source: 'memory' })
+  })
+
+  it('ne retient pas une catégorie archivée ou disparue', () => {
+    const rules = { 'MA SALLE': 'supprimee' }
+    expect(suggestCategory('CB MA SALLE', none, categories, rules).source).not.toBe('memory')
+  })
+
+  it('une catégorie posée par défaut à l’import n’apprend rien', () => {
+    const history = buildHistoryIndex([{ merchant: 'Boulanger', categoryId: 'autres', categoryPending: true }, { merchant: 'Boulanger', categoryId: 'loisirs' }])
+    expect(suggestCategory('CB BOULANGER', history, categories).categoryId).toBe('loisirs')
+  })
+
+  it('borne la taille de la mémoire en oubliant les plus anciennes', () => {
+    const many = Array.from({ length: 2100 }, (_, i) => ({ label: `MAGASIN${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + (Math.floor(i / 26) % 26))}${String.fromCharCode(65 + Math.floor(i / 676))} BIO`, categoryId: 'loisirs' }))
+    expect(Object.keys(rememberCategories(many)).length).toBeLessThanOrEqual(2000)
   })
 })

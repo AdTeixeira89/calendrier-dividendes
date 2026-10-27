@@ -81,6 +81,8 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
       kind: ruleMode ? ('recurring' as ExpenseKind) : kind,
       note: note.trim() || null,
       receiptPath,
+      // Enregistrée depuis le formulaire : la catégorie est maintenant confirmée.
+      ...(expense?.categoryPending ? { categoryPending: false } : {}),
     }
     try {
       if (expense) await updateExpense(household.id, expense, data, user, isPrivate)

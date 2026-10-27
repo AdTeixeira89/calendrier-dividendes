@@ -26,7 +26,27 @@ export function cleanMerchant(label: string): string {
     .slice(0, 60)
 }
 
-export type Suggestion = 'history' | 'rule' | 'none'
+/** `memory` : catégorie choisie lors d'un import précédent ; `history` : dépenses déjà rangées ; `rule` : commerçants courants. */
+export type Suggestion = 'memory' | 'history' | 'rule' | 'none'
+
+/** Mémoire des catégories choisies à l'import : commerçant (`merchantKey`) → catégorie. */
+export type CategoryRules = Record<string, string>
+
+const MAX_RULES = 2000
+
+/** Ajoute à la mémoire les catégories choisies (la dernière choix remplace le précédent) ; borne la taille en oubliant les plus anciennes. */
+export function rememberCategories(rows: { label: string; categoryId: string | null }[], existing: CategoryRules = {}): CategoryRules {
+  const rules: CategoryRules = { ...existing }
+  for (const { label, categoryId } of rows) {
+    const key = merchantKey(label)
+    if (!categoryId || !key) continue
+    delete rules[key] // réinsérée en dernier : les plus anciennes partent en premier
+    rules[key] = categoryId
+  }
+  const keys = Object.keys(rules)
+  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RULES))) delete rules[old]
+  return rules
+}
 
 /** Règles de commerçants courants, par nom de catégorie par défaut. Un mot par entrée, ou une expression. */
 const RULES: Record<string, string[]> = {
@@ -86,10 +106,11 @@ function bump(map: Map<string, Map<string, number>>, key: string, categoryId: st
   map.set(key, counts)
 }
 
-export function buildHistoryIndex(expenses: Pick<Expense, 'merchant' | 'categoryId'>[]): HistoryIndex {
+export function buildHistoryIndex(expenses: Pick<Expense, 'merchant' | 'categoryId' | 'categoryPending'>[]): HistoryIndex {
   const index: HistoryIndex = { byKey: new Map(), byFirstWord: new Map() }
   for (const e of expenses) {
-    if (!e.merchant) continue
+    // Une catégorie posée par défaut à l'import n'apprend rien (sinon « Autres » finirait par s'imposer).
+    if (!e.merchant || e.categoryPending) continue
     const key = merchantKey(e.merchant)
     if (!key) continue
     bump(index.byKey, key, e.categoryId)
@@ -107,16 +128,25 @@ function categoryIdByName(name: string, categories: Category[]): string | null {
 }
 
 /**
- * Catégorie probable d'une dépense : d'abord ce que le foyer a déjà fait pour
- * ce commerçant, puis les règles de commerçants courants. `none` = à choisir.
+ * Catégorie probable d'une dépense : d'abord la catégorie déjà choisie à l'import pour ce
+ * commerçant, puis ce que le foyer a déjà fait, puis les règles de commerçants courants. `none` = à choisir.
  */
-export function suggestCategory(label: string, history: HistoryIndex, categories: Category[]): { categoryId: string | null; source: Suggestion } {
+export function suggestCategory(label: string, history: HistoryIndex, categories: Category[], rules: CategoryRules = {}): { categoryId: string | null; source: Suggestion } {
   const key = merchantKey(label)
   const usable = (id: string | undefined) => (id && categories.some((c) => c.id === id && !c.archived) ? id : null)
 
+  // Ce que le foyer a déjà choisi pour ce commerçant à l'import passe avant tout le reste.
+  const remembered = usable(rules[key])
+  if (remembered) return { categoryId: remembered, source: 'memory' }
+  const word = firstWord(key)
+  if (word) {
+    const candidates = new Set(Object.entries(rules).filter(([k]) => firstWord(k) === word).map(([, id]) => id))
+    const similarMemory = candidates.size === 1 ? usable([...candidates][0]) : null
+    if (similarMemory) return { categoryId: similarMemory, source: 'memory' }
+  }
+
   const exact = usable(mostFrequent(history.byKey.get(key)))
   if (exact) return { categoryId: exact, source: 'history' }
-  const word = firstWord(key)
   const similar = word ? usable(mostFrequent(history.byFirstWord.get(word))) : null
   if (similar) return { categoryId: similar, source: 'history' }
 

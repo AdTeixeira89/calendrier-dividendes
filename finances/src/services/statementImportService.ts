@@ -2,6 +2,7 @@ import { COMMON_SPACE, spaceFields, type Space } from '@/utils/spaces'
 import { Timestamp } from 'firebase/firestore'
 import { guessPaymentMethod } from '@/utils/categorize'
 import type { PreviewRow } from '@/utils/statementImport'
+import { saveCategoryRules } from './categoryRulesService'
 import { createItemsOnce } from './repository'
 
 interface Actor {
@@ -12,6 +13,8 @@ export interface ImportResult {
   created: number
   /** Opérations déjà en base (même relevé importé plusieurs fois). */
   alreadyThere: number
+  /** Catégories mémorisées pour les prochains relevés. */
+  remembered: number
 }
 
 /**
@@ -38,6 +41,8 @@ export async function importStatement(householdId: string, rows: PreviewRow[], f
         note: r.label.slice(0, 280),
         receiptPath: null,
         source: 'import',
+        // Rangée par défaut (aucune catégorie reconnue ni choisie) : elle n'apprendra rien aux prochains relevés.
+        ...(r.categoryId === null ? { categoryPending: true } : {}),
       },
     }))
   const incomes = rows
@@ -56,5 +61,11 @@ export async function importStatement(householdId: string, rows: PreviewRow[], f
       },
     }))
   const created = (await createItemsOnce(householdId, 'expenses', expenses, actor)) + (await createItemsOnce(householdId, 'incomes', incomes, actor))
-  return { created, alreadyThere: rows.length - created }
+  // Chaque catégorie choisie ou confirmée est retenue pour les relevés suivants (la dernière choix remplace la précédente).
+  const remembered = await saveCategoryRules(
+    householdId,
+    rows.filter((r) => r.kind === 'expense').map((r) => ({ label: r.label, categoryId: r.categoryId })),
+    actor,
+  ).catch(() => 0)
+  return { created, alreadyThere: rows.length - created, remembered }
 }

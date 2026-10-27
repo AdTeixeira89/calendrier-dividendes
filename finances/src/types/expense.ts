@@ -22,6 +22,8 @@ export interface Expense extends BaseEntity {
   recurrenceId?: string | null
   /** Origine de la saisie quand elle n'est pas manuelle (relevé bancaire importé). */
   source?: 'import'
+  /** Importée sans catégorie reconnue ni choisie (rangée par défaut) : ne sert pas à apprendre les catégories. */
+  categoryPending?: boolean
   /** Reprise automatique d'une dépense récurrente du mois précédent. */
   autoCopy?: boolean
   /** Jour du mois prévu pour une dépense récurrente reprise (évite la dérive 31 → 28 → 28). */

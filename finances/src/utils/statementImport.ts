@@ -1,6 +1,6 @@
 import type { Category, Expense, Income, IncomeType } from '@/types'
 import type { StatementRow } from './bankStatement'
-import { buildHistoryIndex, cleanMerchant, guessIncomeType, isInternalTransfer, merchantKey, suggestCategory, type Suggestion } from './categorize'
+import { buildHistoryIndex, cleanMerchant, type CategoryRules, guessIncomeType, isInternalTransfer, merchantKey, suggestCategory, type Suggestion } from './categorize'
 
 export type PreviewFlag = 'imported' | 'duplicate' | 'transfer' | null
 
@@ -55,7 +55,7 @@ function matcher(existing: { amountCents: number; date: Date }[]) {
 
 export function buildImportPreview(
   rows: StatementRow[],
-  context: { categories: Category[]; expenses: Pick<Expense, 'id' | 'amountCents' | 'date' | 'merchant' | 'categoryId'>[]; incomes: Pick<Income, 'id' | 'amountCents' | 'date'>[] },
+  context: { categories: Category[]; expenses: Pick<Expense, 'id' | 'amountCents' | 'date' | 'merchant' | 'categoryId' | 'categoryPending'>[]; incomes: Pick<Income, 'id' | 'amountCents' | 'date'>[]; rules?: CategoryRules },
 ): PreviewRow[] {
   const history = buildHistoryIndex(context.expenses)
   const knownIds = new Set([...context.expenses.map((e) => e.id), ...context.incomes.map((i) => i.id)])
@@ -71,7 +71,7 @@ export function buildImportPreview(
     occurrences.set(base, n + 1)
     const id = `imp_${hashText(`${base}|${n}`)}`
 
-    const suggestion = kind === 'expense' ? suggestCategory(row.label, history, context.categories) : { categoryId: null, source: 'none' as const }
+    const suggestion = kind === 'expense' ? suggestCategory(row.label, history, context.categories, context.rules) : { categoryId: null, source: 'none' as const }
     const income = guessIncomeType(row.label)
     let flag: PreviewFlag = null
     if (knownIds.has(id)) flag = 'imported'

@@ -6,6 +6,7 @@ import { Button, Card, Notice, TextField } from '@/components/ui'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { groupByParent, useCategories } from '@/hooks/useCategories'
 import { useCurrentUser } from '@/hooks/useAuth'
+import { useCategoryRules } from '@/hooks/useCategoryRules'
 import { useExpensesRange } from '@/hooks/useExpensesRange'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useIncomesRange } from '@/hooks/useIncomesRange'
@@ -47,11 +48,12 @@ export function ImportStatementPage() {
   // Historique des 12 derniers mois (apprentissage des catégories, détection des doublons), élargi à la période du relevé.
   const current = currentMonthKey()
   const expenses = useExpensesRange(household.id, parsed && parsed.from < shiftMonth(current, -11) ? parsed.from : shiftMonth(current, -11), parsed && parsed.to > current ? parsed.to : current)
+  const rules = useCategoryRules(household.id)
   const incomes = useIncomesRange(household.id, parsed && parsed.from < shiftMonth(current, -11) ? parsed.from : shiftMonth(current, -11), parsed && parsed.to > current ? parsed.to : current)
 
   const preview = useMemo(
-    () => (parsed && categories && expenses && incomes ? buildImportPreview(parsed.rows, { categories, expenses, incomes }) : null),
-    [parsed, categories, expenses, incomes],
+    () => (parsed && categories && expenses && incomes && rules ? buildImportPreview(parsed.rows, { categories, expenses, incomes, rules }) : null),
+    [parsed, categories, expenses, incomes, rules],
   )
   const rows = useMemo(() => preview?.map((p) => ({ ...p, ...overrides[p.id] })) ?? null, [preview, overrides])
   const groups = categories ? groupByParent(categories) : []
@@ -109,6 +111,7 @@ export function ImportStatementPage() {
           <span className="row" style={{ gap: 6 }}>
             <CheckCircle2 size={16} aria-hidden />
             {result.created} opération{result.created > 1 ? 's' : ''} importée{result.created > 1 ? 's' : ''}
+            {result.remembered > 0 && ` · ${result.remembered} catégorie${result.remembered > 1 ? 's' : ''} retenue${result.remembered > 1 ? 's' : ''} pour les prochains relevés`}
             {result.alreadyThere > 0 && ` · ${result.alreadyThere} déjà présente${result.alreadyThere > 1 ? 's' : ''}, ignorée${result.alreadyThere > 1 ? 's' : ''}`}.
           </span>
         </Notice>
@@ -217,6 +220,7 @@ export function ImportStatementPage() {
                       {row.date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} · {row.label}
                     </span>
                     {row.flag && <span className={`${styles.chip} ${styles.chipWarn}`}>{FLAG_LABELS[row.flag]}</span>}
+                    {row.kind === 'expense' && (row.suggestion === 'memory' || row.suggestion === 'history') && <span className={styles.chip}>Catégorie retenue</span>}
                     {editingId === row.id && (
                       <div className="stack" style={{ marginTop: 4 }}>
                         <TextField label="Libellé" maxLength={120} value={row.merchant} onChange={(e) => setRow(row.id, { merchant: e.target.value })} />
