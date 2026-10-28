@@ -861,7 +861,7 @@
 
   /* Contrôle des versements : trouve ce qui fausse les totaux « reçus » SANS rien modifier (pure). Chaque anomalie est une proposition cochable :
      - orpheline : versement estimé dont la position n'existe plus → à supprimer ; versement réel (courtier / CSV / manuel) → rattaché à la position de la même société (ISIN, sinon nom) ou à une position archivée « relevé seul » ;
-     - doublon : estimation / brouillon « auto » qui double un versement réel de la même société (même position, ou autre position avec la même quantité) à ±25 jours (un détachement → paiement jusqu'à 75 j sur la même position) ;
+     - doublon : estimation / brouillon « auto » qui double un versement réel de la même société (même position, ou autre position de quantité voisine (±15 %, l'estimation utilise la quantité actuelle)) à ±25 jours (un détachement → paiement jusqu'à 75 j sur la même position) ;
      - brut Trade Republic : versement CSV Trade Republic (identifiant UUID) dont le « montant » a été lu comme un net alors que l'export donne le brut (brut = net + retenue → brut = montant). */
   function auditPayments(state) {
     const insts = (state.holdings || []).concat(state.archive || []), byId = new Map(insts.map((h) => [h.id, h])), alias = state.isinAlias || {};
@@ -886,7 +886,7 @@
     (state.payments || []).filter((p) => isEst(p) && byId.has(p.holdingId) && date(p)).forEach((e) => {
       real.forEach((r) => {
         const sameHolder = virt.get(r.id) === e.holdingId; let ok = false;
-        if (!sameHolder) { const he = byId.get(e.holdingId), hr = byId.get(virt.get(r.id)); const same = he && hr && ((holdingIsin(he) && canon(alias, holdingIsin(he)) === canon(alias, holdingIsin(hr))) || sameName(sq(he.name), sq(hr.name))); if (!same || !(Number(r.qty) > 0) || !(Number(e.qty) > 0) || Math.abs(r.qty - e.qty) / e.qty > 0.01) return; }
+        if (!sameHolder) { const he = byId.get(e.holdingId), hr = byId.get(virt.get(r.id)); const same = he && hr && ((holdingIsin(he) && canon(alias, holdingIsin(he)) === canon(alias, holdingIsin(hr))) || sameName(sq(he.name), sq(hr.name))); if (!same || !(Number(r.qty) > 0) || !(Number(e.qty) > 0) || Math.abs(r.qty - e.qty) / e.qty > 0.15) return; }
         const dd = Math.abs(dayN(date(r)) - dayN(date(e))), lag = e.exDate && r.payDate ? dayN(r.payDate) - dayN(e.exDate) : -1;
         ok = dd <= 25 || (sameHolder && lag >= 0 && lag <= 75); if (ok) cands.push({ e, r, d: Math.min(dd, lag >= 0 ? lag : 1e9) });
       });
