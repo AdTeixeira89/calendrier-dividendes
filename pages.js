@@ -107,6 +107,8 @@ function dividendKpisHtml() {
   const yRec = Engine.sumEvents(yEvs.filter((e) => e.status === 'received'), mode, convert);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const anyUnver = state.payments.some((p) => p.verified === false);
+  const allRec = Engine.receivedBetween(state, '2000-01-01', Engine.toISO(today), mode, convert, ids);            // depuis le tout 1er versement enregistré
+  const firstPay = (state.payments || []).filter((p) => (!ids || ids.has(p.holdingId)) && (p.payDate || p.exDate) && (p.payDate || p.exDate) <= Engine.toISO(today) && p.verified !== false && !p.estimated).map((p) => p.payDate || p.exDate).sort()[0] || null;
   const hs = visibleHoldings();
   const payers = hs.filter((h) => Engine.isPayer(h)).length;
   const missing = hs.filter((h) => Engine.dividendStatus(h) === 'missing');
@@ -119,6 +121,7 @@ function dividendKpisHtml() {
   const kpis = [
     kpi('Dividendes annuels estimés', money(run.total), 'Rythme sur 12 mois à dividendes actuels (estimation)<br>Année ' + y + ' : ' + money(yRec.total) + ' reçus + ' + money(yUp.total) + ' à venir = ' + money(yRec.total + yUp.total) + (netNote ? '<br>' + netNote : ''), 'income'),
     kpi('Reçus depuis le 1er janvier', rec.count ? money(rec.verified.total) : '—', rec.count ? (rec.count - rec.unverified) + ' versement(s) vérifié(s)' + (rec.unverified ? '<br>+ ' + money(rec.unverifiedSum.total) + ' à vérifier (' + rec.unverified + ', générés d\'après l\'historique de marché : voir Historique)' : '') : 'Aucun versement enregistré (voir Historique)', rec.verified.count ? 'income' : ''),
+    kpi('Total reçu depuis le début', allRec.verified.count ? money(allRec.verified.total) : '—', allRec.verified.count ? allRec.verified.count + ' versement(s) vérifié(s)' + (firstPay ? ' depuis le ' + esc(fmtDate(firstPay, { day: 'numeric', month: 'short', year: 'numeric' })) : '') + (allRec.unverified ? '<br>+ ' + money(allRec.unverifiedSum.total) + ' à vérifier (' + allRec.unverified + ')' : '') : 'Aucun versement confirmé (importez le relevé de compte)', allRec.verified.count ? 'income' : ''),
     kpi('Estimés pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
     kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
     kpi('Rendement sur coût', yoc.rate === null ? '—' : fmtPct(yoc.rate, 2), yoc.rate === null ? 'Renseignez le prix de revient de vos actifs' : 'Calculé sur ' + yoc.withCost + ' / ' + yoc.payers + ' actif(s) avec prix de revient'),

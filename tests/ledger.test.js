@@ -411,6 +411,17 @@ t('RELEVÉ DE COMPTE (suite) : date de paiement = date de valeur, colonnes « Mo
   assert.deepStrictEqual(r.unconfirmed.sort(), ['e3'], 'estimation de la période couverte sans versement correspondant (e2 antérieure au fichier, e4 trop récente pour être jugée)');
   assert.strictEqual(L.brokerDividendPayments(st, g, id, { createMissing: false }).unmatched.length, 1, 'sans option : titre inconnu non rattaché');
 });
+t('RELEVÉ DE COMPTE sans date de détachement : une estimation au montant faussé (split) est remplacée par la date de paiement seule ; un paiement éloigné reste non apparié', () => {
+  let n = 0; const id = () => 'w' + (++n);
+  const est = (i, ex, gross) => ({ id: i, holdingId: 'h', exDate: ex, qty: 10, perShare: gross / 10, gross, currency: 'EUR', estimated: true, source: 'market-history', verified: true });
+  const st = { holdings: [{ id: 'h', isin: 'FR0014003TT8', ticker: 'DSY', name: 'Dassault', currency: 'EUR', quantity: 10 }], archive: [], payments: [est('a', '2019-05-29', .13), est('b', '2020-05-28', .14), est('far', '2021-01-04', .1),
+    { id: 'dr', holdingId: 'h', payDate: '2021-06-20', gross: 1, currency: 'EUR', source: 'auto', verified: false }] };
+  const g = [{ isin: 'FR0014003TT8', name: 'Dassault', date: '2019-05-31', cur: 'EUR', gross: .65, tax: null, net: null }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2020-06-02', cur: 'EUR', gross: .7, tax: .1, net: .6 }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2021-06-01', cur: 'EUR', gross: .56, tax: null, net: null }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2022-06-01', cur: 'EUR', gross: .6, tax: null, net: null }];
+  const r = L.brokerDividendPayments(st, g, id, {});
+  assert.deepStrictEqual(r.replace.sort(), ['a', 'b', 'dr'], 'montants à ×5 d\'écart (split) : appariés par la date de paiement seule ; brouillon sans détachement apparié par sa date de paiement (≤ 20 j)');
+  assert.strictEqual(r.add.length, 4, 'tous les versements du relevé sont ajoutés'); assert.deepStrictEqual(r.add.map((x) => x.exDate), ['2019-05-29', '2020-05-28', null, null], 'détachement repris quand une estimation existe, sinon laissé vide (jamais inventé)');
+  assert.ok(!r.replace.includes('far'), 'estimation éloignée (> 45 j) : non touchée');
+});
 t('RELEVÉ DE COMPTE au format tableur (décimales « . », milliers « , » dans le solde) : mêmes dividendes que le CSV', () => {
   const csv = ['Date,Heure,Date de ,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
     '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Dividende,,EUR,11.40,EUR,"3,857.36",', '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Impôts sur dividende,,EUR,-2.85,EUR,"3,845.96",'].join('\n');

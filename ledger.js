@@ -801,7 +801,7 @@
   }
 
   /* Versements issus du relevé du courtier (source CONFIRMÉE) : rattachés aux positions (détenues ou clôturées) par ISIN, sans doublon (même versement déjà enregistré).
-     - une estimation de marché (« market-history ») ou un brouillon « à vérifier » du même versement est REMPLACÉ par le montant réel (meilleure correspondance de date et de montant, une estimation ne sert qu'une fois) ;
+     - une estimation de marché (« market-history ») ou un brouillon « à vérifier » du même versement est REMPLACÉ par le montant réel (1re passe : date et montant cohérents ; 2e passe : date de paiement seule, sans date de détachement ni contrôle du montant ; une estimation ne sert qu'une fois) ;
      - un titre absent de l'application (société que vous ne détenez plus) : une position archivée « relevé seul » est créée (opt.createMissing) pour y rattacher ses dividendes ;
      - estimations de la période couverte par le fichier SANS versement correspondant : listées (« non confirmées »), jamais supprimées.
      Pure : rien n'est modifié ; l'appelant applique (add, replace, stubs). opt : { createMissing, coverage: { from, to }, account } */
@@ -811,6 +811,7 @@
     const insts = (state.holdings || []).concat(state.archive || []), stubBy = new Map();
     const dayN = (d) => Date.parse(d) / 86400000;
     const sorted = (groups || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const pend = [];
     sorted.forEach((g) => {
       const key = g.isin ? canon(alias, g.isin) : null, nk = norm(g.name);
       let h = insts.find((x) => (key && canon(alias, holdingIsin(x)) === key) || (!key && g.name && norm(x.name) === nk)) || stubBy.get(key || nk);
@@ -823,15 +824,32 @@
       const extId = 'dgd:' + hash32([h.id, g.date, g.cur, g.gross].join('|'), 2166136261).toString(36);
       const same = mine.find((p) => p.extId === extId || (!p.estimated && p.source !== 'auto' && (p.payDate || p.exDate) && Math.abs(dayN(p.payDate || p.exDate) - dayN(g.date)) <= 4 && p.currency === g.cur && Math.abs(Number(p.gross) - g.gross) <= Math.max(0.05, 0.02 * g.gross)));
       if (same) { dups.push(g); return; }
-      // estimation / brouillon correspondant : détachement ≤ date de paiement ≤ détachement + 75 j ; même devise → montant à ±35 %
+      pend.push({ g, h, mine, extId, best: null });
+    });
+    const candidates = (x) => x.mine.filter((p) => !claimed.has(p.id) && ((p.estimated && p.source === 'market-history') || (p.source === 'auto' && p.verified === false)));
+    const claim = (x, p) => { x.best = p; claimed.add(p.id); replace.push(p.id); };
+    // passe 1 : détachement ≤ date de paiement ≤ détachement + 75 j ; même devise → montant à ±35 %
+    pend.forEach((x) => {
       let best = null, bs = 1e9;
-      mine.filter((p) => !claimed.has(p.id) && ((p.estimated && p.source === 'market-history') || (p.source === 'auto' && p.verified === false))).forEach((p) => {
-        const base = p.exDate || p.payDate; if (!base) return; const lag = dayN(g.date) - dayN(base); if (lag < -3 || lag > 75) return;
-        let sc = lag / 100; if (p.currency === g.cur) { const rel = Math.abs(Number(p.gross) - g.gross) / g.gross; if (rel > 0.35) return; sc += rel; } else sc += 1;
+      candidates(x).forEach((p) => {
+        const base = p.exDate || p.payDate; if (!base) return; const lag = dayN(x.g.date) - dayN(base); if (lag < -3 || lag > 75) return;
+        let sc = lag / 100; if (p.currency === x.g.cur) { const rel = Math.abs(Number(p.gross) - x.g.gross) / x.g.gross; if (rel > 0.35) return; sc += rel; } else sc += 1;
         if (sc < bs) { bs = sc; best = p; }
       });
-      if (best) { claimed.add(best.id); replace.push(best.id); }
-      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: best ? best.exDate || null : null, qty: best ? best.qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId });
+      if (best) claim(x, best);
+    });
+    // passe 2 : par la seule date de paiement, SANS détachement ni contrôle du montant (montant estimé faussé par un split, un acompte, une devise…) : le relevé fait foi
+    pend.filter((x) => !x.best).forEach((x) => {
+      let best = null, bs = 1e9;
+      candidates(x).forEach((p) => {
+        const lag = p.exDate ? dayN(x.g.date) - dayN(p.exDate) : (p.payDate ? Math.abs(dayN(x.g.date) - dayN(p.payDate)) : null);
+        if (lag === null || lag < -5 || lag > (p.exDate ? 45 : 20)) return;
+        if (Math.abs(lag) < bs) { bs = Math.abs(lag); best = p; }
+      });
+      if (best) claim(x, best);
+    });
+    pend.forEach((x) => { const g = x.g, h = x.h, best = x.best;
+      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: best ? best.exDate || null : null, qty: best ? best.qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId: x.extId });
     });
     const unconfirmed = [];
     if (opt.coverage && opt.coverage.from && opt.coverage.to) {

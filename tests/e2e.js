@@ -417,6 +417,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const k = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
     ok(/Reçus depuis le 1er janvier \| 10,00\s?€/.test(k), 'statistiques : reçus = 10 € — ' + k.slice(0, 300));
     ok(/\+\s?20,00\s?€\s?à vérifier/.test(k), 'statistiques : « à vérifier » séparé');
+    ok(/Total reçu depuis le début \| 10,00\s?€ \| 1 versement\(s\) vérifié\(s\) depuis le/.test(k), 'statistiques : total reçu depuis le 1er versement vérifié — ' + k.slice(0, 500));
     ok(/Année \d{4} : 30,00\s?€ reçus \+ 10,00\s?€ à venir = 40,00\s?€/.test(k), 'statistiques : ligne de réconciliation');
     await p.evaluate(() => go('history')); await p.waitForTimeout(200); await p.click('[data-do=validate-all]'); await p.click('#cdYes'); await p.waitForTimeout(300);
     eq((await storeOf(p)).payments.every((x) => x.verified !== false), true, 'tout validé');
