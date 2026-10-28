@@ -422,6 +422,25 @@ t('RELEVÉ DE COMPTE sans date de détachement : une estimation au montant fauss
   assert.strictEqual(r.add.length, 4, 'tous les versements du relevé sont ajoutés'); assert.deepStrictEqual(r.add.map((x) => x.exDate), ['2019-05-29', '2020-05-28', null, null], 'détachement repris quand une estimation existe, sinon laissé vide (jamais inventé)');
   assert.ok(!r.replace.includes('far'), 'estimation éloignée (> 45 j) : non touchée');
 });
+t('CONTRÔLE DES DIVIDENDES : orphelins rattachés ou supprimés, estimation en double d\'un versement réel, brut Trade Republic mal lu ; pur ; appliqué seulement sur sélection ; un autre portefeuille de quantité différente n\'est jamais touché', () => {
+  const H = (id, name, isin, qty, acc) => ({ id, name, isin, ticker: isin || name, currency: 'EUR', quantity: qty, account: acc });
+  const st = { holdings: [H('sap1', 'SAP', 'DE0007164600', 12, 'tr'), H('sap2', 'SAP SE', '', 12, 'pea'), H('al1', 'AIR LIQUIDE', 'FR0000120073', 16, 'deg'), H('al2', "L'Air Liquide S.A.", '', 30, 'nom')], archive: [H('tot', 'TOTALENERGIES SE', 'FR0000120271', 0, 'deg')], payments: [
+    { id: 'r1', holdingId: 'sap1', payDate: '2026-05-08', qty: 12, gross: 37.91, tax: 7.91, net: 30, currency: 'EUR', source: 'csv', verified: true, extId: '0573ed03-1d4d-435e-a0cd-5a810eb5711f' },
+    { id: 'a1', holdingId: 'sap2', payDate: '2026-05-06', qty: 12, gross: 30, currency: 'EUR', source: 'auto', verified: true },
+    { id: 'r2', holdingId: 'al1', payDate: '2026-05-20', qty: 16, gross: 55.5, currency: 'EUR', source: 'degiro', verified: true },
+    { id: 'a2', holdingId: 'al2', payDate: '2026-05-18', qty: 30, gross: 100.91, currency: 'EUR', source: 'auto', verified: true },
+    { id: 'o1', holdingId: 'gone', ticker: 'FR0000120271', name: 'TotalEnergies', payDate: '2026-01-05', gross: 34, currency: 'EUR', source: 'csv', verified: true },
+    { id: 'o2', holdingId: 'gone2', ticker: 'FR0000121329', name: 'Thales', payDate: '2024-05-22', gross: 1.25, currency: 'EUR', source: 'csv', verified: true },
+    { id: 'o3', holdingId: 'gone', name: 'TotalEnergies', payDate: '2026-04-02', gross: 34, currency: 'EUR', source: 'auto', verified: true }] };
+  const snap = JSON.stringify(st), au = L.auditPayments(st), kinds = (k) => au.items.filter((i) => i.kind === k).map((i) => i.payId).sort();
+  assert.strictEqual(JSON.stringify(st), snap, 'pure');
+  assert.deepStrictEqual([kinds('duplicate'), kinds('orphan_relink'), kinds('orphan_stub'), kinds('orphan_estimate'), kinds('tr_gross')], [['a1'], ['o1'], ['o2'], ['o3'], ['r1']], 'SAP en double (même quantité) ; Air Liquide (autre portefeuille, 30 ≠ 16 titres) non touché');
+  const r = L.applyAudit(st, au, new Set(au.items.filter((i) => i.kind !== 'tr_gross').map((i) => i.key)), (() => { let n = 0; return () => 's' + (++n); })());
+  assert.deepStrictEqual([r.removed, r.relinked, r.stubs, r.regrossed], [2, 2, 1, 0]); assert.strictEqual(st.payments.find((p) => p.id === 'o1').holdingId, 'tot', 'rattaché à la position archivée de même ISIN'); assert.ok(st.archive.some((h) => h.name === 'Thales' && h.statementOnly), 'société inconnue : position archivée « relevé seul »');
+  assert.ok(st.payments.some((p) => p.id === 'a2') && st.payments.find((p) => p.id === 'r1').gross === 37.91, 'ce qui n\'est pas coché n\'est pas modifié');
+  const au2 = L.auditPayments(st); L.applyAudit(st, au2, new Set(au2.items.map((i) => i.key)), () => 'x'); const r1 = st.payments.find((p) => p.id === 'r1'); assert.deepStrictEqual([r1.gross, r1.net, r1.tax], [30, 22.09, 7.91], 'brut = montant de l\'export, net = montant − retenue');
+  assert.strictEqual(L.auditPayments(st).items.length, 0, 'plus aucune anomalie');
+});
 t('RELEVÉ DE COMPTE au format tableur (décimales « . », milliers « , » dans le solde) : mêmes dividendes que le CSV', () => {
   const csv = ['Date,Heure,Date de ,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
     '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Dividende,,EUR,11.40,EUR,"3,857.36",', '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Impôts sur dividende,,EUR,-2.85,EUR,"3,845.96",'].join('\n');

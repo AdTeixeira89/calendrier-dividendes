@@ -113,7 +113,7 @@
     (state.payments || []).forEach((p) => {
       [p.exDate, p.payDate].forEach((d) => { if (d) taken.add(p.holdingId + '|' + ym(d)); });
       const date = p.payDate || p.exDate;
-      if (!date || date < fromISO || date > toISO_ || !keep(p.holdingId)) return;
+      if (!date || date < fromISO || date > toISO_ || !keep(p.holdingId) || !byId[p.holdingId]) return;
       const h = byId[p.holdingId];
       events.push(makeEvent({
         id: p.id, holdingId: p.holdingId, ticker: p.ticker || (h && (h.displayTicker || h.ticker)) || '?', name: p.name || (h && h.name) || '',
@@ -270,7 +270,8 @@
   }
 
   function receivedBetween(state, fromISO, toISOd, mode, convert, filterIds) {
-    const evs = (state.payments || []).filter((p) => { const d = p.payDate || p.exDate; return d && d >= fromISO && d <= toISOd && (!filterIds || filterIds.has(p.holdingId)); })
+    const known = new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));          // un versement dont la position n'existe plus n'est pas compté (contrôle des dividendes)
+    const evs = (state.payments || []).filter((p) => { const d = p.payDate || p.exDate; return d && d >= fromISO && d <= toISOd && known.has(p.holdingId) && (!filterIds || filterIds.has(p.holdingId)); })
       .map((p) => ({ currency: p.currency || 'EUR', gross: num(p.gross), net: p.net == null ? null : num(p.net), unverified: p.verified === false }));
     const s = sumEvents(evs, mode, convert);
     s.unverified = evs.filter((e) => e.unverified).length;
@@ -304,9 +305,9 @@
   }
 
   function yearlySeries(state, mode, convert, filterIds) {
-    const years = {};
+    const years = {}, known = new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));
     (state.payments || []).forEach((p) => {
-      if (filterIds && !filterIds.has(p.holdingId)) return;
+      if (filterIds && !filterIds.has(p.holdingId)) return; if (!known.has(p.holdingId)) return;
       const d = p.payDate || p.exDate; if (!d) return;
       const y = d.slice(0, 4);
       const c = convert(amount({ gross: num(p.gross), net: p.net == null ? null : num(p.net) }, mode).v, p.currency || 'EUR');

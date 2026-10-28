@@ -319,6 +319,22 @@ function openPaymentModal(id, preset) {
 }
 
 /* Valide d'un coup les versements générés d'après l'historique de marché (ils deviennent des versements « reçus »). */
+/* Contrôle des dividendes : doublons, versements orphelins, brut mal lu (Trade Republic). Rien n'est modifié avant validation ; annulable. */
+function openPaymentAudit() {
+  const audit = Ledger.auditPayments(state);
+  if (!audit.items.length) { toast('Aucune anomalie : aucun doublon ni versement orphelin.'); return; }
+  const groups = [['duplicate', 'Doublons : estimation + versement réel'], ['orphan_estimate', 'Estimations dont la position n\'existe plus'], ['orphan_relink', 'Versements réels à rattacher à leur position'], ['orphan_stub', 'Versements réels de sociétés non détenues'], ['tr_gross', 'Brut Trade Republic mal lu (le montant de l\'export est le brut)']];
+  const body = groups.map(([k, t]) => { const its = audit.items.filter((i) => i.kind === k); return its.length ? '<h3 style="margin:12px 0 4px;font-size:14px">' + t + ' (' + its.length + ')</h3><ul class="dg-list" style="list-style:none;margin:0;padding:0">' + its.map((i) => '<li style="padding:4px 0"><label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" data-au="' + esc(i.key) + '" ' + (i.def ? 'checked' : '') + '><span><b>' + esc(i.title) + '</b><br><span class="hint">' + esc(i.detail) + '</span></span></label></li>').join('') + '</ul>' : ''; }).join('');
+  const m = openModal('<h2>Contrôle des dividendes</h2><div class="sub">Ces anomalies faussent le total « reçu » : une estimation qui double un versement réel, des versements dont la position a été supprimée, un brut mal lu. Décochez ce que vous voulez conserver. <b>Rien n\'est modifié avant validation</b>, et l\'opération est annulable.</div>' + body +
+    '<div class="modal-actions"><span class="hint" id="auCount"></span><div class="btn-row"><button class="btn" type="button" data-close>Fermer</button><button class="btn primary" type="button" id="auGo">Appliquer la sélection</button></div></div>', { wide: true });
+  const sel = () => $$('[data-au]', m).filter((c) => c.checked).map((c) => c.dataset.au), upd = () => { $('#auCount', m).textContent = sel().length + ' / ' + audit.items.length + ' sélectionnée(s)'; };
+  m.addEventListener('change', upd); upd();
+  $('#auGo', m).onclick = () => {
+    const on = new Set(sel()); if (!on.size) return;
+    snapshotForUndo('contrôle des dividendes'); const r = Ledger.applyAudit(state, audit, on, uid); saveState(); closeModal(); renderPage();
+    toast((r.removed ? r.removed + ' supprimé(s)' : '') + (r.relinked ? (r.removed ? ' · ' : '') + r.relinked + ' rattaché(s)' : '') + (r.regrossed ? ((r.removed || r.relinked) ? ' · ' : '') + r.regrossed + ' brut corrigé(s)' : '') + '. Reçu depuis le 1er janvier : ' + money(Engine.receivedBetween(state, new Date().getFullYear() + '-01-01', todayISO(), incomeMode(), convert, visibleIds()).verified.total) + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
+}
 async function runValidateAll() {
   const n = state.payments.filter((p) => p.verified === false).length; if (!n) return;
   const c = await confirmDialog({ title: 'Valider ' + n + ' versement(s) ?', body: 'Ces versements ont été générés d\'après les dates de détachement passées, avec votre quantité actuelle et le montant brut théorique (sans retenue ni frais réels). Une fois validés, ils comptent comme <b>dividendes reçus</b>.', confirmLabel: 'Tout valider' });
@@ -573,7 +589,7 @@ function txFromRows(rows, hIdx, cols, opts) {
       let gross, net, taxv = tax && !isNaN(tax) ? tax : null;
       if (opts.divMode === 'gross') { gross = amount; net = taxv !== null ? Math.round((gross - taxv) * 100) / 100 : null; }
       else { net = amount; gross = Math.round((net + (taxv || 0)) * 100) / 100; }
-      out.dividends.push(Object.assign(base, { gross, net, tax: taxv, shares: isNaN(shares) ? null : shares }));
+      out.dividends.push(Object.assign(base, { gross, net, tax: taxv, shares: isNaN(shares) ? null : shares, basis: opts.divMode === 'gross' ? 'gross' : 'net' }));
     } else {
       let qty = isNaN(shares) ? NaN : shares, pr = isNaN(price) ? NaN : price;
       if ((isNaN(qty) || !qty) && !isNaN(amount) && pr) qty = amount / pr;
@@ -591,7 +607,7 @@ function renderTxMapping(rows, hIdx, prev) {
     shares: G('shares', ['shares', 'quantite', 'quantity', 'nombre', 'qty']), price: G('price', ['price', 'prix', 'cours']), amount: G('amount', ['amount', 'montant', 'total', 'valeur']), fee: G('fee', ['fee', 'frais', 'commission']), tax: G('tax', ['tax', 'impot', 'retenue', 'taxe']),
     cur: G('cur', ['currency', 'devise']), id: G('id', ['transaction id', 'transaction_id', 'id']) };
   const isTR = head.map(norm).includes('transaction_id') || head.map(norm).includes('asset_class');
-  const divMode = prev.divMode || 'net';
+  const divMode = prev.divMode || 'gross';
   const m = openModal('<h2>Importer des transactions</h2><div class="sub">' + (isTR ? 'Format <b>Trade Republic</b> reconnu. ' : '') + 'Vérifiez les colonnes, puis contrôlez le résultat avant d\'importer.</div>' +
     fld('Ligne d\'en-tête', '<select id="xH">' + rows.slice(0, 10).map((r, i) => opt(i, 'Ligne ' + (i + 1) + ' — ' + r.slice(0, 3).join(' / '), i === hIdx)).join('') + '</select>', '', 'xH') +
     '<div class="row2">' + fld('Date', colSelect('xdate', head, sel.date, false), '', 'xdate') + fld('Type d\'opération', colSelect('xtype', head, sel.type, false), 'Achat, vente, dividende…', 'xtype') + '</div>' +
@@ -600,7 +616,7 @@ function renderTxMapping(rows, hIdx, prev) {
     '<div class="row2">' + fld('Prix unitaire', colSelect('xprice', head, sel.price), '', 'xprice') + fld('Montant', colSelect('xamount', head, sel.amount), '', 'xamount') + '</div>' +
     '<div class="row2">' + fld('Frais', colSelect('xfee', head, sel.fee), '', 'xfee') + fld('Retenue / impôt', colSelect('xtax', head, sel.tax), '', 'xtax') + '</div>' +
     '<div class="row2">' + fld('Devise', colSelect('xcur', head, sel.cur), '', 'xcur') + fld('Identifiant de transaction (anti-doublon)', colSelect('xid', head, sel.id), '', 'xid') + '</div>' +
-    fld('Le montant d\'un dividende est…', '<select id="xmode">' + opt('net', 'le net reçu (après retenue) — cas Trade Republic', divMode === 'net') + opt('gross', 'le brut (avant retenue)', divMode === 'gross') + '</select>', 'Détermine le calcul du brut et du net enregistrés.', 'xmode') +
+    fld('Le montant d\'un dividende est…', '<select id="xmode">' + opt('gross', 'le brut (avant retenue) — cas Trade Republic', divMode === 'gross') + opt('net', 'le net reçu (après retenue)', divMode === 'net') + '</select>', 'Détermine le calcul du brut et du net enregistrés.', 'xmode') +
     fld('Portefeuille pour les nouveaux actifs', '<select id="xacc">' + state.accounts.map((a) => opt(a.id, a.name, (view.account !== 'all' ? view.account : state.accounts[0].id) === a.id)).join('') + '</select>', '', 'xacc') +
     '<div id="xSummary" class="notice info" style="margin-top:6px"></div><div id="xPrev"></div>' +
     '<label class="chk"><input type="checkbox" id="xNew" checked><span>Créer les actifs qui ne sont pas encore dans le portefeuille (quantité et prix de revient calculés)</span></label>' +
@@ -644,7 +660,7 @@ function commitTransactions(p, o) {
     touched.add(h);
     if (r.kind === 'dividend') {
       const pay = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || r.name, exDate: null, payDate: r.date, qty: r.shares || Engine.quantityAt(state, h, r.date) || h.quantity, perShare: r.shares ? Math.round(r.gross / r.shares * 10000) / 10000 : null,
-        gross: r.gross, tax: r.tax, fees: null, net: r.net, currency: r.currency || h.currency, source: 'csv', verified: true, extId: r.ext || undefined };
+        gross: r.gross, tax: r.tax, fees: null, net: r.net, currency: r.currency || h.currency, source: 'csv', verified: true, extId: r.ext || undefined, amountBasis: r.basis };
       const key = r.ext || Engine.paymentKey(pay);
       if (payKeys.has(key) || payKeys.has(Engine.paymentKey(pay))) { dupPay++; return; }
       payKeys.add(key); newPay.push(pay);

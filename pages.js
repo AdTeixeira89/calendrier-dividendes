@@ -40,6 +40,7 @@ function wireDo(host) {
     else if (a === 'prefill') runPrefill();
     else if (a === 'div-history') runDividendHistory();
     else if (a === 'validate-all') runValidateAll();
+    else if (a === 'audit-pay') openPaymentAudit();
   }));
 }
 function holdingById(id) { return state.holdings.find((h) => h.id === id); }
@@ -430,7 +431,7 @@ function renderHistory(host) {
       } }
     : { id: 'transactions', columns: txColumns(), rows: txRows(), getId: (t) => t.id, selectable: true, sortKey: 'date', sortDir: -1, deleteLabel: 'Supprimer la sélection', onBulkDelete: (ids) => confirmDeleteTransactions(ids),
       empty: '<div class="card empty"><h3>Aucune opération enregistrée</h3><p>Importez vos transactions (CSV Trade Republic ou autre) pour reconstituer vos achats, ventes et prix de revient.</p><button class="btn primary" data-do="import-tx" type="button">' + icon('upload') + 'Importer des transactions</button></div>' };
-  const unver = state.payments.filter((p) => p.verified === false).length;
+  const unver = state.payments.filter((p) => p.verified === false).length, audN = isPay ? Ledger.auditPayments(state).items.length : 0;
   host.innerHTML = pageHead('Historique', 'Dividendes effectivement reçus et opérations associées',
     '<button class="btn" type="button" data-do="import-tx">' + icon('upload') + 'Importer</button>' + (isPay ? '<button class="btn primary" type="button" data-do="add-payment">' + icon('plus') + 'Ajouter un versement</button>' : '')) +
     '<div class="toolbar"><div class="seg" id="hTab"><button type="button" data-t="payments" class="' + (isPay ? 'on' : '') + '">Dividendes reçus</button><button type="button" data-t="transactions" class="' + (!isPay ? 'on' : '') + '">Opérations</button></div>' +
@@ -440,6 +441,7 @@ function renderHistory(host) {
     (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Effectivement reçus (confirmés)</option><option value="estimated">Estimés (historique de marché)</option><option value="unverified">À vérifier</option></select>' : '') +
     '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Rechercher les dividendes passés</button><button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
     (isPay && state.transactions.some((t) => t.type === 'buy') && state.settings.relayUrl && !state.payments.some((p) => p.estimated || p.source === 'degiro') ? '<div class="notice info" style="margin-bottom:10px"><span><b>Complétez vos dividendes passés.</b> L\'application connaît vos achats et ventes datés : elle peut retrouver les dividendes versés aux dates où vous déteniez chaque titre (positions détenues et clôturées) et les ajouter après votre vérification.</span><button class="btn sm primary" type="button" data-do="div-history">Rechercher les dividendes passés</button></div>' : '') +
+    (audN ? '<div class="notice warn" style="margin-bottom:10px"><span><b>' + audN + ' anomalie(s) dans les dividendes</b> (doublons, versements sans position, brut mal lu) : le total « reçu » peut être surévalué.</span> <button class="btn sm" type="button" data-do="audit-pay">Contrôler</button></div>' : '') +
     (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais), ou acceptez-les tels quels : <button class="btn sm" type="button" data-do="validate-all" style="margin-left:6px">Tout valider</button></div>' : '') +
     '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Le net marqué * est incomplet : les versements sans net connu sont comptés en brut.</p>' : '');
   $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset; if (isPay) $('#hStatus', host).value = h.status;

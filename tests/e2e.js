@@ -245,7 +245,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('#xGo'); await p.waitForTimeout(1500);
     let s = await storeOf(p); eq(s.transactions.length, 3, '3 opérations'); eq(s.payments.length, 1, '1 dividende');
     const h = s.holdings[0]; eq(h.quantity, 15, 'quantité = 10 + 10 − 5'); ok(Math.abs(h.avgCost - ((1501 + 1701) / 20)) < 1e-6, 'PRU moyen pondéré = ' + h.avgCost);
-    const pay = s.payments[0]; eq([pay.net, pay.tax, pay.gross], [35.7, 15.3, 51], 'net reçu 35,70 + retenue 15,30 = brut 51,00'); eq(pay.payDate, '2026-05-20', 'date de paiement');
+    const pay = s.payments[0]; eq([pay.net, pay.tax, pay.gross], [20.4, 15.3, 35.7], 'montant de l\'export Trade Republic = brut 35,70 ; retenue 15,30 ; net 20,40'); eq(pay.payDate, '2026-05-20', 'date de paiement');
     await importIt(); await p.click('#xGo'); await p.waitForTimeout(800); s = await storeOf(p);
     eq([s.transactions.length, s.payments.length, s.holdings.length], [3, 1, 1], 'réimport : aucun doublon');
     await p.evaluate(() => go('history')); await p.waitForTimeout(200); ok(/35,70/.test(await p.locator('tbody').innerText()), 'dividende affiché dans l\'historique');
@@ -1301,6 +1301,22 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(await p.locator('#dErr:not(.hide)').count(), 'mauvais mot de passe refusé'); ok(fsOps.get('users/' + uid).exists, 'rien supprimé');
     await p.fill('#dPwd', 'motdepasse4'); await p.click('#dGo'); await p.waitForTimeout(800);
     ok(!fsOps.get('users/' + uid).exists && !users.has('erin@test.fr'), 'document et compte supprimés'); ok(await p.locator('#authRoot.on').count(), 'retour à la connexion');
+  });
+
+  await test('contrôle des dividendes : bandeau, estimation en double et versement orphelin proposés, rien avant validation, total « reçu » corrigé, annulable', async () => {
+    RELAY.old = false; const y = new Date().getFullYear();
+    const seed = SEED(0); seed.holdings = [{ id: 'sap', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 12, avgCost: 100, price: 150, account: 'main', logo: null, source: 'manual', addedAt: y + '-01-01', dividend: {} }];
+    const pay = (id, h, d, g, src, more) => Object.assign({ id, holdingId: h, ticker: 'SAP', name: 'SAP', payDate: d, qty: 12, gross: g, net: g, currency: 'EUR', source: src, verified: true }, more || {});
+    seed.payments = [pay('r', 'sap', y + '-02-10', 30, 'csv'), pay('a', 'sap', y + '-02-08', 30, 'auto'), pay('o', 'gone', y + '-03-10', 50, 'auto')];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
+    ok(/2 anomalie\(s\) dans les dividendes/.test(await p.locator('#page').innerText()), 'bandeau : 2 anomalies — ' + (await p.locator('#page').innerText()).slice(0, 200));
+    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300);
+    ok(/Total reçu depuis le début \| 60,00\s?€/.test((await p.locator('#page').innerText()).replace(/\n/g, ' | ')), 'le versement orphelin n\'est pas compté ; l\'estimation en double l\'est encore : 30 + 30 = 60 → ' + (await p.locator('#page').innerText()).replace(/\n/g, ' | ').slice(0, 400));
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=audit-pay]'); await p.waitForSelector('#auGo');
+    eq(await p.locator('[data-au]:checked').count(), 2, 'deux anomalies cochées par défaut'); eq((await storeOf(p)).payments.length, 3, 'rien de modifié avant validation');
+    await p.click('#auGo'); await p.waitForTimeout(400); const st = await storeOf(p); eq(st.payments.map((x) => x.id).sort(), ['r'], 'doublon et orphelin supprimés, versement réel conservé');
+    ok(!/anomalie\(s\) dans les dividendes/.test(await p.locator('#page').innerText()), 'bandeau disparu'); await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); eq((await storeOf(p)).payments.length, 3, 'annulable');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {

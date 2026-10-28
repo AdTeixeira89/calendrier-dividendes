@@ -859,7 +859,65 @@
     return { add, dups, unmatched, replace, stubs, unconfirmed };
   }
 
+  /* Contrôle des versements : trouve ce qui fausse les totaux « reçus » SANS rien modifier (pure). Chaque anomalie est une proposition cochable :
+     - orpheline : versement estimé dont la position n'existe plus → à supprimer ; versement réel (courtier / CSV / manuel) → rattaché à la position de la même société (ISIN, sinon nom) ou à une position archivée « relevé seul » ;
+     - doublon : estimation / brouillon « auto » qui double un versement réel de la même société (même position, ou autre position avec la même quantité) à ±25 jours (un détachement → paiement jusqu'à 75 j sur la même position) ;
+     - brut Trade Republic : versement CSV Trade Republic (identifiant UUID) dont le « montant » a été lu comme un net alors que l'export donne le brut (brut = net + retenue → brut = montant). */
+  function auditPayments(state) {
+    const insts = (state.holdings || []).concat(state.archive || []), byId = new Map(insts.map((h) => [h.id, h])), alias = state.isinAlias || {};
+    const sq = (s) => norm(s).replace(/ /g, ''), dayN = (d) => Date.parse(d) / 86400000, date = (p) => p.payDate || p.exDate || null;
+    const pref = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i; };
+    const sameName = (a, b) => { if (!a || !b) return false; const s = a.length <= b.length ? a : b, l = a.length <= b.length ? b : a; return (s.length >= 6 && l.includes(s)) || (s.length >= 3 && l.startsWith(s)) || pref(a, b) >= 8; };
+    const isinOf = (p) => { const t = String(p.isin || p.ticker || '').toUpperCase(); return isISIN(t) ? canon(alias, t) : ''; };
+    const findInst = (p) => { const k = isinOf(p); if (k) { const h = insts.find((x) => canon(alias, holdingIsin(x)) === k); if (h) return h; } const n = sq(p.name); return n ? insts.find((x) => sameName(n, sq(x.name))) || null : null; };
+    const isEst = (p) => !!p.estimated || p.source === 'auto', items = [], virt = new Map(), stubs = new Map();
+    const label = (p) => (p.name || p.ticker || '—') + ' · ' + (date(p) || '—') + ' · ' + r2(Number(p.gross) || 0) + ' ' + (p.currency || 'EUR');
+    (state.payments || []).forEach((p) => {
+      if (byId.has(p.holdingId)) { virt.set(p.id, p.holdingId); return; }
+      if (isEst(p)) { items.push({ key: 'o:' + p.id, kind: 'orphan_estimate', payId: p.id, def: true, title: label(p), detail: 'Estimation dont la position n\'existe plus : à supprimer (elle peut être régénérée par « Rechercher les dividendes passés »).' }); virt.set(p.id, null); return; }
+      const t = findInst(p);
+      if (t) { items.push({ key: 'o:' + p.id, kind: 'orphan_relink', payId: p.id, targetId: t.id, def: true, title: label(p), detail: 'Versement réel sans position : rattaché à « ' + (t.name || t.ticker) + ' ».' }); virt.set(p.id, t.id); return; }
+      const sk = isinOf(p) || sq(p.name) || p.holdingId; if (!stubs.has(sk)) stubs.set(sk, { key: sk, isin: isinOf(p), name: p.name || p.ticker || sk, currency: p.currency || 'EUR', last: date(p) || '' });
+      const sb = stubs.get(sk); if ((date(p) || '') > sb.last) sb.last = date(p);
+      items.push({ key: 'o:' + p.id, kind: 'orphan_stub', payId: p.id, stubKey: sk, def: true, title: label(p), detail: 'Versement réel sans position : rattaché à une position archivée « relevé seul » (' + (p.name || sk) + ').' }); virt.set(p.id, 'stub:' + sk);
+    });
+    // doublons : estimations ↔ versements réels (appariement un pour un, plus proche d'abord)
+    const real = (state.payments || []).filter((p) => !isEst(p) && date(p)), cands = [];
+    (state.payments || []).filter((p) => isEst(p) && byId.has(p.holdingId) && date(p)).forEach((e) => {
+      real.forEach((r) => {
+        const sameHolder = virt.get(r.id) === e.holdingId; let ok = false;
+        if (!sameHolder) { const he = byId.get(e.holdingId), hr = byId.get(virt.get(r.id)); const same = he && hr && ((holdingIsin(he) && canon(alias, holdingIsin(he)) === canon(alias, holdingIsin(hr))) || sameName(sq(he.name), sq(hr.name))); if (!same || !(Number(r.qty) > 0) || !(Number(e.qty) > 0) || Math.abs(r.qty - e.qty) / e.qty > 0.01) return; }
+        const dd = Math.abs(dayN(date(r)) - dayN(date(e))), lag = e.exDate && r.payDate ? dayN(r.payDate) - dayN(e.exDate) : -1;
+        ok = dd <= 25 || (sameHolder && lag >= 0 && lag <= 75); if (ok) cands.push({ e, r, d: Math.min(dd, lag >= 0 ? lag : 1e9) });
+      });
+    });
+    cands.sort((a, b) => a.d - b.d); const usedE = new Set(), usedR = new Set();
+    cands.forEach((c) => { if (usedE.has(c.e.id) || usedR.has(c.r.id)) return; usedE.add(c.e.id); usedR.add(c.r.id);
+      items.push({ key: 'd:' + c.e.id, kind: 'duplicate', payId: c.e.id, withId: c.r.id, def: true, title: label(c.e), detail: 'Estimation (' + (c.e.source === 'auto' ? 'générée d\'après l\'historique de marché' : 'marché') + ') qui double le versement réel du ' + date(c.r) + ' : ' + r2(Number(c.r.gross) || 0) + ' ' + (c.r.currency || 'EUR') + ' (' + (c.r.source === 'degiro' ? 'relevé DEGIRO' : c.r.source === 'csv' ? 'import CSV' : 'saisi') + '). À supprimer.' }); });
+    (state.payments || []).forEach((p) => {
+      if (p.source !== 'csv' || p.amountBasis || !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(p.extId || '')) || !(Number(p.tax) > 0) || p.net == null || Math.abs(Number(p.net) + Number(p.tax) - Number(p.gross)) > 0.011) return;   // identifiant UUID = export Trade Republic ; amountBasis absent = importé avant le choix brut/net
+      items.push({ key: 'g:' + p.id, kind: 'tr_gross', payId: p.id, def: true, title: label(p), detail: 'Le montant du CSV a été lu comme un net : brut ' + r2(Number(p.gross)) + ' → ' + r2(Number(p.net)) + ' (le montant de l\'export Trade Republic est le brut), net ' + r2(Number(p.net)) + ' → ' + r2(Number(p.net) - Number(p.tax)) + '.' });
+    });
+    return { items, stubs: Array.from(stubs.values()) };
+  }
+  /* Applique les propositions retenues (clés) ; l'appelant a pris l'instantané d'annulation. */
+  function applyAudit(state, audit, on, uid) {
+    const keep = (it) => on.has(it.key), ids = { del: new Set() }, stubId = new Map(), n = { removed: 0, relinked: 0, regrossed: 0, stubs: 0 };
+    const pay = new Map((state.payments || []).map((p) => [p.id, p]));
+    audit.items.filter(keep).forEach((it) => {
+      const p = pay.get(it.payId); if (!p) return;
+      if (it.kind === 'orphan_estimate' || it.kind === 'duplicate') { ids.del.add(p.id); n.removed++; }
+      else if (it.kind === 'orphan_relink') { const h = (state.holdings || []).concat(state.archive || []).find((x) => x.id === it.targetId); if (h) { p.holdingId = h.id; p.ticker = h.displayTicker || h.ticker; n.relinked++; } }
+      else if (it.kind === 'orphan_stub') {
+        if (!stubId.has(it.stubKey)) { const sb = audit.stubs.find((x) => x.key === it.stubKey); const h = { id: uid(), isin: sb.isin, ticker: sb.isin || sb.name, displayTicker: '', name: sb.name, currency: sb.currency, account: null, source: 'csv', closedAt: sb.last, userClosed: true, statementOnly: true, hist: null }; (state.archive = state.archive || []).push(h); stubId.set(it.stubKey, h.id); n.stubs++; }
+        p.holdingId = stubId.get(it.stubKey); n.relinked++;
+      } else if (it.kind === 'tr_gross') { const net = Number(p.net), tax = Number(p.tax); p.gross = r2(net); p.net = r2(net - tax); p.amountBasis = 'gross'; if (p.qty > 0 && p.perShare != null) p.perShare = Math.round(p.gross / p.qty * 10000) / 10000; n.regrossed++; }
+    });
+    if (ids.del.size) state.payments = state.payments.filter((p) => !ids.del.has(p.id));
+    return n;
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, brokerDividendPayments, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, brokerDividendPayments, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);
