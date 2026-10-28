@@ -192,7 +192,7 @@ async function refreshMarket(list, o) {
   // positions entièrement vendues : leurs cours passés servent à reconstituer la courbe de valeur
   let ares = null;
   if (!refreshCancel && !res.stopped && (list === state.holdings || list.length === visibleHoldings().length)) {
-    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && (!x.hist || x.marketAt !== nowISO));
+    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && (!x.hist || x.marketAt !== nowISO));
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;

@@ -345,7 +345,7 @@ async function runDividendHistory() {
   if (!state.settings.relayUrl) { toast('Renseignez d\'abord le relais de données (Paramètres) : l\'historique des dividendes vient des données de marché.', { error: true }); return; }
   const ids = visibleIds();
   // positions détenues ET positions clôturées (elles ont aussi perçu des dividendes tant qu\'elles étaient détenues)
-  const hs = visibleHoldings().concat((state.archive || []).filter((a) => !ids || ids.has(a.id))).filter((h) => !Engine.isAccumulating(h) && (h.ticker || h.isin));
+  const hs = visibleHoldings().concat((state.archive || []).filter((a) => !a.statementOnly && (!ids || ids.has(a.id)))).filter((h) => !Engine.isAccumulating(h) && (h.ticker || h.isin));
   if (!hs.length) { toast('Aucune action ou ETF distribuant à analyser.', { ms: 5000 }); return; }
   let cancelled = false;
   const m = openModal('<h2>Recherche des dividendes passés</h2><div class="sub">Analyse de vos positions (détenues et clôturées), de vos achats et ventes datés, puis de l\'historique des dividendes en espèces (données de marché Yahoo). Rien n\'est enregistré avant votre validation.</div><div class="progress"><i id="dhBar" style="width:0%"></i></div><div id="dhMsg" class="hint" style="margin-top:8px">Préparation…</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Annuler</button></div>', { onClose: () => { cancelled = true; } });

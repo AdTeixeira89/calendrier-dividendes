@@ -389,6 +389,33 @@ t('ACHATS MANUELS multiples : date + nombre d\'actions (prix et frais facultatif
   assert.strictEqual(st.transactions[1].amountAcct, null); assert.strictEqual(L.txAmount(st.transactions[1]), null); assert.strictEqual(JSON.stringify(st.holdings), snap, 'quantité et PRU de la position inchangés');
   const rm = L.removePurchase(st, st.transactions[1].id); assert.ok(rm.ok && st.transactions.length === 1); assert.strictEqual(L.removePurchase({ transactions: [{ id: 'x', source: 'degiro' }] }, 'x').ok, false, 'opération du courtier : pas supprimable ici');
 });
+t('RELEVÉ DE COMPTE (suite) : date de paiement = date de valeur, colonnes « Mouvements » / « Date de », titres non détenus (archive « relevé seul »), meilleure estimation appariée, estimations non confirmées listées', () => {
+  const csv = ['Date,Heure,Date de,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
+    '16-10-2024,07:44,15-10-2024,APPLE INC.,US0378331005,Dividende,,USD,"2,60",USD,"10,00",',
+    '16-10-2024,07:44,15-10-2024,APPLE INC.,US0378331005,Impôts sur dividende,,USD,"-0,39",USD,"9,61",',
+    '28-07-2026,11:37,17-11-2023,ANCIENNE SA,FR0000000001,Dividende,,EUR,"5,00",EUR,"20,00",',
+    '28-07-2026,11:38,17-11-2023,ANCIENNE SA,FR0000000001,Dividende,,EUR,"-5,00",EUR,"15,00",',
+    '12-12-2024,09:00,10-12-2024,VIEILLE SA,FR0000000002,Dividende,,EUR,"8,00",EUR,"23,00",',
+    '01-06-2026,09:00,01-06-2026,,,Dépôt flatex Deposit,,EUR,"100,00",EUR,"123,00",'].join('\n');
+  const { res, det } = parse(csv); assert.deepStrictEqual([det.cols.valueDate, det.cols.change, det.cols.changeCur], [2, 8, 7], 'colonnes reconnues'); assert.deepStrictEqual([res.meta.from, res.meta.to], ['2024-10-16', '2026-07-28'], 'période couverte');
+  const g = L.groupDividends(res.divs); assert.deepStrictEqual(g.map((x) => [x.isin, x.date, x.gross, x.net]).sort(), [['FR0000000002', '2024-12-10', 8, null], ['US0378331005', '2024-10-15', 2.6, 2.21]], 'paiement à la date de valeur ; dividende annulé (+5 puis −5) = rien');
+  let n = 0; const id = () => 'z' + (++n);
+  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10 }], archive: [], payments: [
+    { id: 'e1', holdingId: 'h', exDate: '2024-10-11', qty: 10, perShare: .26, gross: 2.6, currency: 'USD', estimated: true, source: 'market-history', verified: true },
+    { id: 'e2', holdingId: 'h', exDate: '2024-07-11', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true },
+    { id: 'e3', holdingId: 'h', exDate: '2025-02-10', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true },
+    { id: 'e4', holdingId: 'h', exDate: '2026-06-01', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true }] };
+  const r = L.brokerDividendPayments(st, g, id, { createMissing: true, coverage: { from: res.meta.from, to: res.meta.to }, account: 'a' });
+  assert.deepStrictEqual(r.replace, ['e1'], 'meilleure correspondance : l\'estimation du détachement 11 oct. (pas celle de juillet)'); assert.strictEqual(r.add.length, 2); assert.strictEqual(r.stubs.length, 1, 'société inconnue : une position archivée « relevé seul »');
+  assert.deepStrictEqual([r.stubs[0].isin, r.stubs[0].statementOnly, r.stubs[0].userClosed, r.stubs[0].account], ['FR0000000002', true, true, 'a']); assert.strictEqual(r.add.find((x) => x.holdingId === r.stubs[0].id).gross, 8, 'dividende rattaché à la société non détenue');
+  assert.deepStrictEqual(r.unconfirmed.sort(), ['e3'], 'estimation de la période couverte sans versement correspondant (e2 antérieure au fichier, e4 trop récente pour être jugée)');
+  assert.strictEqual(L.brokerDividendPayments(st, g, id, { createMissing: false }).unmatched.length, 1, 'sans option : titre inconnu non rattaché');
+});
+t('RELEVÉ DE COMPTE au format tableur (décimales « . », milliers « , » dans le solde) : mêmes dividendes que le CSV', () => {
+  const csv = ['Date,Heure,Date de ,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
+    '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Dividende,,EUR,11.40,EUR,"3,857.36",', '16-10-2026,07:44,15-10-2026,CREDIT AGRICOLE SA,FR0000045072,Impôts sur dividende,,EUR,-2.85,EUR,"3,845.96",'].join('\n');
+  const { res } = parse(csv); const g = L.groupDividends(res.divs); assert.deepStrictEqual(g.map((x) => [x.date, x.gross, x.tax, x.net]), [['2026-10-15', 11.4, 2.85, 8.55]]);
+});
 t('DIAGNOSTIC : quantités négatives, position calculée absente de la réalité, quantité nulle encore au portefeuille, écart de PRU, transactions incomplètes — avec cause et action', () => {
   const s = emptyState(); s.holdings.push(
     hold({ id: 'a', isin: 'FR0000120073', name: 'Zéro', quantity: 5, avgCost: 10, derived: true, source: 'degiro' }),

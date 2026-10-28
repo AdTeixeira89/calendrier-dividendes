@@ -75,7 +75,7 @@
      DÉTECTION DES COLONNES (par le sens, pas par un nom fixe)
      --------------------------------------------------------------- */
   const ROLE_TESTS = [
-    ['valueDate', /\b(date de valeur|value date|valutadatum|fecha valor|data valuta|valutadatum)\b/],
+    ['valueDate', /\b(date de valeur|value date|valutadatum|fecha valor|data valuta|valutadatum)\b|^date de$/],
     ['date', /^(date|datum|fecha|data|trade date|transaction date|date de transaction|date d execution|date operation|datum transactie)$/],
     ['time', /^(heure|time|uhrzeit|hora|tijd|ora|heure d execution)$/],
     ['isin', /\bisin\b/],
@@ -88,7 +88,7 @@
     ['qty', /^(quantite|quantity|aantal|anzahl|cantidad|quantita|nombre|number|shares|stuks|qty|nb|nombre de titres|nbre)$/],
     ['price', /^(cours|price|koers|kurs|prix|precio|prezzo|cotation|prix unitaire|unit price)( [a-z]{3})?$/],
     ['balance', /^(solde|saldo|balance|rekeningsaldo)$/],
-    ['change', /^(variation|mutatie|veranderung|cambio|movimiento|movement)$/],
+    ['change', /^(variation|mouvements?|mutatie|veranderung|cambio|movimientos?|movements?|bewegung|bewegingen)$/],
     ['type', /^(type|sens|side|buy sell|achat vente|b s|type d operation|operation type|transaction type|soort)$/],
     ['description', /^(description|omschrijving|beschreibung|descripcion|descrizione|operation|libelle)$/],
     ['currency', /^(devise|currency|munt|wahrung|waehrung|moneda|valuta|divisa)( .*)?$/],
@@ -196,6 +196,7 @@
       const line = base + i + 1, raw = r.map((c) => String(c == null ? '' : c).trim()).join(' ; ');
       const dateCell = g(r, 'date'), date = parseDate(dateCell, order);
       if (!date) { if (headerScore(r) >= 3) return; out.bad.push({ line, reason: 'Date illisible (« ' + dateCell + ' »)', raw }); return; }
+      if (!out.meta.from || date < out.meta.from) out.meta.from = date; if (!out.meta.to || date > out.meta.to) out.meta.to = date;      // période couverte par le fichier
       let time = parseTime(g(r, 'time')) || parseTime(dateCell);
       let name = g(r, 'product'), isin = g(r, 'isin').toUpperCase();
       const warn = [];
@@ -209,7 +210,7 @@
         if (!m) {
           const kind0 = otherKind(desc); out.other.push({ line, kind: kind0, desc, date, raw });
           // dividendes et retenues à la source du relevé de compte du courtier : source CONFIRMÉE (montant brut, retenue, devise réels)
-          if ((kind0 === 'dividende' || kind0 === 'retenue') && /dividend|dividende/.test(norm(desc))) { const a = num(g(r, 'change')), isTax = /impot|\btax\b|retenue|withholding|quellensteuer/.test(norm(desc)); if (!isNaN(a) && a !== 0 && (isin || name)) out.divs.push({ line, date, isin, name, kind: isTax ? 'tax' : 'dividend', amount: a, cur: (cols.changeCur !== undefined ? g(r, 'changeCur') : '').replace(/\s/g, '').toUpperCase() || det.acctCur || 'EUR' }); }
+          if ((kind0 === 'dividende' || kind0 === 'retenue') && /dividend|dividende/.test(norm(desc))) { const a = num(g(r, 'change')), isTax = /impot|\btax\b|retenue|withholding|quellensteuer/.test(norm(desc)); if (!isNaN(a) && a !== 0 && (isin || name)) out.divs.push({ line, date: (cols.valueDate !== undefined && parseDate(g(r, 'valueDate'), order)) || date, bookedAt: date, isin, name, kind: isTax ? 'tax' : 'dividend', amount: a, cur: (cols.changeCur !== undefined ? g(r, 'changeCur') : '').replace(/\s/g, '').toUpperCase() || det.acctCur || 'EUR' }); }
           if (kind0 === 'opération sur titres') { const rm = desc.match(/(\d+(?:[.,]\d+)?)\s*(?:pour|for|:|\/|contre|voor|zu)\s*(\d+(?:[.,]\d+)?)/i); out.corp.push({ line, date, isin, name, desc, ratio: rm ? parseNumber(rm[1], dec) / parseNumber(rm[2], dec) : null, source: 'csv' }); }
           return;
         }
@@ -799,25 +800,45 @@
     return Array.from(m.values()).filter((g) => g.gross > 0).map((g) => ({ isin: g.isin, name: g.name, date: g.date, cur: g.cur, gross: r2(g.gross), tax: g.hasTax ? r2(g.tax) : null, net: g.hasTax ? r2(g.gross - g.tax) : null, lines: g.lines }));
   }
 
-  /* Versements issus du relevé du courtier (source confirmée) : rattachés aux positions par ISIN, sans doublon (même versement déjà enregistré) ;
-     une estimation de marché (source « market-history ») du même détachement est remplacée par le montant réel. Rien d'autre n'est modifié. */
-  function brokerDividendPayments(state, groups, uid) {
-    const add = [], dups = [], unmatched = [], replace = []; const alias = state.isinAlias || {};
-    const insts = (state.holdings || []).concat(state.archive || []);
+  /* Versements issus du relevé du courtier (source CONFIRMÉE) : rattachés aux positions (détenues ou clôturées) par ISIN, sans doublon (même versement déjà enregistré).
+     - une estimation de marché (« market-history ») ou un brouillon « à vérifier » du même versement est REMPLACÉ par le montant réel (meilleure correspondance de date et de montant, une estimation ne sert qu'une fois) ;
+     - un titre absent de l'application (société que vous ne détenez plus) : une position archivée « relevé seul » est créée (opt.createMissing) pour y rattacher ses dividendes ;
+     - estimations de la période couverte par le fichier SANS versement correspondant : listées (« non confirmées »), jamais supprimées.
+     Pure : rien n'est modifié ; l'appelant applique (add, replace, stubs). opt : { createMissing, coverage: { from, to }, account } */
+  function brokerDividendPayments(state, groups, uid, opt) {
+    opt = opt || {};
+    const add = [], dups = [], unmatched = [], replace = [], stubs = [], claimed = new Set(); const alias = state.isinAlias || {};
+    const insts = (state.holdings || []).concat(state.archive || []), stubBy = new Map();
     const dayN = (d) => Date.parse(d) / 86400000;
-    (groups || []).forEach((g) => {
-      const key = g.isin ? canon(alias, g.isin) : null;
-      const h = insts.find((x) => (key && canon(alias, holdingIsin(x)) === key) || (!key && g.name && norm(x.name) === norm(g.name)));
-      if (!h) { unmatched.push(g); return; }
+    const sorted = (groups || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    sorted.forEach((g) => {
+      const key = g.isin ? canon(alias, g.isin) : null, nk = norm(g.name);
+      let h = insts.find((x) => (key && canon(alias, holdingIsin(x)) === key) || (!key && g.name && norm(x.name) === nk)) || stubBy.get(key || nk);
+      if (!h) {
+        if (!opt.createMissing || !(g.isin || g.name)) { unmatched.push(g); return; }
+        h = { id: uid(), isin: g.isin || '', ticker: g.isin || '', displayTicker: '', name: g.name || g.isin, currency: g.cur, account: opt.account || null, source: 'degiro', closedAt: g.date, userClosed: true, statementOnly: true, hist: null };
+        stubs.push(h); stubBy.set(key || nk, h);
+      }
       const mine = (state.payments || []).filter((p) => p.holdingId === h.id);
       const extId = 'dgd:' + hash32([h.id, g.date, g.cur, g.gross].join('|'), 2166136261).toString(36);
-      const same = mine.find((p) => p.extId === extId || (!p.estimated && (p.payDate || p.exDate) && Math.abs(dayN(p.payDate || p.exDate) - dayN(g.date)) <= 4 && p.currency === g.cur && Math.abs(Number(p.gross) - g.gross) <= Math.max(0.05, 0.02 * g.gross)));
+      const same = mine.find((p) => p.extId === extId || (!p.estimated && p.source !== 'auto' && (p.payDate || p.exDate) && Math.abs(dayN(p.payDate || p.exDate) - dayN(g.date)) <= 4 && p.currency === g.cur && Math.abs(Number(p.gross) - g.gross) <= Math.max(0.05, 0.02 * g.gross)));
       if (same) { dups.push(g); return; }
-      const est = mine.filter((p) => p.estimated && p.source === 'market-history' && p.exDate && dayN(p.exDate) <= dayN(g.date) && dayN(g.date) - dayN(p.exDate) <= 75 && (p.currency !== g.cur || Math.abs(Number(p.gross) - g.gross) <= 0.35 * g.gross));
-      if (est.length === 1) replace.push(est[0].id);
-      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: est.length === 1 ? est[0].exDate : null, qty: est.length === 1 ? est[0].qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId });
+      // estimation / brouillon correspondant : détachement ≤ date de paiement ≤ détachement + 75 j ; même devise → montant à ±35 %
+      let best = null, bs = 1e9;
+      mine.filter((p) => !claimed.has(p.id) && ((p.estimated && p.source === 'market-history') || (p.source === 'auto' && p.verified === false))).forEach((p) => {
+        const base = p.exDate || p.payDate; if (!base) return; const lag = dayN(g.date) - dayN(base); if (lag < -3 || lag > 75) return;
+        let sc = lag / 100; if (p.currency === g.cur) { const rel = Math.abs(Number(p.gross) - g.gross) / g.gross; if (rel > 0.35) return; sc += rel; } else sc += 1;
+        if (sc < bs) { bs = sc; best = p; }
+      });
+      if (best) { claimed.add(best.id); replace.push(best.id); }
+      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: best ? best.exDate || null : null, qty: best ? best.qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId });
     });
-    return { add, dups, unmatched, replace };
+    const unconfirmed = [];
+    if (opt.coverage && opt.coverage.from && opt.coverage.to) {
+      const last = dayN(opt.coverage.to) - 75, first = dayN(opt.coverage.from);
+      (state.payments || []).forEach((p) => { if (claimed.has(p.id) || !p.estimated || p.source !== 'market-history' || p.verified === false) return; const base = p.exDate || p.payDate; if (base && dayN(base) >= first && dayN(base) <= last) unconfirmed.push(p.id); });
+    }
+    return { add, dups, unmatched, replace, stubs, unconfirmed };
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,

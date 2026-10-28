@@ -383,8 +383,8 @@ function paymentColumns() {
     { key: 'net', label: 'Net', essential: true, align: 'r', sort: (p) => p.net, html: (p) => p.net == null ? '<span class="muted" title="Net inconnu">—</span>' : '<b class="pos">' + c(p, p.net) + '</b>' },
     { key: 'ex', label: 'Détachement', sort: (p) => p.exDate || '', html: (p) => esc(fmtDate(p.exDate)) },
     { key: 'currency', label: 'Devise', sort: (p) => p.currency, html: (p) => esc(p.currency) },
-    { key: 'status', label: 'Statut', essential: true, sort: (p) => (p.verified === false ? 1 : 0), html: (p) => (p.estimated ? '<span class="badge warn" title="Reconstitué d\'après vos opérations et l\'historique de marché : date de paiement et retenues non confirmées">Estimé</span>' : statusBadge('received', p.verified === false)) },
-    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', auto: 'Historique de marché', 'market-history': 'Historique de marché (estimé)' }[p.source] || p.source || '—') }
+    { key: 'status', label: 'Statut', essential: true, sort: (p) => (p.verified === false ? 1 : 0), html: (p) => (p.estimated && p.verified === false ? '<span class="badge warn" title="Estimation non confirmée par le relevé de compte : ne compte pas dans vos revenus">À vérifier</span>' : p.estimated ? '<span class="badge warn" title="Reconstitué d\'après vos opérations et l\'historique de marché : date de paiement et retenues non confirmées">Estimé</span>' : statusBadge('received', p.verified === false)) },
+    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', degiro: 'Relevé DEGIRO (confirmé)', auto: 'Historique de marché', 'market-history': 'Historique de marché (estimé)' }[p.source] || p.source || '—') }
   ];
 }
 function txRows() {

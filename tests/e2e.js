@@ -1051,6 +1051,26 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('relevé de compte DEGIRO : dividendes réels y compris sociétés non détenues, estimations confirmées (remplacées), estimations non confirmées marquées « à vérifier », achats du relevé non importés par défaut', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 10, avgCost: 150, price: 190, account: 'main', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: {} }];
+    seed.transactions = [{ id: 't1', holdingId: 'aapl', date: '2026-01-15', type: 'buy', qty: 10, price: 150, fees: 0, currency: 'USD', amountAcct: 1400, acctCur: 'EUR', source: 'degiro' }];
+    const est = (id, ex, g) => ({ id, holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: ex, payDate: null, qty: 10, perShare: g / 10, gross: g, currency: 'USD', source: 'market-history', estimated: true, verified: true });
+    seed.payments = [est('e1', '2026-05-11', 2.6), est('e3', '2026-02-09', 2.5)];
+    const csv = ['Date,Heure,Date de,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
+      '15-05-2026,07:44,14-05-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",USD,"10,00",', '15-05-2026,07:44,14-05-2026,APPLE INC.,US0378331005,Impôts sur dividende,,USD,"-0,39",USD,"9,61",',
+      '15-08-2026,07:44,14-08-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",USD,"12,00",', '04-03-2025,07:44,03-03-2025,ANCIENNE SA,FR0000000009,Dividende,,EUR,"5,00",EUR,"15,00",',
+      '05-01-2026,09:00,05-01-2026,,,Dépôt flatex Deposit,,EUR,"100,00",EUR,"123,00",', '28-10-2026,15:41,28-10-2026,APPLE INC.,US0378331005,"Achat 20 APPLE INC.@170 USD (US0378331005)",,USD,"-3400,00",USD,"-3400,00",abc'].join('\n');
+    const p = await device({ guest: true, seed }); p.setDefaultTimeout(15000); await p.open(); await dgOpen(p, csv, 'Account.csv');
+    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/3\s+dividende\(s\) du relevé de compte/.test(sum) && /1 ajoutée\(s\) aux positions clôturées/.test(sum) && /1\s+estimation\(s\) remplacée/.test(sum), 'résumé : ' + sum.slice(0, 420));
+    ok(await p.locator('#dgOpsRow').isVisible() && !(await p.locator('#dgOps').isChecked()), 'achats/ventes du relevé : case décochée par défaut (déjà des transactions)'); ok(await p.locator('#dgUnconfRow').isVisible() && /1<\/b> dividende/.test(await p.locator('#dgUnconfTxt').innerHTML()), 'estimation non confirmée signalée (1)');
+    await dgConfirm(p); await idle(p); const st = await storeOf(p);
+    eq(st.transactions.length, 1, 'achat du relevé non importé (pas de doublon avec Transactions)'); const dg = st.payments.filter((x) => x.source === 'degiro'); eq(dg.map((x) => [x.payDate, x.gross, x.tax, x.net]).sort(), [['2025-03-03', 5, null, null], ['2026-05-14', 2.6, 0.39, 2.21], ['2026-08-14', 2.6, null, null]].sort(), 'dividendes réels, à la date de valeur');
+    ok(!st.payments.some((x) => x.id === 'e1'), 'estimation confirmée remplacée'); eq(st.payments.find((x) => x.id === 'e3').verified, false, 'estimation non confirmée : « à vérifier »'); const stub = st.archive.find((a) => a.statementOnly); ok(stub && stub.isin === 'FR0000000009' && st.payments.some((x) => x.holdingId === stub.id && x.gross === 5), 'société non détenue : position archivée « relevé seul » + dividende rattaché');
+    await p.evaluate(() => { view.port.tab = 'closed'; go('portfolio'); renderPage(); }); await p.waitForTimeout(300); ok(!/ANCIENNE/.test(await p.locator('#page').innerText()), 'la position « relevé seul » n\'encombre pas l\'onglet Clôturées');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('contrôle : position calculée absente de vos positions réelles → archivage proposé ; une position saisie n\'est JAMAIS archivée automatiquement ; transactions conservées ; annulable', async () => {
     const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple réelle', quantity: 3, avgCost: 90 }), H(1, { ticker: 'OLD', displayTicker: 'OLD', isin: 'FR0000120271', name: 'Ancienne 2019', quantity: 5, avgCost: 10, source: 'degiro', derived: true })];
