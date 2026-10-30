@@ -137,7 +137,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.selectOption('#hFreq', 'quarterly'); await p.fill('#hDiv', '0.25'); await p.selectOption('#hMonth', '2'); await p.click('#hSave'); await p.waitForTimeout(200);
     const s = await storeOf(p); eq(s.holdings.length, 1, 'un actif'); eq(s.holdings[0].avgCost, 100, 'PRU'); eq(s.holdings[0].dividend.lastAmount, 0.25, 'dividende');
     await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300); const txt = await p.locator('#page').innerText();
-    ok(/Dividendes annuels estimés\s+5,00\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5 € — obtenu : ' + txt.slice(0, 160));
+    ok(/Prévision : dividendes annuels\s+5,00\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5 € — obtenu : ' + txt.slice(0, 160));
     ok(/Rendement sur coût\s+1,00\s?%/.test(txt), 'rendement sur coût = 5/500 = 1,00 % — obtenu : ' + txt);
     eq(p.errors, [], 'aucune erreur JS');
   });
@@ -194,7 +194,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(ev, [['h0', 'received']], 'un seul versement (reçu), pas de prévision en double, pas d\'ETF capitalisant');
     const rr = await p.evaluate(() => [Engine.runRate(state, 'gross', convert, null).total, Engine.runRate(state, 'net', convert, null).total]);
     eq(rr, [20, 14], 'annuel brut 20, net 14 (30 %), ETF capitalisant exclu');
-    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(250); await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/Dividendes annuels estimés\s+14,00\s?€/.test(await p.locator('#page').innerText()), 'KPI en net');
+    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(250); await p.click('[data-mode=net]'); await p.waitForTimeout(150); ok(/Prévision : dividendes annuels\s+14,00\s?€/.test(await p.locator('#page').innerText()), 'KPI en net');
   });
 
   await test('migration v1 → v2 : aucune donnée perdue, clé FMP et résultats supprimés', async () => {
@@ -251,25 +251,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => go('history')); await p.waitForTimeout(200); ok(/35,70/.test(await p.locator('tbody').innerText()), 'dividende affiché dans l\'historique');
   });
 
-  await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), anti-doublon, suppression multiple', async () => {
+  await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
     await p.click('[data-do=add-payment]'); await p.fill('#pPay', '2026-03-10'); await p.fill('#pQty', '10'); await p.fill('#pGross', '100'); await p.fill('#pTax', '30'); await p.fill('#pFees', '1');
     eq(await p.inputValue('#pNet'), '69', 'net = 100 − 30 − 1'); await p.click('#pSave'); await p.waitForTimeout(200);
     let s = await storeOf(p); eq(s.payments.length, 1, 'versement ajouté'); eq([s.payments[0].gross, s.payments[0].tax, s.payments[0].net], [100, 30, 69]);
-    await p.click('[data-do=add-payment]'); await p.fill('#pPay', '2026-03-10'); await p.fill('#pQty', '10'); await p.fill('#pGross', '100'); await p.click('#pSave'); await p.waitForTimeout(150);
-    eq((await storeOf(p)).payments.length, 1, 'doublon refusé'); ok(await p.locator('.toast.err:has-text("existe déjà")').count(), 'message clair');
-    await p.keyboard.press('Escape');
+    await p.click('[data-do=add-payment]'); await p.fill('#pPay', '2026-03-10'); await p.fill('#pQty', '10'); await p.fill('#pGross', '100'); await p.click('#pSave'); await p.waitForSelector('#cdYes'); ok(/identique/.test(await p.locator('.modal').innerText()), 'message clair : versement identique déjà enregistré'); await p.click('#cdNo'); await p.waitForTimeout(150);
+    eq((await storeOf(p)).payments.length, 1, 'refus de l\'ajout : rien n\'est ajouté');
+    await p.click('[data-do=add-payment]'); await p.fill('#pPay', '2026-03-10'); await p.fill('#pQty', '10'); await p.fill('#pGross', '100'); await p.click('#pSave'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(250);
+    eq((await storeOf(p)).payments.length, 2, 'deux versements légitimes identiques : conservés après confirmation explicite');
     await p.locator('thead [data-selall]').check(); await p.click('[data-seldel]'); await p.click('#cdYes'); await p.waitForTimeout(300); eq((await storeOf(p)).payments.length, 0, 'suppression multiple des versements');
-  });
-
-  await test('pré-remplissage de l\'historique : « à vérifier », sans doublon', async () => {
-    const seed = SEED(1); const y = new Date().getFullYear(); seed.holdings[0].dividend.history = [{ exDate: (y - 1) + '-05-10', amount: 1 }, { exDate: y + '-02-10', amount: 1 }];
-    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
-    await p.click('[data-do=prefill]'); await p.click('#cdYes'); await p.waitForTimeout(250);
-    let s = await storeOf(p); eq(s.payments.length, 2, '2 versements générés'); ok(s.payments.every((x) => x.verified === false && x.source === 'auto'), 'marqués à vérifier');
-    ok(await p.locator('.badge.warn:has-text("À vérifier")').count() >= 2, 'badge affiché');
-    await p.click('[data-do=prefill]').catch(() => {}); await p.waitForTimeout(250); eq((await storeOf(p)).payments.length, 2, 'pas de doublon au 2e passage');
   });
 
   await test('calendrier : statuts reçu / estimé distingués, filtres, enregistrement d\'un versement attendu', async () => {
@@ -402,26 +394,27 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(150); ok(!/blur/.test(await p.evaluate(() => getComputedStyle(document.querySelector('.tbl td')).filter)), 'le masquage ne concerne que l\'accueil');
   });
 
-  await test('accueil : « reçus » = versements vérifiés ; générés d\'après l\'historique comptés à part ; réconciliation annuel = reçus + à venir ; « Tout valider »', async () => {
+  await test('accueil : « perçus » = versements réels uniquement ; brouillons et estimations jamais comptés ; prévision séparée ; mise à jour réversible qui range les estimations', async () => {
     const y = new Date().getFullYear(); const seed = SEED(0);
     seed.holdings = [H(0, { ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 10, dividend: { lastAmount: 1, anchorMonth: 2, frequency: 'quarterly', dateKind: 'ex' } })];
     seed.payments = [
       { id: 'v1', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-01-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'manual', verified: true },
       { id: 'u1', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-04-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false },
-      { id: 'u2', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-07-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: false }];
+      { id: 'u2', holdingId: 'h0', ticker: 'AAA', name: 'Alpha', payDate: y + '-07-10', qty: 10, perShare: 1, gross: 10, net: 10, currency: 'EUR', source: 'auto', verified: true }];
     const p = await device({ guest: true, seed }); await p.open();
     const hm = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
-    ok(/Perçus \| 10\s?€/.test(hm), 'accueil : perçus = uniquement le versement vérifié (10 €) — ' + hm.slice(0, 400));
-    ok(/\+\s?20\s?€\s?à vérifier/.test(hm), 'accueil : montant « à vérifier » affiché séparément');
+    ok(/Perçus \| 10\s?€/.test(hm), 'accueil : perçus = uniquement le versement réel (10 €) — ' + hm.slice(0, 400)); ok(!/à vérifier/.test(hm), 'accueil : plus de montant « à vérifier » mélangé');
     await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(250);
     const k = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
-    ok(/Reçus depuis le 1er janvier \| 10,00\s?€/.test(k), 'statistiques : reçus = 10 € — ' + k.slice(0, 300));
-    ok(/\+\s?20,00\s?€\s?à vérifier/.test(k), 'statistiques : « à vérifier » séparé');
-    ok(/Total reçu depuis le début \| 10,00\s?€ \| 1 versement\(s\) vérifié\(s\) depuis le/.test(k), 'statistiques : total reçu depuis le 1er versement vérifié — ' + k.slice(0, 500));
-    ok(/Année \d{4} : 30,00\s?€ reçus \+ 10,00\s?€ à venir = 40,00\s?€/.test(k), 'statistiques : ligne de réconciliation');
-    await p.evaluate(() => go('history')); await p.waitForTimeout(200); await p.click('[data-do=validate-all]'); await p.click('#cdYes'); await p.waitForTimeout(300);
-    eq((await storeOf(p)).payments.every((x) => x.verified !== false), true, 'tout validé');
-    await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Perçus\s+30\s?€/.test(await p.locator('#page').innerText()), 'après validation : 30 € perçus');
+    ok(/Dividendes nets perçus depuis le 1er janvier \| 10,00\s?€ \| Brut 10,00\s?€ · retenues 0,00\s?€ \| 1 versement\(s\) réel\(s\)/.test(k), 'statistiques : net 10 €, brut 10 € — ' + k.slice(0, 500));
+    ok(/Dividendes bruts perçus \| 10,00\s?€/.test(k) && /Total net perçu depuis le début \| 10,00\s?€ \| Brut 10,00\s?€ · retenues 0,00\s?€ \| 1 versement\(s\) depuis le/.test(k), 'statistiques : brut et total depuis le début — ' + k.slice(0, 700));
+    ok(/Prévision : dividendes annuels/.test(k) && /perçus \+ .* à venir/.test(k), 'les prévisions sont étiquetées et séparées du perçu');
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(250); ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau : 2 estimations encore mélangées'); eq(await p.locator('#tblHost tbody tr').count(), 1, 'la liste ne montre que le versement réel');
+    await p.click('[data-do=div-migrate]'); await p.waitForSelector('#auGo'); eq((await storeOf(p)).payments.length, 3, 'simulation : rien n\'est modifié avant validation'); await p.click('#auGo'); await p.waitForTimeout(400);
+    let st = await storeOf(p); eq([st.payments.map((x) => x.id), st.estimates.map((x) => x.id).sort(), st.migrations.length], [['v1'], ['u1', 'u2'], 1], 'estimations rangées (conservées), versement réel intact, migration enregistrée');
+    ok(!/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau disparu');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); st = await storeOf(p); eq([st.payments.length, (st.estimates || []).length], [3, 0], 'annulation : état d\'origine rétabli');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Perçus\s+10\s?€/.test(await p.locator('#page').innerText()), 'perçu inchangé : 10 €');
   });
 
   await test('import CSV : les actifs déjà présents restent INTACTS (PRU, quantité, données), seuls les nouveaux sont ajoutés', async () => {
@@ -549,7 +542,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(r0['Plus/moins-value (EUR)'], '100', 'plus-value'); eq(r0['Secteur'], 'Technologie', 'secteur en français'); ok(/^"?'=HYPERLINK/.test(r0['Nom']), 'formule neutralisée : ' + r0['Nom']);
     ok(!/[€$]/.test(lines.slice(1).join('')), 'aucun symbole monétaire dans les nombres');
     const r1 = row(2); eq(r1['PRU'], '', 'PRU absent = vide (jamais 0)'); eq(r1['Plus/moins-value (EUR)'], '', 'pas de plus-value sans PRU'); ok(r1['Poids (%)'] !== '', 'poids calculé');
-    const dv = await grab('dividends'); const dl = dv.text.replace(/^﻿/, '').trim().split('\r\n'); eq(dl.length, 2, 'dividendes : 1 versement'); ok(dl[1].startsWith(y + '-03-10;;T0;') && dl[1].includes(';15;3;;12;EUR;Vérifié;manual'), 'versement exporté : ' + dl[1]);
+    const dv = await grab('dividends'); const dl = dv.text.replace(/^﻿/, '').trim().split('\r\n'); eq(dl.length, 2, 'dividendes : 1 versement'); ok(dl[1].startsWith(y + '-03-10;;T0;') && dl[1].includes(';15;3;;12;EUR;manual'), 'versement exporté : ' + dl[1]);
     const tx = await grab('transactions'); ok(tx.text.includes(';Achat;T0;') && tx.text.includes(';10;50,5;1;EUR;csv'), 'transaction exportée (décimale virgule) : ' + tx.text.slice(0, 200));
     const se = await grab('series'); const sl = se.text.replace(/^﻿/, '').trim().split('\r\n'); ok(sl.length > 12 && /^\d{4}-\d{2};[\d,]+;3$/.test(sl[sl.length - 1]), 'série mensuelle : ' + sl.length + ' lignes, dernière ' + sl[sl.length - 1]);
     // relisible par l'import de relevé : mêmes colonnes ticker / quantité / PRU détectées
@@ -919,7 +912,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const strip = async () => (await p.locator('.hero .perf-strip').innerText() + ' || ' + await p.locator('.hero .perf-line').innerText()).replace(/\s+/g, ' ');
     await p.selectOption('#acctSel', 'dg'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="0"]'); await p.waitForTimeout(300); let t = await strip();
     ok(/Performance · Tout/i.test(t) && /\+\s?490\s?€/i.test(t) && /Apports nets\s+\+2\s?200\s?€/i.test(t) && /Dividendes perçus\s+\+50\s?€/i.test(t), 'DEGIRO, depuis le début : gain 440 (marché) + 50 (dividendes) = 490, apports 2 200 séparés : ' + t.slice(0, 400));
-    ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(/dividendes « à vérifier » non comptés/i.test(t), 'dividende à vérifier signalé, non compté');
+    ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(!/à vérifier/i.test(t), 'le brouillon de 400 € (« auto ») n\'est ni compté ni affiché : seuls 50 € de dividendes réels');
     await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t) && /Apports nets\s+0\s?€/i.test(t), 'DEGIRO, 1 an : 2 400 → 2 640 + 50 de dividendes = 290, aucun apport : ' + t.slice(0, 300));
     ok(!/hors apports/i.test(t) && !/Performance · 1 an\s+\+\s?290\s?€\s+[+−-]?\d+,\d\s?%/i.test(t), 'le ratio « % hors apports » n\'est plus affiché : ' + t.slice(0, 200));
     await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(300); t = await strip(); ok(/raccourcie/i.test(t), '5 ans : historique plus court signalé : ' + t.slice(-250)); ok(await p.locator('#perSeg [data-per="60"].dim').count() === 1, 'bouton 5 ans atténué (historique plus court)');
@@ -929,7 +922,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await shot(p, 'perf-strip'); eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('dividendes passés : recherche d\'après les opérations importées, liste de vérification, éligibilité à la veille du détachement, doublons évités, titres sans historique non supposés détenus, ajout annulable', async () => {
+  await test('dividendes dus : calcul à la demande d\'après les opérations importées (lecture seule), éligibilité à la veille du détachement, rapprochement des versements réels, titres sans historique non supposés détenus ; jamais ajouté au perçu', async () => {
     RELAY.old = false;
     const seed = SEED(0); const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
     seed.holdings = [Object.assign({}, base, { id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, avgCost: 150, price: 190 }), Object.assign({}, base, { id: 'air', ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Air Liquide', currency: 'EUR', quantity: 5, avgCost: 140, price: 175 }),
@@ -937,29 +930,30 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.transactions = [{ id: 't1', holdingId: 'aapl', date: '2026-01-15', type: 'buy', qty: 10, price: 150, fees: 0, currency: 'USD', amountAcct: 1400, acctCur: 'EUR', source: 'degiro' }];
     seed.payments = [{ id: 'pre', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', payDate: '2026-05-14', exDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', source: 'manual', verified: true }];
     const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
-    await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo', { timeout: 20000 }); const t = (await p.locator('.modal').innerText()).replace(/\n/g, ' | ');
-    ok(/À valider\s*\|?\s*2/.test(t) || /2\s*\|?\s*À valider/i.test(t), 'AAPL : détachements du 9 févr. et du 10 août éligibles (le 11 mai est déjà enregistré, celui de 2025 antérieur à l\'achat) : ' + t.slice(0, 600));
-    ok(/estimations/.test(t) && /date non fournie/.test(t), 'estimé, date de paiement non inventée'); ok(/Air Liquide[^|]*aucune opération importée/.test(t) || /Air Liquide.*date d'acquisition inconnue/.test(t), 'titre sans opérations : non calculable, non supposé détenu'); ok(/iShares World.*ETF capitalisant/.test(t), 'ETF capitalisant exclu');
-    ok(/Déjà enregistrés \(ignorés\)\s*\|?\s*1/i.test(t) || /1\s*\|?\s*Déjà enregistrés/i.test(t), 'doublon détecté'); eq(await p.locator('[data-dh]').count(), 2, '2 lignes proposées');
-    await p.uncheck('[data-dh="0"]'); await p.waitForTimeout(100); ok(/1<\/b> versement|1\s+versement\(s\) sélectionné/.test(await p.locator('#dhTotal').innerHTML() + await p.locator('#dhTotal').innerText()), 'compteur de sélection');
-    await p.check('[data-dh="0"]'); eq((await storeOf(p)).payments.length, 1, 'rien n\'est enregistré avant validation'); await p.click('#dhGo'); await p.waitForTimeout(400);
-    let st = await storeOf(p); eq(st.payments.length, 3, '2 versements ajoutés, l\'existant intact'); const add = st.payments.filter((x) => x.source === 'market-history'); eq(add.map((x) => [x.exDate, x.qty, x.gross, x.net, x.payDate]).sort(), [['2026-02-09', 10, 2.5, null, null], ['2026-08-10', 10, 2.6, null, null]].sort(), 'quantité 10, montants bruts, net et date de paiement non inventés'); eq(st.payments.find((x) => x.id === 'pre').gross, 2.6, 'versement existant inchangé');
-    ok(/Estimé/.test(await p.locator('#tblHost').innerText()), 'badge « Estimé » dans l\'historique');
-    await p.click('[data-do=div-history]'); await p.waitForSelector('.modal .notice, #dhGo', { timeout: 20000 }); ok(/Aucun dividende nouveau/.test(await p.locator('.modal').innerText()), 'relance : plus rien à ajouter (aucun doublon)'); await p.keyboard.press('Escape');
+    await p.click('[data-do=div-history]'); await p.waitForSelector('[data-rec]', { timeout: 20000 }); const t = (await p.locator('.modal').innerText()).replace(/\n/g, ' | ');
+    ok(/Dus non enregistrés\s*\|?\s*2/.test(t) || /2\s*\|?\s*Dus non enregistrés/i.test(t), 'AAPL : détachements du 9 févr. et du 10 août dus (le 11 mai correspond au versement réel, celui de 2025 est antérieur à l\'achat) : ' + t.slice(0, 600));
+    ok(/ne sont jamais ajoutés à vos dividendes perçus/.test(t), 'le dû n\'est jamais ajouté au perçu'); ok(/Air Liquide[^|]*aucune opération importée/.test(t) || /Air Liquide.*date d'acquisition inconnue/.test(t), 'titre sans opérations : non calculable, non supposé détenu'); ok(/iShares World.*ETF capitalisant/.test(t), 'ETF capitalisant exclu');
+    ok(/Correspondent à un versement réel\s*\|?\s*1/i.test(t) || /1\s*\|?\s*Correspondent à un versement réel/i.test(t), 'versement réel rapproché'); eq(await p.locator('[data-rec]').count(), 2, '2 lignes dues'); eq((await storeOf(p)).payments.length, 1, 'rien n\'est enregistré (lecture seule)');
+    await p.click('[data-rec="1"]'); await p.waitForSelector('#pGross'); eq(await p.inputValue('#pEx'), '2026-02-09', 'saisie du versement réel : détachement prérempli'); await p.fill('#pPay', '2026-02-20'); await p.fill('#pGross', '2.5'); await p.click('#pSave'); await p.waitForTimeout(300);
+    let st = await storeOf(p); eq(st.payments.length, 2, 'le versement réel saisi est ajouté'); const nw = st.payments.find((x) => x.id !== 'pre'); eq([nw.source, nw.gross, nw.exDate, nw.payDate], ['manual', 2.5, '2026-02-09', '2026-02-20'], 'saisie manuelle = perçu ; montant saisi, rien d\'inventé');
+    await p.click('[data-do=div-history]'); await p.waitForSelector('[data-rec]', { timeout: 20000 }); eq(await p.locator('[data-rec]').count(), 1, 'après saisie : un seul dû non enregistré'); await p.keyboard.press('Escape');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('import du relevé de compte DEGIRO : dividendes réels (brut, retenue, net) ajoutés après validation, rattachés par ISIN, doublons ignorés, estimation de marché remplacée ; annulable', async () => {
+  await test('import du relevé de compte DEGIRO : dividendes réels (brut, retenue, net), rattachés par ISIN ; versement déjà saisi adopté (aucun doublon) ; estimations jamais comptées ni supprimées ; réimport = zéro doublon ; annulable', async () => {
     RELAY.old = false;
     const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 10, avgCost: 150, price: 190, account: 'main', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: {} }];
     seed.payments = [{ id: 'est', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: '2026-05-11', payDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', source: 'market-history', estimated: true, verified: true }, { id: 'man', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', payDate: '2026-08-14', qty: 10, gross: 2.6, currency: 'USD', source: 'manual', verified: true }];
     const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre', '14-05-2026,00:00,14-05-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"103,00",', '14-05-2026,00:00,14-05-2026,APPLE INC.,US0378331005,Impôt sur dividende,,USD,"-0,39",EUR,"102,61",',
       '14-08-2026,00:00,14-08-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"105,00",', '14-02-2026,00:00,14-02-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,50",EUR,"107,50",'].join('\n');
     const p = await device({ guest: true, seed }); await p.open(); await dgOpen(p, csv);
-    ok(/3\s+dividende\(s\) du relevé de compte/.test((await p.locator('#dgSummary').innerText()).replace(/\n/g, ' ')), 'dividendes du relevé détectés : ' + (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ').slice(0, 300));
-    ok(await p.locator('#dgDivRow').isVisible(), 'case dividendes visible'); await dgConfirm(p); await idle(p); const st = await storeOf(p);
+    const sm0 = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/3\s+dividende\(s\) du relevé de compte/.test(sm0) && /2<\/b> nouveau|2\s+nouveau/.test((await p.locator('#dgSummary').innerHTML()).replace(/<[^>]+>/g, '')) , 'dividendes du relevé détectés, 2 nouveaux : ' + sm0.slice(0, 400));
+    ok(await p.locator('#dgDivRow').isVisible(), 'case dividendes visible'); await dgConfirm(p); await idle(p); let st = await storeOf(p);
     const dg = st.payments.filter((x) => x.source === 'degiro').map((x) => [x.payDate, x.gross, x.tax, x.net]).sort(); eq(dg, [['2026-02-14', 2.5, null, null], ['2026-05-14', 2.6, 0.39, 2.21]].sort(), 'montants réels : retenue et net seulement quand le courtier les fournit');
-    ok(!st.payments.some((x) => x.id === 'est'), 'estimation de marché du même versement remplacée'); ok(st.payments.some((x) => x.id === 'man'), 'versement saisi à la main conservé (doublon du 14 août ignoré)'); eq(st.payments.length, 3, '3 versements : 14 févr., 14 mai (réel), 14 août (saisie)');
+    ok(st.payments.some((x) => x.id === 'est'), 'l\'estimation n\'est ni supprimée ni remplacée (jamais comptée dans le perçu)'); const man = st.payments.find((x) => x.id === 'man'); ok(man && man.source === 'manual' && man.extId, 'versement saisi à la main conservé et adopté (identifiant posé, pas de doublon du 14 août)'); eq(st.payments.length, 4, 'estimation + saisie + 2 nouveaux réels');
+    const p5 = await p.evaluate(() => Dividends.summary(state, { convert: (v) => v }).gross); ok(Math.abs(p5 - 7.7) < 1e-9, 'perçu = 3 versements réels = 7,70 (l\'estimation n\'en fait pas partie) : ' + p5);
+    const snap = JSON.stringify(st.payments); await dgOpen(p, csv); await dgConfirm(p).catch(() => {}); await idle(p); await p.waitForTimeout(300); st = await storeOf(p); eq(JSON.stringify(st.payments), snap, 'réimport du même fichier : état strictement identique, zéro doublon');
+    ok((st.dividendImports || []).length >= 1 && st.dividendImports[0].name, 'journal des importations conservé (nom du fichier, compte rendu)');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
@@ -1025,13 +1019,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.check('[data-selrow="b1"]'); await p.waitForTimeout(300); const sp2 = (await p.locator('#selPerf').innerText()).replace(/\s+/g, ' '); ok(/2 positions sélectionnées/.test(sp2) && /pourcentage non affiché/.test(sp2), 'Beta sans historique d\'achats : pourcentage non affiché, jamais un chiffre trompeur : ' + sp2.slice(0, 300));
     await p.uncheck('[data-selrow="a1"]'); await p.uncheck('[data-selrow="b1"]'); await p.waitForTimeout(200); eq(await p.locator('#selPerf .sel-perf').count(), 0, 'sans sélection : pas de carte');
     // dividendes passés : Alpha calculable d'après les achats saisis, Beta à compléter
-    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo'); const rows = await p.locator('.modal tbody tr').allInnerTexts();
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=div-history]'); await p.waitForSelector('[data-rec]'); const rows = await p.locator('.modal tbody tr').allInnerTexts();
     ok(rows.length === 3 && rows.every((r) => /Alpha/.test(r)), '3 versements éligibles pour Alpha : ' + rows.map((r) => r.replace(/\s+/g, ' ')).join(' / ')); ok(/10/.test(rows[0]) && /4/.test(rows[2]), 'quantité éligible : 4 au 9 févr., 10 ensuite : ' + rows.map((r) => r.replace(/\s+/g, ' ').slice(0, 60)).join(' / '));
     await p.click('[data-buys="b1"]'); await p.waitForSelector('#byDate'); ok(/Achats de Beta/.test(await p.locator('.modal').innerText()), 'lien « Saisir les achats » depuis la liste des titres non calculables');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('dividendes passés complétés : positions détenues ET clôturées, achats datés, brouillon « à vérifier » remplacé, montants perçus de l\'accueil mis à jour', async () => {
+  await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
     const seed = SEED(0); seed.holdings = [Object.assign({}, base, { id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, avgCost: 150, price: 190 })];
@@ -1040,19 +1034,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.transactions = [T('t1', 'aapl', '2026-01-15', 'buy', 10, 150), T('o1', 'old', '2024-01-10', 'buy', 5, 100), T('o2', 'old', '2025-06-01', 'sell', 5, 130)];
     seed.payments = [{ id: 'draft', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: '2026-02-09', payDate: null, qty: 10, perShare: .25, gross: 2.5, currency: 'USD', source: 'auto', verified: false }];
     const p = await device({ guest: true, seed }); p.setDefaultTimeout(15000); await p.open(); await p.evaluate(() => go('home')); await p.waitForTimeout(400);
-    ok(/Compléter l'historique/.test(await p.locator('#divCardEl').innerText()), 'accueil : lien « Compléter l\'historique »');
-    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); ok(/Complétez vos dividendes passés/.test(await p.locator('#page').innerText()), 'historique : invitation à compléter');
-    await p.click('[data-do=div-history]'); await p.waitForSelector('#dhGo', { timeout: 60000 }); const t = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
-    ok(/Air Liquide \(ancienne\) clôturée/.test(t), 'position clôturée proposée (dividendes perçus tant qu\'elle était détenue) : ' + t.slice(0, 500)); ok(/remplace 1 brouillon/.test(t), 'brouillon « à vérifier » remplacé, pas pris pour un doublon');
-    const rows = await p.locator('.modal tbody tr').allInnerTexts(); ok(rows.filter((r) => /Air Liquide/.test(r)).length === 2, '2 détachements pour l\'ancienne position (2024 et 2025 ; pas 2026 après la vente) : ' + rows.length + ' lignes');
-    ok(/Détachement passé/.test(t) && /il y a \d+ j/.test(t), 'vérification : détachement passé depuis N jours, détenu à la veille');
-    await p.click('#dhGo'); await p.waitForTimeout(500); const st = await storeOf(p); ok(!st.payments.some((x) => x.id === 'draft'), 'brouillon remplacé'); const add = st.payments.filter((x) => x.source === 'market-history');
-    ok(add.length >= 5 && add.every((x) => x.estimated && x.verified && x.payDate === null), add.length + ' dividendes estimés ajoutés, date de paiement non inventée'); ok(add.some((x) => x.holdingId === 'old'), 'rattachés aussi à la position clôturée');
-    ok(/perçus en \d{4}/.test(await p.locator('#toastRoot').innerText()), 'bilan des montants perçus affiché'); await p.evaluate(() => go('home')); await p.waitForTimeout(400); ok(/dont .* estimés/.test(await p.locator('#divCardEl').innerText()), 'accueil : « dont X estimés »');
+    ok(!/Compléter l'historique/.test(await p.locator('#divCardEl').innerText()), 'accueil : plus d\'invitation à ajouter des estimations aux dividendes');
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'historique : le brouillon est signalé comme estimation à ranger');
+    await p.click('[data-do=div-history]'); await p.waitForSelector('[data-rec]', { timeout: 60000 }); const t = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
+    ok(/Air Liquide \(ancienne\) clôturée/.test(t), 'position clôturée : dividendes dus tant qu\'elle était détenue : ' + t.slice(0, 500));
+    const rows = await p.locator('.modal tbody tr').allInnerTexts(); ok(rows.filter((r) => /Air Liquide/.test(r)).length === 2, '2 détachements pour l\'ancienne position (2024 et 2025 ; pas 2026 après la vente) : ' + rows.length + ' lignes'); ok(rows.some((r) => /Apple/.test(r) && /2026/.test(r)), 'le brouillon n\'est pas un versement réel : le dû d\'Apple reste à confirmer');
+    ok(/Détachement passé/.test(t) && /il y a \d+ j/.test(t), 'vérification : détachement passé depuis N jours, détenu à la veille'); eq((await storeOf(p)).payments.length, 1, 'rien n\'est enregistré');
+    await p.keyboard.press('Escape'); await p.evaluate(() => go('home')); await p.waitForTimeout(400); ok(/Perçus\s+—/.test(await p.locator('#divCardEl').innerText()), 'accueil : rien de perçu (aucun versement réel)');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('relevé de compte DEGIRO : dividendes réels y compris sociétés non détenues, estimations confirmées (remplacées), estimations non confirmées marquées « à vérifier », achats du relevé non importés par défaut', async () => {
+  await test('relevé de compte DEGIRO : dividendes réels y compris sociétés non détenues, estimations ni comptées ni supprimées, achats du relevé non importés par défaut', async () => {
     RELAY.old = false;
     const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', isin: 'US0378331005', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 10, avgCost: 150, price: 190, account: 'main', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', dividend: {} }];
     seed.transactions = [{ id: 't1', holdingId: 'aapl', date: '2026-01-15', type: 'buy', qty: 10, price: 150, fees: 0, currency: 'USD', amountAcct: 1400, acctCur: 'EUR', source: 'degiro' }];
@@ -1063,11 +1055,11 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
       '15-08-2026,07:44,14-08-2026,APPLE INC.,US0378331005,Dividende,,USD,"2,60",USD,"12,00",', '04-03-2025,07:44,03-03-2025,ANCIENNE SA,FR0000000009,Dividende,,EUR,"5,00",EUR,"15,00",',
       '05-01-2026,09:00,05-01-2026,,,Dépôt flatex Deposit,,EUR,"100,00",EUR,"123,00",', '28-10-2026,15:41,28-10-2026,APPLE INC.,US0378331005,"Achat 20 APPLE INC.@170 USD (US0378331005)",,USD,"-3400,00",USD,"-3400,00",abc'].join('\n');
     const p = await device({ guest: true, seed }); p.setDefaultTimeout(15000); await p.open(); await dgOpen(p, csv, 'Account.csv');
-    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/3\s+dividende\(s\) du relevé de compte/.test(sum) && /1 ajoutée\(s\) aux positions clôturées/.test(sum) && /1\s+estimation\(s\) remplacée/.test(sum), 'résumé : ' + sum.slice(0, 420));
-    ok(await p.locator('#dgOpsRow').isVisible() && !(await p.locator('#dgOps').isChecked()), 'achats/ventes du relevé : case décochée par défaut (déjà des transactions)'); ok(await p.locator('#dgUnconfRow').isVisible() && /1<\/b> dividende/.test(await p.locator('#dgUnconfTxt').innerHTML()), 'estimation non confirmée signalée (1)');
+    const sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | '); ok(/3\s+dividende\(s\) du relevé de compte/.test(sum) && /1 ajoutée\(s\) aux positions clôturées/.test(sum), 'résumé : ' + sum.slice(0, 420));
+    ok(await p.locator('#dgOpsRow').isVisible() && !(await p.locator('#dgOps').isChecked()), 'achats/ventes du relevé : case décochée par défaut (déjà des transactions)');
     await dgConfirm(p); await idle(p); const st = await storeOf(p);
     eq(st.transactions.length, 1, 'achat du relevé non importé (pas de doublon avec Transactions)'); const dg = st.payments.filter((x) => x.source === 'degiro'); eq(dg.map((x) => [x.payDate, x.gross, x.tax, x.net]).sort(), [['2025-03-03', 5, null, null], ['2026-05-14', 2.6, 0.39, 2.21], ['2026-08-14', 2.6, null, null]].sort(), 'dividendes réels, à la date de valeur');
-    ok(!st.payments.some((x) => x.id === 'e1'), 'estimation confirmée remplacée'); eq(st.payments.find((x) => x.id === 'e3').verified, false, 'estimation non confirmée : « à vérifier »'); const stub = st.archive.find((a) => a.statementOnly); ok(stub && stub.isin === 'FR0000000009' && st.payments.some((x) => x.holdingId === stub.id && x.gross === 5), 'société non détenue : position archivée « relevé seul » + dividende rattaché');
+    ok(['e1', 'e3'].every((id) => st.payments.some((x) => x.id === id && x.estimated)), 'estimations conservées telles quelles (ni remplacées ni supprimées) et jamais comptées dans le perçu'); const stub = st.archive.find((a) => a.statementOnly); ok(stub && stub.isin === 'FR0000000009' && st.payments.some((x) => x.holdingId === stub.id && x.gross === 5), 'société non détenue : position archivée « relevé seul » + dividende rattaché');
     await p.evaluate(() => { view.port.tab = 'closed'; go('portfolio'); renderPage(); }); await p.waitForTimeout(300); ok(!/ANCIENNE/.test(await p.locator('#page').innerText()), 'la position « relevé seul » n\'encombre pas l\'onglet Clôturées');
     eq(p.errors, [], 'aucune erreur JS');
   });
@@ -1303,19 +1295,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!fsOps.get('users/' + uid).exists && !users.has('erin@test.fr'), 'document et compte supprimés'); ok(await p.locator('#authRoot.on').count(), 'retour à la connexion');
   });
 
-  await test('contrôle des dividendes : bandeau, estimation en double et versement orphelin proposés, rien avant validation, total « reçu » corrigé, annulable', async () => {
+  await test('mise à jour des dividendes : versement orphelin rattaché, brut Trade Republic corrigé, estimations rangées ; rien avant validation ; annulable', async () => {
     RELAY.old = false; const y = new Date().getFullYear();
     const seed = SEED(0); seed.holdings = [{ id: 'sap', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 12, avgCost: 100, price: 150, account: 'main', logo: null, source: 'manual', addedAt: y + '-01-01', dividend: {} }];
     const pay = (id, h, d, g, src, more) => Object.assign({ id, holdingId: h, ticker: 'SAP', name: 'SAP', payDate: d, qty: 12, gross: g, net: g, currency: 'EUR', source: src, verified: true }, more || {});
-    seed.payments = [pay('r', 'sap', y + '-02-10', 30, 'csv'), pay('a', 'sap', y + '-02-08', 30, 'auto'), pay('o', 'gone', y + '-03-10', 50, 'auto')];
+    seed.payments = [pay('r', 'sap', y + '-02-10', 37.91, 'csv', { net: 30, tax: 7.91, extId: '0573ed03-1d4d-435e-a0cd-5a810eb5711f' }), pay('a', 'sap', y + '-02-08', 30, 'auto'), pay('o', 'gone', y + '-03-10', 50, 'csv', { ticker: 'DE0007164600', extId: 'zz' })];
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
-    ok(/2 anomalie\(s\) dans les dividendes/.test(await p.locator('#page').innerText()), 'bandeau : 2 anomalies — ' + (await p.locator('#page').innerText()).slice(0, 200));
-    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300);
-    ok(/Total reçu depuis le début \| 60,00\s?€/.test((await p.locator('#page').innerText()).replace(/\n/g, ' | ')), 'le versement orphelin n\'est pas compté ; l\'estimation en double l\'est encore : 30 + 30 = 60 → ' + (await p.locator('#page').innerText()).replace(/\n/g, ' | ').slice(0, 400));
-    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); await p.click('[data-do=audit-pay]'); await p.waitForSelector('#auGo');
-    eq(await p.locator('[data-au]:checked').count(), 2, 'deux anomalies cochées par défaut'); eq((await storeOf(p)).payments.length, 3, 'rien de modifié avant validation');
-    await p.click('#auGo'); await p.waitForTimeout(400); const st = await storeOf(p); eq(st.payments.map((x) => x.id).sort(), ['r'], 'doublon et orphelin supprimés, versement réel conservé');
-    ok(!/anomalie\(s\) dans les dividendes/.test(await p.locator('#page').innerText()), 'bandeau disparu'); await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); eq((await storeOf(p)).payments.length, 3, 'annulable');
+    ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau affiché');
+    await p.click('[data-do=div-migrate]'); await p.waitForSelector('#auGo'); eq(await p.locator('[data-au]:checked').count(), 2, 'deux corrections cochées (rattachement, brut)'); eq((await storeOf(p)).payments.length, 3, 'rien de modifié avant validation');
+    await p.click('#auGo'); await p.waitForTimeout(400); const st = await storeOf(p); eq(st.payments.map((x) => x.id).sort(), ['o', 'r'], 'estimation rangée ; réels conservés'); eq(st.estimates.map((x) => x.id), ['a'], 'estimation conservée à part');
+    eq([st.payments.find((x) => x.id === 'o').holdingId, st.payments.find((x) => x.id === 'r').gross, st.payments.find((x) => x.id === 'r').net], ['sap', 30, 22.09], 'orphelin rattaché à SAP ; brut = montant de l\'export (30), net = 30 − 7,91');
+    const tot = await p.evaluate(() => Dividends.summary(state, { convert: (v) => v }).gross); eq(tot, 80, 'perçu = 30 + 50');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); eq((await storeOf(p)).payments.length, 3, 'annulable');
     eq(p.errors, [], 'aucune erreur JS');
   });
 

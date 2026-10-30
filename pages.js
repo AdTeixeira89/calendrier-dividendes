@@ -37,10 +37,8 @@ function wireDo(host) {
     else if (a === 'refresh') refreshMarket(visibleHoldings());
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
-    else if (a === 'prefill') runPrefill();
     else if (a === 'div-history') runDividendHistory();
-    else if (a === 'validate-all') runValidateAll();
-    else if (a === 'audit-pay') openPaymentAudit();
+    else if (a === 'div-migrate') openDividendMigration();
   }));
 }
 function holdingById(id) { return state.holdings.find((h) => h.id === id); }
@@ -107,27 +105,28 @@ function dividendKpisHtml() {
   const yEvs = Engine.buildEvents(state, new Date(y, 0, 1), new Date(y, 11, 31), today, ids);
   const yRec = Engine.sumEvents(yEvs.filter((e) => e.status === 'received'), mode, convert);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
-  const anyUnver = state.payments.some((p) => p.verified === false);
-  const allRec = Engine.receivedBetween(state, '2000-01-01', Engine.toISO(today), mode, convert, ids);            // depuis le tout 1er versement enregistré
-  const firstPay = (state.payments || []).filter((p) => (!ids || ids.has(p.holdingId)) && (p.payDate || p.exDate) && (p.payDate || p.exDate) <= Engine.toISO(today) && p.verified !== false && !p.estimated).map((p) => p.payDate || p.exDate).sort()[0] || null;
+  const sm = rec.summary, all = Dividends.summary(state, { to: Engine.toISO(today), ids, convert }), firstPay = all.items.length ? all.items[all.items.length - 1].date : null;     // perçu = versements réels uniquement
+  const partial = (s) => s.netUnknown ? '<br><span class="warn-t">net partiel : ' + s.netUnknown + ' versement(s) sans net connu (brut ' + money(s.netUnknownGross) + ' non inclus)</span>' : '';
   const hs = visibleHoldings();
   const payers = hs.filter((h) => Engine.isPayer(h)).length;
   const missing = hs.filter((h) => Engine.dividendStatus(h) === 'missing');
   const first = next[0];
   const fa = first ? Engine.amount(first, mode) : null;
-  const allMissing = Array.from(new Set([].concat(run.missing, rec.missing, mSum.missing)));
+  const allMissing = Array.from(new Set([].concat(run.missing, mSum.missing)));
   const netNote = mode === 'net' && (run.fallbacks || mSum.fallbacks) ? 'Net inconnu pour ' + (run.fallbacks) + ' actif(s) : brut utilisé' : '';
 
   const kpi = kpiCard;
   const kpis = [
-    kpi('Dividendes annuels estimés', money(run.total), 'Rythme sur 12 mois à dividendes actuels (estimation)<br>Année ' + y + ' : ' + money(yRec.total) + ' reçus + ' + money(yUp.total) + ' à venir = ' + money(yRec.total + yUp.total) + (netNote ? '<br>' + netNote : ''), 'income'),
-    kpi('Reçus depuis le 1er janvier', rec.count ? money(rec.verified.total) : '—', rec.count ? (rec.count - rec.unverified) + ' versement(s) vérifié(s)' + (rec.unverified ? '<br>+ ' + money(rec.unverifiedSum.total) + ' à vérifier (' + rec.unverified + ', générés d\'après l\'historique de marché : voir Historique)' : '') : 'Aucun versement enregistré (voir Historique)', rec.verified.count ? 'income' : ''),
-    kpi('Total reçu depuis le début', allRec.verified.count ? money(allRec.verified.total) : '—', allRec.verified.count ? allRec.verified.count + ' versement(s) vérifié(s)' + (firstPay ? ' depuis le ' + esc(fmtDate(firstPay, { day: 'numeric', month: 'short', year: 'numeric' })) : '') + (allRec.unverified ? '<br>+ ' + money(allRec.unverifiedSum.total) + ' à vérifier (' + allRec.unverified + ')' : '') : 'Aucun versement confirmé (importez le relevé de compte)', allRec.verified.count ? 'income' : ''),
-    kpi('Estimés pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
+    kpi('Prévision : dividendes annuels', money(run.total), 'Rythme sur 12 mois à dividendes actuels (<b>prévision</b>, jamais ajoutée au perçu)<br>Année ' + y + ' : ' + money(yRec.total) + ' perçus + ' + money(yUp.total) + ' à venir' + (netNote ? '<br>' + netNote : ''), 'income'),
+    kpi('Dividendes nets perçus depuis le 1er janvier', sm.count ? money(sm.net) : '—', sm.count ? 'Brut ' + money(sm.gross) + ' · retenues ' + money(sm.tax) + (sm.taxUnknown ? '*' : '') + '<br>' + sm.count + ' versement(s) réel(s) (relevés, CSV, saisie)' + partial(sm) + (sm.unconverted ? '<br><span class="warn-t">' + sm.unconverted + ' versement(s) non convertis (taux absent)</span>' : '') : 'Aucun versement réel enregistré (importez un relevé)', sm.count ? 'income' : ''),
+    kpi('Dividendes bruts perçus', sm.count ? money(sm.gross) : '—', 'Avant retenues, depuis le 1er janvier', sm.count ? 'income' : ''),
+    kpi('Retenues fiscales', sm.count ? money(sm.tax) : '—', sm.count ? 'Retenues connues depuis le 1er janvier' + (sm.taxUnknown ? '<br><span class="warn-t">' + sm.taxUnknown + ' versement(s) sans retenue connue</span>' : '') : 'Aucune donnée'),
+    kpi('Total net perçu depuis le début', all.count ? money(all.net) : '—', all.count ? 'Brut ' + money(all.gross) + ' · retenues ' + money(all.tax) + '<br>' + all.count + ' versement(s)' + (firstPay ? ' depuis le ' + esc(fmtDate(firstPay, { day: 'numeric', month: 'short', year: 'numeric' })) : '') + partial(all) : 'Aucun versement réel enregistré', all.count ? 'income' : ''),
+    kpi('Prévision pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
     kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
     kpi('Rendement sur coût', yoc.rate === null ? '—' : fmtPct(yoc.rate, 2), yoc.rate === null ? 'Renseignez le prix de revient de vos actifs' : 'Calculé sur ' + yoc.withCost + ' / ' + yoc.payers + ' actif(s) avec prix de revient'),
     kpi('Actifs détenus', String(hs.length), payers + ' versent un dividende' + (missing.length ? ' · ' + missing.length + ' sans données' : '')),
-    kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) + (anyUnver ? ' (inclut des versements à vérifier)' : '') : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
+    kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) + '' : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
   ].join('');
 
   return '<div class="grid kpis">' + kpis + '</div>' + missingNote(allMissing);
@@ -361,16 +360,12 @@ function renderCalendar(host) {
    =============================================================== */
 function paymentRows() {
   const ids = visibleIds(), h = view.hist;
-  return state.payments.filter((p) => {
+  return Dividends.realPayments(state).filter((p) => {                    // uniquement les versements réellement perçus
     if (ids && !ids.has(p.holdingId)) return false;
     const d = p.payDate || p.exDate || '';
     if (h.year !== 'all' && d.slice(0, 4) !== h.year) return false;
     if (h.month !== 'all' && d.slice(5, 7) !== h.month) return false;
     if (h.asset !== 'all' && p.holdingId !== h.asset) return false;
-    if (h.status === 'verified' && (p.verified === false || p.estimated)) return false;
-    if (h.status === 'received' && (p.verified === false || p.estimated)) return false;
-    if (h.status === 'estimated' && !p.estimated) return false;
-    if (h.status === 'unverified' && p.verified !== false) return false;
     return true;
   });
 }
@@ -387,8 +382,8 @@ function paymentColumns() {
     { key: 'net', label: 'Net', essential: true, align: 'r', sort: (p) => p.net, html: (p) => p.net == null ? '<span class="muted" title="Net inconnu">—</span>' : '<b class="pos">' + c(p, p.net) + '</b>' },
     { key: 'ex', label: 'Détachement', sort: (p) => p.exDate || '', html: (p) => esc(fmtDate(p.exDate)) },
     { key: 'currency', label: 'Devise', sort: (p) => p.currency, html: (p) => esc(p.currency) },
-    { key: 'status', label: 'Statut', essential: true, sort: (p) => (p.verified === false ? 1 : 0), html: (p) => (p.estimated && p.verified === false ? '<span class="badge warn" title="Estimation non confirmée par le relevé de compte : ne compte pas dans vos revenus">À vérifier</span>' : p.estimated ? '<span class="badge warn" title="Reconstitué d\'après vos opérations et l\'historique de marché : date de paiement et retenues non confirmées">Estimé</span>' : statusBadge('received', p.verified === false)) },
-    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', degiro: 'Relevé DEGIRO (confirmé)', auto: 'Historique de marché', 'market-history': 'Historique de marché (estimé)' }[p.source] || p.source || '—') }
+    { key: 'broker', label: 'Courtier / compte', essential: true, sort: (p) => accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account), html: (p) => esc(accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account)) },
+    { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', degiro: 'Relevé DEGIRO' }[p.source] || p.source || '—') + (p.origin && p.origin.file ? '<div class="muted" style="font-size:11px">' + esc(p.origin.file) + '</div>' : '') }
   ];
 }
 function txRows() {
@@ -417,37 +412,47 @@ function txColumns() {
 
 function renderHistory(host) {
   const h = view.hist;
-  const years = Array.from(new Set(state.payments.map((p) => (p.payDate || p.exDate || '').slice(0, 4)).concat(state.transactions.map((t) => (t.date || '').slice(0, 4))).filter(Boolean))).sort().reverse();
+  const years = Array.from(new Set(Dividends.realPayments(state).map((p) => (p.payDate || p.exDate || '').slice(0, 4)).concat(state.transactions.map((t) => (t.date || '').slice(0, 4))).filter(Boolean))).sort().reverse();
   const assets = visibleHoldings().slice().sort((a, b) => (a.name || a.ticker).localeCompare(b.name || b.ticker));
   const isPay = h.tab === 'payments';
   const cfg = isPay
     ? { id: 'history', columns: paymentColumns(), rows: paymentRows(), getId: (p) => p.id, selectable: true, sortKey: 'date', sortDir: -1, deleteLabel: 'Supprimer la sélection', onOpen: (id) => openPaymentModal(id), onBulkDelete: (ids) => confirmDeletePayments(ids),
-      empty: '<div class="card empty"><h3>Aucun versement enregistré</h3><p>Saisissez vos dividendes reçus, importez vos transactions (Trade Republic…) ou pré-remplissez l\'historique d\'après les dates passées.</p><div class="btn-row" style="justify-content:center"><button class="btn primary" data-do="add-payment" type="button">' + icon('plus') + 'Ajouter un versement</button><button class="btn" data-do="import-tx" type="button">' + icon('upload') + 'Importer des transactions</button><button class="btn" data-do="prefill" type="button">Pré-remplir depuis l\'historique</button></div></div>',
+      empty: '<div class="card empty"><h3>Aucun versement enregistré</h3><p>Saisissez vos dividendes reçus, importez vos transactions (Trade Republic…) ou saisissez vos versements.</p><div class="btn-row" style="justify-content:center"><button class="btn primary" data-do="add-payment" type="button">' + icon('plus') + 'Ajouter un versement</button><button class="btn" data-do="import-tx" type="button">' + icon('upload') + 'Importer des transactions</button><button class="btn" data-do="prefill" type="button">Pré-remplir depuis l\'historique</button></div></div>',
       footer: (rows) => {
-        const ev = rows.map((p) => ({ currency: p.currency || 'EUR', gross: Number(p.gross) || 0, net: p.net == null ? null : Number(p.net), tax: p.tax }));
-        const g = Engine.sumEvents(ev, 'gross', convert), n = Engine.sumEvents(ev, 'net', convert);
-        const tx = Engine.sumEvents(rows.filter((p) => p.tax != null).map((p) => ({ currency: p.currency || 'EUR', gross: Math.abs(Number(p.tax)) })), 'gross', convert);
-        return { date: rows.length + ' versement(s)', gross: money(g.total), tax: money(tx.total), net: money(n.total) + (n.fallbacks ? '*' : '') };
+        const sm = Dividends.summary(Object.assign({}, state, { payments: rows }), { convert });
+        return { date: rows.length + ' versement(s)', gross: money(sm.gross), tax: money(sm.tax) + (sm.taxUnknown ? '*' : ''), net: money(sm.net) + (sm.netUnknown ? '*' : '') };
       } }
     : { id: 'transactions', columns: txColumns(), rows: txRows(), getId: (t) => t.id, selectable: true, sortKey: 'date', sortDir: -1, deleteLabel: 'Supprimer la sélection', onBulkDelete: (ids) => confirmDeleteTransactions(ids),
       empty: '<div class="card empty"><h3>Aucune opération enregistrée</h3><p>Importez vos transactions (CSV Trade Republic ou autre) pour reconstituer vos achats, ventes et prix de revient.</p><button class="btn primary" data-do="import-tx" type="button">' + icon('upload') + 'Importer des transactions</button></div>' };
-  const unver = state.payments.filter((p) => p.verified === false).length, audN = isPay ? Ledger.auditPayments(state).items.length : 0;
+  const mig = isPay ? Dividends.planMigration(state) : null;
   host.innerHTML = pageHead('Historique', 'Dividendes effectivement reçus et opérations associées',
     '<button class="btn" type="button" data-do="import-tx">' + icon('upload') + 'Importer</button>' + (isPay ? '<button class="btn primary" type="button" data-do="add-payment">' + icon('plus') + 'Ajouter un versement</button>' : '')) +
     '<div class="toolbar"><div class="seg" id="hTab"><button type="button" data-t="payments" class="' + (isPay ? 'on' : '') + '">Dividendes reçus</button><button type="button" data-t="transactions" class="' + (!isPay ? 'on' : '') + '">Opérations</button></div>' +
     '<select id="hYear" aria-label="Année" style="width:auto"><option value="all">Toutes les années</option>' + years.map((y) => '<option value="' + y + '">' + y + '</option>').join('') + '</select>' +
     '<select id="hMonth" aria-label="Mois" style="width:auto"><option value="all">Tous les mois</option>' + MOIS.map((m, i) => '<option value="' + pad2(i + 1) + '">' + m + '</option>').join('') + '</select>' +
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
-    (isPay ? '<select id="hStatus" aria-label="Statut" style="width:auto"><option value="all">Tous les statuts</option><option value="verified">Effectivement reçus (confirmés)</option><option value="estimated">Estimés (historique de marché)</option><option value="unverified">À vérifier</option></select>' : '') +
-    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Rechercher les dividendes passés</button><button class="btn" type="button" data-do="prefill">Pré-remplir</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
-    (isPay && state.transactions.some((t) => t.type === 'buy') && state.settings.relayUrl && !state.payments.some((p) => p.estimated || p.source === 'degiro') ? '<div class="notice info" style="margin-bottom:10px"><span><b>Complétez vos dividendes passés.</b> L\'application connaît vos achats et ventes datés : elle peut retrouver les dividendes versés aux dates où vous déteniez chaque titre (positions détenues et clôturées) et les ajouter après votre vérification.</span><button class="btn sm primary" type="button" data-do="div-history">Rechercher les dividendes passés</button></div>' : '') +
-    (audN ? '<div class="notice warn" style="margin-bottom:10px"><span><b>' + audN + ' anomalie(s) dans les dividendes</b> (doublons, versements sans position, brut mal lu) : le total « reçu » peut être surévalué.</span> <button class="btn sm" type="button" data-do="audit-pay">Contrôler</button></div>' : '') +
-    (isPay && unver ? '<div class="notice info" style="margin-bottom:10px">' + unver + ' versement(s) générés d\'après l\'historique de marché sont marqués « À vérifier » : ouvrez-les pour confirmer le montant réel (retenue, frais), ou acceptez-les tels quels : <button class="btn sm" type="button" data-do="validate-all" style="margin-left:6px">Tout valider</button></div>' : '') +
-    '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Le net marqué * est incomplet : les versements sans net connu sont comptés en brut.</p>' : '');
-  $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset; if (isPay) $('#hStatus', host).value = h.status;
-  ['hYear:year', 'hMonth:month', 'hAsset:asset', 'hStatus:status'].forEach((x) => { const [id, k] = x.split(':'); const el = $('#' + id, host); if (el) el.onchange = (e) => { h[k] = e.target.value; renderHistory(host); }; });
+    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Dividendes dus</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
+    (mig && !mig.empty ? '<div class="notice warn" style="margin-bottom:10px"><span><b>Mise à jour des dividendes disponible.</b> ' + (mig.estimates.length ? mig.estimates.length + ' estimation(s) sont encore mélangées aux versements (elles ne sont déjà plus comptées dans le « perçu ») ' : '') + (mig.items.length ? (mig.estimates.length ? ' et ' : '') + mig.items.length + ' correction(s) de rattachement / de brut sont proposées' : '') + '. Rien n\'est supprimé ; annulable.</span> <button class="btn sm" type="button" data-do="div-migrate">Voir et appliquer</button></div>' : '') +
+    '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Uniquement les versements réellement perçus (relevés, CSV, saisie). Un total marqué * est partiel : certains versements n\'ont ni retenue ni net connus (non estimés, non remplacés par le brut).</p>' : '');
+  $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset;
+  ['hYear:year', 'hMonth:month', 'hAsset:asset'].forEach((x) => { const [id, k] = x.split(':'); const el = $('#' + id, host); if (el) el.onchange = (e) => { h[k] = e.target.value; renderHistory(host); }; });
   $$('#hTab [data-t]', host).forEach((b) => b.onclick = () => { h.tab = b.dataset.t; renderHistory(host); });
   Tbl.render($('#tblHost'), cfg); wireDo(host);
+}
+
+/* Perçu par courtier, par entreprise et par mois (moteur central : versements réels uniquement). Un clic ouvre le détail. */
+function dividendBreakdownHtml(y) {
+  const today = new Date(), ids = visibleIds(), cv = convert, yr = Dividends.summary(state, { from: y + '-01-01', to: y + '-12-31', year: y, ids, convert: cv }), all = Dividends.summary(state, { to: Engine.toISO(today), ids, convert: cv });
+  if (!all.count) return '';
+  const cell = (v, partial) => money(v) + (partial ? '*' : ''), yBy = new Map(yr.byCompany.map((c) => [c.key, c]));
+  const brokers = '<section class="card card-pad"><h3>Perçu par courtier / compte</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Courtier / compte</th><th class="r">' + y + ' brut</th><th class="r">' + y + ' net</th><th class="r">Depuis le début : net</th></tr></thead><tbody>' +
+    all.byBroker.map((b) => { const yb = yr.byBroker.find((x) => x.id === b.id) || { gross: 0, net: 0 }; return '<tr><td><b>' + esc(b.name) + '</b> <span class="muted">' + b.count + ' versement(s)</span></td><td class="r">' + money(yb.gross) + '</td><td class="r">' + money(yb.net) + '</td><td class="r">' + money(b.net) + '</td></tr>'; }).join('') + '</tbody></table></div></section>';
+  const cos = '<section class="card card-pad"><h3>Perçu par entreprise <span class="muted" style="font-weight:500">· cliquez pour le détail</span></h3><div class="tbl-wrap" style="max-height:340px"><table class="tbl"><thead><tr><th>Entreprise</th><th class="r">' + y + ' brut</th><th class="r">Depuis le début : brut</th><th class="r">net</th></tr></thead><tbody>' +
+    all.byCompany.map((c) => { const yc = yBy.get(c.key) || { gross: 0 }; return '<tr class="clickable" data-co="' + esc(c.key) + '" style="cursor:pointer"><td><b>' + esc(c.name) + '</b> <span class="muted">' + esc(c.brokers.join(', ')) + '</span></td><td class="r">' + money(yc.gross) + '</td><td class="r">' + money(c.gross) + '</td><td class="r">' + money(c.net) + '</td></tr>'; }).join('') + '</tbody></table></div></section>';
+  const months = '<section class="card card-pad"><h3>Historique mensuel ' + y + ' (perçu)</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Mois</th><th class="r">Versements</th><th class="r">Brut</th><th class="r">Retenues</th><th class="r">Net</th></tr></thead><tbody>' +
+    yr.byMonth.map((m, i) => '<tr><td>' + MOIS[i] + '</td><td class="r">' + m.count + '</td><td class="r">' + (m.count ? money(m.gross) : '—') + '</td><td class="r">' + (m.count ? money(m.tax) : '—') + '</td><td class="r">' + (m.count ? money(m.net) : '—') + '</td></tr>').join('') +
+    '</tbody><tfoot><tr><td><b>Total ' + y + '</b></td><td class="r"><b>' + yr.count + '</b></td><td class="r"><b>' + money(yr.gross) + '</b></td><td class="r"><b>' + cell(yr.tax, yr.taxUnknown) + '</b></td><td class="r"><b>' + cell(yr.net, yr.netUnknown) + '</b></td></tr></tfoot></table></div></section>';
+  return '<div class="grid two even section-gap">' + brokers + months + '</div><div class="section-gap">' + cos + '</div>';
 }
 
 /* ===============================================================
@@ -467,15 +472,17 @@ function renderStats(host) {
   host.innerHTML = pageHead('Statistiques', 'Évolution des revenus et prévisions · montants en ' + esc(baseCur()), modeSeg()) +
     dividendKpisHtml() + '<div class="grid two even section-gap">' +
     '<section class="card card-pad"><div class="page-head" style="margin-bottom:6px"><h3 style="margin:0">Revenus mensuels ' + y + '</h3><div class="btn-row"><button class="btn sm icon" type="button" data-yr="-1" aria-label="Année précédente">‹</button><button class="btn sm icon" type="button" data-yr="1" aria-label="Année suivante">›</button></div></div>' +
-    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Reçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
+    stackedBars({ labels: MOIS_C, cur: baseCur(), title: 'Revenus mensuels', layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir (estimés / confirmés)', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] }) + '</section>' +
     '<section class="card card-pad"><h3>Répartition par actif (revenu annuel estimé)</h3>' + (dist.total ? donut(dist.items, baseCur()) : '<div class="muted">Aucune prévision disponible.</div>') + '</section></div>' +
     '<div class="grid two even section-gap">' +
     '<section class="card card-pad"><h3>Prévision des 12 prochains mois <span class="muted" style="font-weight:500">· ' + money(f12Total, 0) + '</span></h3>' +
     stackedBars({ labels: f12.map((m) => MOIS_C[m.month]), cur: baseCur(), title: 'Prévision 12 mois', layers: [{ name: 'Confirmé / reçu', color: 'var(--chart-1)', values: f12.map((m) => m.confirmed) }, { name: 'Estimé', color: 'var(--chart-1)', faded: true, values: f12.map((m) => m.value - m.confirmed) }] }) + '</section>' +
-    '<section class="card card-pad"><h3>Dividendes reçus par année</h3>' + (yearly.length ? stackedBars({ labels: yearly.map((x) => String(x.year)), cur: baseCur(), title: 'Dividendes reçus par année', layers: [{ name: 'Reçus (vérifiés)', color: 'var(--chart-1)', values: yearly.map((x) => x.verified) }, { name: 'À vérifier', color: 'var(--chart-3)', values: yearly.map((x) => x.unverified) }] }) : '<div class="muted">Aucun versement enregistré : saisissez-les ou importez vos transactions (Historique).</div>') + '</section></div>' +
+    '<section class="card card-pad"><h3>Dividendes reçus par année</h3>' + (yearly.length ? stackedBars({ labels: yearly.map((x) => String(x.year)), cur: baseCur(), title: 'Dividendes reçus par année', layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: yearly.map((x) => x.verified) }] }) : '<div class="muted">Aucun versement enregistré : saisissez-les ou importez vos transactions (Historique).</div>') + '</section></div>' +
+    dividendBreakdownHtml(y) +
     missingNote(run.missing) +
     '<section class="card card-pad section-gap"><h3>Principaux contributeurs</h3>' + (top.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Actif</th><th class="r">Revenu annuel est.</th><th class="r">Part</th></tr></thead><tbody>' + top.map((t) => '<tr><td><b>' + esc(t.name || t.ticker) + '</b> <span class="muted">' + esc(t.ticker) + '</span></td><td class="r">' + money(t.value) + '</td><td class="r">' + fmtPct(run.total ? t.value / run.total : 0, 1) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="muted">Aucun actif ne verse de dividende.</div>') + '</section>' +
     (acc.length ? '<section class="card card-pad section-gap"><h3>ETF capitalisants (aucun dividende versé)</h3><div class="muted">' + acc.map((h) => esc(h.name || h.displayTicker || h.ticker)).join(' · ') + '</div></section>' : '');
   wireMode(host); wireDo(host);
+  $$('[data-co]', host).forEach((tr) => tr.onclick = () => openCompanyDividends(tr.dataset.co));
   $$('[data-yr]', host).forEach((b) => b.onclick = () => { view.stats.year += Number(b.dataset.yr); renderStats(host); });
 }

@@ -793,70 +793,44 @@
     const m = new Map();
     (divs || []).forEach((d) => {
       const k = (d.isin || norm(d.name)) + '|' + d.date + '|' + d.cur;
-      const g = m.get(k) || { isin: d.isin, name: d.name, date: d.date, cur: d.cur, gross: 0, tax: 0, hasTax: false, lines: [] };
-      if (d.kind === 'dividend') g.gross += d.amount; else { g.tax += Math.abs(d.amount); g.hasTax = true; }
+      const g = m.get(k) || { isin: d.isin, name: d.name, date: d.date, cur: d.cur, gross: 0, tax: 0, hasTax: false, pos: [], neg: [], taxes: [], lines: [] };
+      if (d.kind === 'dividend') { g.gross += d.amount; (d.amount >= 0 ? g.pos : g.neg).push(Math.abs(d.amount)); } else { g.tax += Math.abs(d.amount); g.hasTax = true; g.taxes.push(Math.abs(d.amount)); }
       g.lines.push(d.line); m.set(k, g);
     });
-    return Array.from(m.values()).filter((g) => g.gross > 0).map((g) => ({ isin: g.isin, name: g.name, date: g.date, cur: g.cur, gross: r2(g.gross), tax: g.hasTax ? r2(g.tax) : null, net: g.hasTax ? r2(g.gross - g.tax) : null, lines: g.lines }));
+    // plusieurs lignes « Dividende » identiques le même jour (deux versements légitimes de même montant) : elles restent des versements distincts (parts), sauf annulation / correction ambiguë
+    const parts = (g) => {
+      const pos = g.pos.map((x) => Math.round(x * 100)), neg = g.neg.map((x) => Math.round(x * 100));
+      for (const n of neg) { const i = pos.indexOf(n); if (i < 0) return 1; pos.splice(i, 1); }
+      const tx = g.taxes.map((x) => Math.round(x * 100));
+      if (pos.length > 1 && pos.every((x) => x === pos[0]) && (!tx.length || (tx.length === pos.length && tx.every((x) => x === tx[0])))) return pos.length;
+      return 1;
+    };
+    return Array.from(m.values()).filter((g) => g.gross > 0).map((g) => ({ isin: g.isin, name: g.name, date: g.date, cur: g.cur, gross: r2(g.gross), tax: g.hasTax ? r2(g.tax) : null, net: g.hasTax ? r2(g.gross - g.tax) : null, parts: parts(g), lines: g.lines }));
   }
 
-  /* Versements issus du relevé du courtier (source CONFIRMÉE) : rattachés aux positions (détenues ou clôturées) par ISIN, sans doublon (même versement déjà enregistré).
-     - une estimation de marché (« market-history ») ou un brouillon « à vérifier » du même versement est REMPLACÉ par le montant réel (1re passe : date et montant cohérents ; 2e passe : date de paiement seule, sans date de détachement ni contrôle du montant ; une estimation ne sert qu'une fois) ;
-     - un titre absent de l'application (société que vous ne détenez plus) : une position archivée « relevé seul » est créée (opt.createMissing) pour y rattacher ses dividendes ;
-     - estimations de la période couverte par le fichier SANS versement correspondant : listées (« non confirmées »), jamais supprimées.
-     Pure : rien n'est modifié ; l'appelant applique (add, replace, stubs). opt : { createMissing, coverage: { from, to }, account } */
-  function brokerDividendPayments(state, groups, uid, opt) {
-    opt = opt || {};
-    const add = [], dups = [], unmatched = [], replace = [], stubs = [], claimed = new Set(); const alias = state.isinAlias || {};
-    const insts = (state.holdings || []).concat(state.archive || []), stubBy = new Map();
-    const dayN = (d) => Date.parse(d) / 86400000;
+  /* Versements du relevé du courtier → éléments normalisés pour Dividends.reconcile (source RÉELLE).
+     - rattachement à la position du MÊME compte par ISIN (alias compris), sinon par nom ; un titre absent de ce compte (société non détenue) reçoit une position archivée « relevé seul » (opt.createMissing) ;
+     - les comptes restent indépendants : une position d'un autre compte n'est jamais utilisée quand le compte est connu (opt.account) ;
+     - l'identifiant stable est posé par Dividends.stableIds ; legacyStatementId reproduit l'ancien identifiant pour ne jamais dupliquer un versement déjà importé.
+     Pure : l'appelant applique (stubs, puis Dividends.reconcile / applyReconcile). opt : { createMissing, account, file, broker } */
+  function legacyStatementId(holdingId, date, cur, gross) { return 'dgd:' + hash32([holdingId, date, cur, gross].join('|'), 2166136261).toString(36); }
+  function statementDividends(state, groups, uid, opt) {
+    opt = opt || {}; const incoming = [], unmatched = [], stubs = [], stubBy = new Map(), alias = state.isinAlias || {};
+    const insts = (state.holdings || []).concat(state.archive || []), scoped = opt.account ? insts.filter((x) => x.account === opt.account) : insts;
     const sorted = (groups || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    const pend = [];
     sorted.forEach((g) => {
       const key = g.isin ? canon(alias, g.isin) : null, nk = norm(g.name);
-      let h = insts.find((x) => (key && canon(alias, holdingIsin(x)) === key) || (!key && g.name && norm(x.name) === nk)) || stubBy.get(key || nk);
+      let h = scoped.find((x) => key && canon(alias, holdingIsin(x)) === key) || scoped.find((x) => !key && g.name && norm(x.name) === nk) || stubBy.get(key || nk);
       if (!h) {
         if (!opt.createMissing || !(g.isin || g.name)) { unmatched.push(g); return; }
         h = { id: uid(), isin: g.isin || '', ticker: g.isin || '', displayTicker: '', name: g.name || g.isin, currency: g.cur, account: opt.account || null, source: 'degiro', closedAt: g.date, userClosed: true, statementOnly: true, hist: null };
         stubs.push(h); stubBy.set(key || nk, h);
       }
-      const mine = (state.payments || []).filter((p) => p.holdingId === h.id);
-      const extId = 'dgd:' + hash32([h.id, g.date, g.cur, g.gross].join('|'), 2166136261).toString(36);
-      const same = mine.find((p) => p.extId === extId || (!p.estimated && p.source !== 'auto' && (p.payDate || p.exDate) && Math.abs(dayN(p.payDate || p.exDate) - dayN(g.date)) <= 4 && p.currency === g.cur && Math.abs(Number(p.gross) - g.gross) <= Math.max(0.05, 0.02 * g.gross)));
-      if (same) { dups.push(g); return; }
-      pend.push({ g, h, mine, extId, best: null });
+      const n = g.parts > 1 ? g.parts : 1;
+      for (let i = 0; i < n; i++) incoming.push({ account: h.account || opt.account || '', holdingId: h.id, isin: key || '', name: h.name || g.name || '', ticker: h.displayTicker || h.ticker, payDate: g.date, currency: g.cur, gross: r2(g.gross / n), tax: g.tax == null ? null : r2(g.tax / n), net: g.net == null ? null : r2(g.net / n),
+        qty: null, perShare: null, source: 'degiro', brokerId: null, origin: { broker: opt.broker || 'DEGIRO', file: opt.file || null, line: (g.lines || []).join(',') || null } });
     });
-    const candidates = (x) => x.mine.filter((p) => !claimed.has(p.id) && ((p.estimated && p.source === 'market-history') || (p.source === 'auto' && p.verified === false)));
-    const claim = (x, p) => { x.best = p; claimed.add(p.id); replace.push(p.id); };
-    // passe 1 : détachement ≤ date de paiement ≤ détachement + 75 j ; même devise → montant à ±35 %
-    pend.forEach((x) => {
-      let best = null, bs = 1e9;
-      candidates(x).forEach((p) => {
-        const base = p.exDate || p.payDate; if (!base) return; const lag = dayN(x.g.date) - dayN(base); if (lag < -3 || lag > 75) return;
-        let sc = lag / 100; if (p.currency === x.g.cur) { const rel = Math.abs(Number(p.gross) - x.g.gross) / x.g.gross; if (rel > 0.35) return; sc += rel; } else sc += 1;
-        if (sc < bs) { bs = sc; best = p; }
-      });
-      if (best) claim(x, best);
-    });
-    // passe 2 : par la seule date de paiement, SANS détachement ni contrôle du montant (montant estimé faussé par un split, un acompte, une devise…) : le relevé fait foi
-    pend.filter((x) => !x.best).forEach((x) => {
-      let best = null, bs = 1e9;
-      candidates(x).forEach((p) => {
-        const lag = p.exDate ? dayN(x.g.date) - dayN(p.exDate) : (p.payDate ? Math.abs(dayN(x.g.date) - dayN(p.payDate)) : null);
-        if (lag === null || lag < -5 || lag > (p.exDate ? 45 : 20)) return;
-        if (Math.abs(lag) < bs) { bs = Math.abs(lag); best = p; }
-      });
-      if (best) claim(x, best);
-    });
-    pend.forEach((x) => { const g = x.g, h = x.h, best = x.best;
-      add.push({ id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || g.name || '', payDate: g.date, exDate: best ? best.exDate || null : null, qty: best ? best.qty : null, perShare: null, gross: g.gross, tax: g.tax, net: g.net, fees: null, currency: g.cur, source: 'degiro', verified: true, extId: x.extId });
-    });
-    const unconfirmed = [];
-    if (opt.coverage && opt.coverage.from && opt.coverage.to) {
-      const last = dayN(opt.coverage.to) - 75, first = dayN(opt.coverage.from);
-      (state.payments || []).forEach((p) => { if (claimed.has(p.id) || !p.estimated || p.source !== 'market-history' || p.verified === false) return; const base = p.exDate || p.payDate; if (base && dayN(base) >= first && dayN(base) <= last) unconfirmed.push(p.id); });
-    }
-    return { add, dups, unmatched, replace, stubs, unconfirmed };
+    return { incoming, unmatched, stubs };
   }
 
   /* Contrôle des versements : trouve ce qui fausse les totaux « reçus » SANS rien modifier (pure). Chaque anomalie est une proposition cochable :
@@ -918,6 +892,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, brokerDividendPayments, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

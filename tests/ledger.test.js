@@ -342,7 +342,7 @@ t('DIAGNOSTIC : anomalie ignorée = masquée et non comptée, rétablissable ; e
   s.ignored = { [it.sig]: { at: '2026-10-16T10:00:00Z' } }; const d2 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(!d2.items.some((i) => i.code === 'qty_year')); assert.strictEqual(d2.counts.error, 0); assert.strictEqual(d2.ignored.length, 1);
   s.holdings[0].quantity = 2025; const d3 = L.diagnose(s, { today: '2026-10-15' }); assert.ok(d3.items.some((i) => i.code === 'qty_year'), 'cause différente : réapparaît'); assert.strictEqual(d3.ignored.length, 0);
 });
-t('DIVIDENDES DU RELEVÉ DE COMPTE : brut, retenue et net réels, rattachés par ISIN ; doublons ignorés ; une estimation de marché du même versement est remplacée ; sans ligne d\'impôt le net reste inconnu', () => {
+t('DIVIDENDES DU RELEVÉ DE COMPTE : brut, retenue et net réels, rattachés par ISIN ; doublons ignorés ; sans ligne d\'impôt le net reste inconnu', () => {
   const csv = ['Date,Heure,Date de valeur,Produit,ISIN,Description,Taux de change,Variation,,Solde,,ID Ordre',
     '10-01-2024,09:31,10-01-2024,APPLE INC.,US0378331005,"Achat 10 APPLE INC.@170 USD (US0378331005)",1.1,EUR,"-1545,41",EUR,"100,00",s1',
     '15-05-2024,00:00,15-05-2024,APPLE INC.,US0378331005,Dividende,,USD,"2,60",EUR,"103,00",',
@@ -352,11 +352,9 @@ t('DIVIDENDES DU RELEVÉ DE COMPTE : brut, retenue et net réels, rattachés par
     '08-02-2024,00:00,08-02-2024,,,Dépôt flatex Deposit,,EUR,"500,00",EUR,"603,00",'].join('\n');
   const { res } = parse(csv); const g = L.groupDividends(res.divs).sort((a, b) => (a.date < b.date ? -1 : 1));
   assert.deepStrictEqual(g.map((x) => [x.isin, x.date, x.cur, x.gross, x.tax, x.net]), [['FR0000000000', '2024-02-05', 'EUR', 1, null, null], ['US0378331005', '2024-05-15', 'USD', 2.6, 0.39, 2.21], ['US0378331005', '2024-08-20', 'USD', 2.6, null, null]], 'retenue du même jour retranchée ; sans ligne d\'impôt : net null (jamais inventé)');
-  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10 }], archive: [], payments: [{ id: 'est', holdingId: 'h', exDate: '2024-05-10', payDate: null, qty: 10, perShare: .26, gross: 2.6, currency: 'USD', estimated: true, source: 'market-history', verified: true }, { id: 'man', holdingId: 'h', payDate: '2024-08-21', gross: 2.6, currency: 'USD', source: 'manual', verified: true }] };
-  const snap = JSON.stringify(st), r = L.brokerDividendPayments(st, g, uid); assert.strictEqual(JSON.stringify(st), snap, 'pure : rien n\'est modifié');
-  assert.deepStrictEqual(r.add.map((x) => [x.payDate, x.gross, x.net, x.source, x.exDate, x.qty]), [['2024-05-15', 2.6, 2.21, 'degiro', '2024-05-10', 10]], 'montant réel ajouté, détachement et quantité repris de l\'estimation remplacée');
-  assert.deepStrictEqual(r.replace, ['est']); assert.strictEqual(r.dups.length, 1, 'versement déjà saisi à 1 jour d\'écart : ignoré'); assert.strictEqual(r.unmatched.length, 1, 'titre inconnu : non rattaché');
-  st.payments.push.apply(st.payments, r.add); assert.strictEqual(L.brokerDividendPayments(st, g, uid).add.length, 0, 'réimport : aucun doublon');
+  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, account: 'a' }], archive: [], payments: [{ id: 'man', holdingId: 'h', payDate: '2024-08-20', gross: 2.6, currency: 'USD', source: 'manual', verified: true }] };
+  const snap = JSON.stringify(st), sd = L.statementDividends(st, g, uid, { account: 'a' }); assert.strictEqual(JSON.stringify(st), snap, 'pure : rien n\'est modifié');
+  assert.deepStrictEqual(sd.incoming.map((x) => [x.payDate, x.gross, x.tax, x.net, x.source]), [['2024-05-15', 2.6, 0.39, 2.21, 'degiro'], ['2024-08-20', 2.6, null, null, 'degiro']], 'brut, retenue et net réels ; sans ligne d\'impôt : net null'); assert.strictEqual(sd.unmatched.length, 1, 'titre inconnu : non rattaché');
 });
 t('VENTE / CLÔTURE enregistrée : vente partielle puis totale d\'une position saisie (opération d\'ouverture au PRU saisi), résultat réalisé, PRU des titres restants inchangé, archivage', () => {
   let n = 0; const id = () => 'q' + (++n), deps = { uid: id, today: '2026-10-23' };
@@ -389,7 +387,7 @@ t('ACHATS MANUELS multiples : date + nombre d\'actions (prix et frais facultatif
   assert.strictEqual(st.transactions[1].amountAcct, null); assert.strictEqual(L.txAmount(st.transactions[1]), null); assert.strictEqual(JSON.stringify(st.holdings), snap, 'quantité et PRU de la position inchangés');
   const rm = L.removePurchase(st, st.transactions[1].id); assert.ok(rm.ok && st.transactions.length === 1); assert.strictEqual(L.removePurchase({ transactions: [{ id: 'x', source: 'degiro' }] }, 'x').ok, false, 'opération du courtier : pas supprimable ici');
 });
-t('RELEVÉ DE COMPTE (suite) : date de paiement = date de valeur, colonnes « Mouvements » / « Date de », titres non détenus (archive « relevé seul »), meilleure estimation appariée, estimations non confirmées listées', () => {
+t('RELEVÉ DE COMPTE (suite) : date de paiement = date de valeur, colonnes « Mouvements » / « Date de », titres non détenus (archive « relevé seul »), rattachement par compte', () => {
   const csv = ['Date,Heure,Date de,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',
     '16-10-2024,07:44,15-10-2024,APPLE INC.,US0378331005,Dividende,,USD,"2,60",USD,"10,00",',
     '16-10-2024,07:44,15-10-2024,APPLE INC.,US0378331005,Impôts sur dividende,,USD,"-0,39",USD,"9,61",',
@@ -400,46 +398,16 @@ t('RELEVÉ DE COMPTE (suite) : date de paiement = date de valeur, colonnes « Mo
   const { res, det } = parse(csv); assert.deepStrictEqual([det.cols.valueDate, det.cols.change, det.cols.changeCur], [2, 8, 7], 'colonnes reconnues'); assert.deepStrictEqual([res.meta.from, res.meta.to], ['2024-10-16', '2026-07-28'], 'période couverte');
   const g = L.groupDividends(res.divs); assert.deepStrictEqual(g.map((x) => [x.isin, x.date, x.gross, x.net]).sort(), [['FR0000000002', '2024-12-10', 8, null], ['US0378331005', '2024-10-15', 2.6, 2.21]], 'paiement à la date de valeur ; dividende annulé (+5 puis −5) = rien');
   let n = 0; const id = () => 'z' + (++n);
-  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10 }], archive: [], payments: [
+  const st = { holdings: [{ id: 'h', isin: 'US0378331005', ticker: 'AAPL', name: 'Apple', currency: 'USD', quantity: 10, account: 'a' }], archive: [], payments: [
     { id: 'e1', holdingId: 'h', exDate: '2024-10-11', qty: 10, perShare: .26, gross: 2.6, currency: 'USD', estimated: true, source: 'market-history', verified: true },
     { id: 'e2', holdingId: 'h', exDate: '2024-07-11', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true },
     { id: 'e3', holdingId: 'h', exDate: '2025-02-10', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true },
     { id: 'e4', holdingId: 'h', exDate: '2026-06-01', qty: 10, perShare: .25, gross: 2.5, currency: 'USD', estimated: true, source: 'market-history', verified: true }] };
-  const r = L.brokerDividendPayments(st, g, id, { createMissing: true, coverage: { from: res.meta.from, to: res.meta.to }, account: 'a' });
-  assert.deepStrictEqual(r.replace, ['e1'], 'meilleure correspondance : l\'estimation du détachement 11 oct. (pas celle de juillet)'); assert.strictEqual(r.add.length, 2); assert.strictEqual(r.stubs.length, 1, 'société inconnue : une position archivée « relevé seul »');
-  assert.deepStrictEqual([r.stubs[0].isin, r.stubs[0].statementOnly, r.stubs[0].userClosed, r.stubs[0].account], ['FR0000000002', true, true, 'a']); assert.strictEqual(r.add.find((x) => x.holdingId === r.stubs[0].id).gross, 8, 'dividende rattaché à la société non détenue');
-  assert.deepStrictEqual(r.unconfirmed.sort(), ['e3'], 'estimation de la période couverte sans versement correspondant (e2 antérieure au fichier, e4 trop récente pour être jugée)');
-  assert.strictEqual(L.brokerDividendPayments(st, g, id, { createMissing: false }).unmatched.length, 1, 'sans option : titre inconnu non rattaché');
-});
-t('RELEVÉ DE COMPTE sans date de détachement : une estimation au montant faussé (split) est remplacée par la date de paiement seule ; un paiement éloigné reste non apparié', () => {
-  let n = 0; const id = () => 'w' + (++n);
-  const est = (i, ex, gross) => ({ id: i, holdingId: 'h', exDate: ex, qty: 10, perShare: gross / 10, gross, currency: 'EUR', estimated: true, source: 'market-history', verified: true });
-  const st = { holdings: [{ id: 'h', isin: 'FR0014003TT8', ticker: 'DSY', name: 'Dassault', currency: 'EUR', quantity: 10 }], archive: [], payments: [est('a', '2019-05-29', .13), est('b', '2020-05-28', .14), est('far', '2021-01-04', .1),
-    { id: 'dr', holdingId: 'h', payDate: '2021-06-20', gross: 1, currency: 'EUR', source: 'auto', verified: false }] };
-  const g = [{ isin: 'FR0014003TT8', name: 'Dassault', date: '2019-05-31', cur: 'EUR', gross: .65, tax: null, net: null }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2020-06-02', cur: 'EUR', gross: .7, tax: .1, net: .6 }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2021-06-01', cur: 'EUR', gross: .56, tax: null, net: null }, { isin: 'FR0014003TT8', name: 'Dassault', date: '2022-06-01', cur: 'EUR', gross: .6, tax: null, net: null }];
-  const r = L.brokerDividendPayments(st, g, id, {});
-  assert.deepStrictEqual(r.replace.sort(), ['a', 'b', 'dr'], 'montants à ×5 d\'écart (split) : appariés par la date de paiement seule ; brouillon sans détachement apparié par sa date de paiement (≤ 20 j)');
-  assert.strictEqual(r.add.length, 4, 'tous les versements du relevé sont ajoutés'); assert.deepStrictEqual(r.add.map((x) => x.exDate), ['2019-05-29', '2020-05-28', null, null], 'détachement repris quand une estimation existe, sinon laissé vide (jamais inventé)');
-  assert.ok(!r.replace.includes('far'), 'estimation éloignée (> 45 j) : non touchée');
-});
-t('CONTRÔLE DES DIVIDENDES : orphelins rattachés ou supprimés, estimation en double d\'un versement réel, brut Trade Republic mal lu ; pur ; appliqué seulement sur sélection ; un autre portefeuille de quantité différente n\'est jamais touché', () => {
-  const H = (id, name, isin, qty, acc) => ({ id, name, isin, ticker: isin || name, currency: 'EUR', quantity: qty, account: acc });
-  const st = { holdings: [H('sap1', 'SAP', 'DE0007164600', 12, 'tr'), H('sap2', 'SAP SE', '', 12, 'pea'), H('al1', 'AIR LIQUIDE', 'FR0000120073', 16, 'deg'), H('al2', "L'Air Liquide S.A.", '', 30, 'nom')], archive: [H('tot', 'TOTALENERGIES SE', 'FR0000120271', 0, 'deg')], payments: [
-    { id: 'r1', holdingId: 'sap1', payDate: '2026-05-08', qty: 12, gross: 37.91, tax: 7.91, net: 30, currency: 'EUR', source: 'csv', verified: true, extId: '0573ed03-1d4d-435e-a0cd-5a810eb5711f' },
-    { id: 'a1', holdingId: 'sap2', payDate: '2026-05-06', qty: 12, gross: 30, currency: 'EUR', source: 'auto', verified: true },
-    { id: 'r2', holdingId: 'al1', payDate: '2026-05-20', qty: 16, gross: 55.5, currency: 'EUR', source: 'degiro', verified: true },
-    { id: 'a2', holdingId: 'al2', payDate: '2026-05-18', qty: 30, gross: 100.91, currency: 'EUR', source: 'auto', verified: true },
-    { id: 'o1', holdingId: 'gone', ticker: 'FR0000120271', name: 'TotalEnergies', payDate: '2026-01-05', gross: 34, currency: 'EUR', source: 'csv', verified: true },
-    { id: 'o2', holdingId: 'gone2', ticker: 'FR0000121329', name: 'Thales', payDate: '2024-05-22', gross: 1.25, currency: 'EUR', source: 'csv', verified: true },
-    { id: 'o3', holdingId: 'gone', name: 'TotalEnergies', payDate: '2026-04-02', gross: 34, currency: 'EUR', source: 'auto', verified: true }] };
-  const snap = JSON.stringify(st), au = L.auditPayments(st), kinds = (k) => au.items.filter((i) => i.kind === k).map((i) => i.payId).sort();
-  assert.strictEqual(JSON.stringify(st), snap, 'pure');
-  assert.deepStrictEqual([kinds('duplicate'), kinds('orphan_relink'), kinds('orphan_stub'), kinds('orphan_estimate'), kinds('tr_gross')], [['a1'], ['o1'], ['o2'], ['o3'], ['r1']], 'SAP en double (même quantité) ; Air Liquide (autre portefeuille, 30 ≠ 16 titres) non touché');
-  const r = L.applyAudit(st, au, new Set(au.items.filter((i) => i.kind !== 'tr_gross').map((i) => i.key)), (() => { let n = 0; return () => 's' + (++n); })());
-  assert.deepStrictEqual([r.removed, r.relinked, r.stubs, r.regrossed], [2, 2, 1, 0]); assert.strictEqual(st.payments.find((p) => p.id === 'o1').holdingId, 'tot', 'rattaché à la position archivée de même ISIN'); assert.ok(st.archive.some((h) => h.name === 'Thales' && h.statementOnly), 'société inconnue : position archivée « relevé seul »');
-  assert.ok(st.payments.some((p) => p.id === 'a2') && st.payments.find((p) => p.id === 'r1').gross === 37.91, 'ce qui n\'est pas coché n\'est pas modifié');
-  const au2 = L.auditPayments(st); L.applyAudit(st, au2, new Set(au2.items.map((i) => i.key)), () => 'x'); const r1 = st.payments.find((p) => p.id === 'r1'); assert.deepStrictEqual([r1.gross, r1.net, r1.tax], [30, 22.09, 7.91], 'brut = montant de l\'export, net = montant − retenue');
-  assert.strictEqual(L.auditPayments(st).items.length, 0, 'plus aucune anomalie');
+  const sd = L.statementDividends(st, g, id, { createMissing: true, account: 'a' });
+  assert.strictEqual(sd.incoming.length, 2); assert.strictEqual(sd.stubs.length, 1, 'société inconnue : une position archivée « relevé seul »');
+  assert.deepStrictEqual([sd.stubs[0].isin, sd.stubs[0].statementOnly, sd.stubs[0].userClosed, sd.stubs[0].account], ['FR0000000002', true, true, 'a']); assert.strictEqual(sd.incoming.find((x) => x.holdingId === sd.stubs[0].id).gross, 8, 'dividende rattaché à la société non détenue');
+  assert.strictEqual(L.statementDividends(st, g, id, { createMissing: false, account: 'a' }).unmatched.length, 1, 'sans option : titre inconnu non rattaché');
+  assert.strictEqual(L.statementDividends(st, g, id, { createMissing: true, account: 'autre' }).incoming.find((x) => x.isin === 'US0378331005').holdingId !== 'h', true, 'les comptes restent indépendants : la position d\'un autre compte n\'est jamais utilisée');
 });
 t('RELEVÉ DE COMPTE au format tableur (décimales « . », milliers « , » dans le solde) : mêmes dividendes que le CSV', () => {
   const csv = ['Date,Heure,Date de ,Produit,Code ISIN,Description,FX,Mouvements,,Solde,,ID Ordre',

@@ -14,6 +14,7 @@
     ? require('./payouts.js').Payouts : root.Payouts;
 
   const Ledger = (typeof require === 'function' && typeof module !== 'undefined' && !root.Ledger) ? require('./ledger.js') : root.Ledger;
+  const D = (typeof require === 'function' && typeof module !== 'undefined' && !root.Dividends) ? require('./dividends.js') : root.Dividends;   // moteur central : seule source du « perçu »
 
   const pad2 = (n) => String(n).padStart(2, '0');
   const iso = (y, m, d) => y + '-' + pad2(m) + '-' + pad2(d);
@@ -110,7 +111,7 @@
     const events = [];
     const taken = new Set();   // holdingId|YYYY-MM déjà couverts par un versement réel
 
-    (state.payments || []).forEach((p) => {
+    D.realPayments(state).forEach((p) => {            // uniquement les versements réellement perçus ; estimations et prévisions sont calculées à part
       [p.exDate, p.payDate].forEach((d) => { if (d) taken.add(p.holdingId + '|' + ym(d)); });
       const date = p.payDate || p.exDate;
       if (!date || date < fromISO || date > toISO_ || !keep(p.holdingId) || !byId[p.holdingId]) return;
@@ -121,7 +122,7 @@
       }, {
         date, dateKind: p.payDate ? 'pay' : 'ex', status: 'received', perShare: num(p.perShare), qty: num(p.qty),
         gross: num(p.gross), tax: p.tax == null ? null : Math.abs(num(p.tax)), net: p.net == null ? null : num(p.net),
-        verified: p.verified !== false, paymentId: p.id
+        verified: true, paymentId: p.id
       }));
     });
 
@@ -270,14 +271,10 @@
   }
 
   function receivedBetween(state, fromISO, toISOd, mode, convert, filterIds) {
-    const known = new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));          // un versement dont la position n'existe plus n'est pas compté (contrôle des dividendes)
-    const evs = (state.payments || []).filter((p) => { const d = p.payDate || p.exDate; return d && d >= fromISO && d <= toISOd && known.has(p.holdingId) && (!filterIds || filterIds.has(p.holdingId)); })
-      .map((p) => ({ currency: p.currency || 'EUR', gross: num(p.gross), net: p.net == null ? null : num(p.net), unverified: p.verified === false }));
-    const s = sumEvents(evs, mode, convert);
-    s.unverified = evs.filter((e) => e.unverified).length;
-    s.verified = sumEvents(evs.filter((e) => !e.unverified), mode, convert);    // versements confirmés par l'utilisateur
-    s.unverifiedSum = sumEvents(evs.filter((e) => e.unverified), mode, convert); // générés d'après l'historique de marché
-    return s;
+    const sm = D.summary(state, { from: fromISO, to: toISOd, ids: filterIds || null, convert }), total = mode === 'net' ? sm.net : sm.gross;
+    // net : somme des nets CONNUS ; les versements sans net connu sont comptés à part (netUnknown), jamais remplacés par le brut
+    const part = { total, count: sm.count, missing: [], fallbacks: 0 };
+    return Object.assign({}, part, { verified: part, unverified: 0, unverifiedSum: { total: 0, count: 0, missing: [], fallbacks: 0 }, gross: sm.gross, tax: sm.tax, net: sm.net, netUnknown: sm.netUnknown, taxUnknown: sm.taxUnknown, unconverted: sm.unconverted, summary: sm });
   }
 
   /* Évolution vs année précédente (même période de l'année : du 1er janvier à aujourd'hui). */
@@ -305,17 +302,9 @@
   }
 
   function yearlySeries(state, mode, convert, filterIds) {
-    const years = {}, known = new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));
-    (state.payments || []).forEach((p) => {
-      if (filterIds && !filterIds.has(p.holdingId)) return; if (!known.has(p.holdingId)) return;
-      const d = p.payDate || p.exDate; if (!d) return;
-      const y = d.slice(0, 4);
-      const c = convert(amount({ gross: num(p.gross), net: p.net == null ? null : num(p.net) }, mode).v, p.currency || 'EUR');
-      if (c === null) return;
-      years[y] = years[y] || { total: 0, unverified: 0 };
-      years[y].total += c; if (p.verified === false) years[y].unverified += c;
-    });
-    return Object.keys(years).sort().map((y) => ({ year: Number(y), total: years[y].total, unverified: years[y].unverified, verified: years[y].total - years[y].unverified }));
+    const sm = D.summary(state, { ids: filterIds || null, convert }), years = {};
+    sm.items.forEach((it) => { const y = it.date.slice(0, 4), v = mode === 'net' ? it.netC : it.grossC; if (v === null) return; years[y] = (years[y] || 0) + v; });
+    return Object.keys(years).sort().map((y) => ({ year: Number(y), total: years[y], unverified: 0, verified: years[y] }));
   }
 
   /* Prévision des 12 prochains mois (à partir du mois courant). */
@@ -686,32 +675,6 @@
     return [p.holdingId || p.ticker, p.payDate || p.exDate || '', Math.round(num(p.gross) * 100)].join('|');
   }
 
-  /* Pré-remplissage de l'historique d'après les dates de détachement passées
-     (quantité actuelle supposée) — toujours marqué « à vérifier ». */
-  function prefillPayments(state, holdingsList, uid, sinceISO) {
-    const existing = new Set((state.payments || []).map(paymentKey));
-    const taken = new Set();
-    (state.payments || []).forEach((p) => { [p.exDate, p.payDate].forEach((d) => { if (d) taken.add(p.holdingId + '|' + ym(d)); }); });
-    const out = [];
-    holdingsList.forEach((h) => {
-      if (isAccumulating(h)) return;
-      ((h.dividend || {}).history || []).forEach((x) => {
-        const d = x.payDate || x.exDate;
-        if (!d || d < sinceISO || d > toISO(new Date()) || !(num(x.amount) > 0)) return;
-        if (taken.has(h.id + '|' + ym(d)) || taken.has(h.id + '|' + ym(x.exDate))) return;
-        const qty = quantityAt(state, h, x.exDate || d);
-        if (qty <= 0) return;
-        const rate = taxRate(h), gross = Math.round(num(x.amount) * qty * 100) / 100;
-        const p = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', exDate: x.exDate || null, payDate: x.payDate || null,
-          qty, perShare: x.amount, gross, tax: rate === null ? null : Math.round(gross * rate) / 100,
-          net: rate === null ? null : Math.round(gross * (100 - rate)) / 100, fees: null, currency: h.currency || 'EUR', source: 'auto', verified: false };
-        if (existing.has(paymentKey(p))) return;
-        out.push(p);
-      });
-    });
-    return out;
-  }
-
   /* ---------- HISTORIQUE DES DIVIDENDES REÇUS (reconstitué) ----------
      Quantité éligible à une date de détachement = titres détenus à la CLÔTURE DE LA VEILLE (un achat le jour du détachement n'ouvre pas droit au dividende ;
      une vente ce jour-là le conserve), d'après le grand livre des opérations (achats, ventes, livraisons, splits validés), ramenée à la base actuelle des
@@ -737,8 +700,8 @@
      Ne modifie rien ; renvoie les versements à valider, les doublons évités et les titres non calculables avec la raison. */
   function dividendProposals(state, today, uid, opt) {
     opt = opt || {}; const todayS = toISO(today || new Date()), dN = (d) => Date.parse(d) / 86400000;
-    const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [], pending: 0, atypical: 0, replaces: 0 };
-    const pays = state.payments || [];
+    const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [], pending: 0, atypical: 0 };
+    const pays = (state.payments || []).filter(D.isReal);        // le « dû » se compare aux versements RÉELS uniquement
     const ymOf_ = (d) => d.slice(0, 7), nextYm = (d) => { const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7)); return m === 12 ? (y + 1) + '-01' : y + '-' + pad2(m + 1); };
     const insts = (state.holdings || []).map((h) => ({ h, closed: false })).concat(opt.noArchive ? [] : (state.archive || []).map((h) => ({ h, closed: true }))).filter((x) => !opt.ids || opt.ids.has(x.h.id));
     insts.forEach(({ h, closed }) => {
@@ -748,7 +711,7 @@
       if (!h.divHist.items.length) { if (!closed) out.noData.push(name); return; }
       const f = heldQtyFn(state, h); if (!f.ok) { if (!closed || f.reason.indexOf('incohérent') >= 0) out.unverifiable.push({ id: h.id, name, reason: f.reason, closed }); return; }
       const mineAll = pays.filter((p) => p.holdingId === h.id);
-      const drafts = mineAll.filter((p) => p.source === 'auto' && p.verified === false), mine = mineAll.filter((p) => !(p.source === 'auto' && p.verified === false));   // brouillons « à vérifier » générés avec la quantité ACTUELLE : jamais comptés comme versements existants
+      const mine = mineAll;
       const rate = taxRate(h), cur = h.divHist.currency || h.currency || 'EUR';
       const priceAt = (ex) => { const hh = h.hist; if (!hh || !hh.from || !hh.c) return null; const m = (Number(ex.slice(0, 4)) - Number(hh.from.slice(0, 4))) * 12 + Number(ex.slice(5, 7)) - Number(hh.from.slice(5, 7)); const v = hh.c[m]; return v > 0 ? v : null; };
       const same = (p, ex, amt) => {
@@ -767,8 +730,8 @@
         const pending = age < 45, atypical = !!(px && amt / px > 0.4);        // < 45 j depuis le détachement : paiement peut-être pas encore reçu ; montant > 40 % du cours : donnée suspecte
         const row = { id: uid ? uid() : null, holdingId: h.id, ticker: h.displayTicker || h.ticker, name, closed, exDate: ex, payDate: null, qty: Math.round(qty * 1e6) / 1e6, perShare: amt, gross,
           tax: rate === null ? null : Math.round(gross * rate) / 100, net: rate === null ? null : Math.round(gross * (100 - rate)) / 100, fees: null, currency: cur,
-          source: 'market-history', estimated: true, verified: true, ageDays: age, pending, atypical, replaceIds: drafts.filter((p) => same(p, ex, amt)).map((p) => p.id) };
-        if (dup) out.already.push(row); else { out.proposals.push(row); if (pending) out.pending++; if (atypical) out.atypical++; out.replaces += row.replaceIds.length; }
+          source: 'market-history', estimated: true, ageDays: age, pending, atypical };
+        if (dup) out.already.push(row); else { out.proposals.push(row); if (pending) out.pending++; if (atypical) out.atypical++; }
       });
     });
     out.proposals.sort((a, b) => (a.exDate < b.exDate ? 1 : -1));
@@ -778,7 +741,7 @@
   root.Engine = {
     valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
-    forecast12, nextEvents, distribution, paymentKey, prefillPayments, heldQtyFn, dividendProposals, toISO, parse, iso
+    forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Engine;
 })(typeof self !== 'undefined' ? self : this);

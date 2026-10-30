@@ -68,7 +68,7 @@ function hydrateState(parsed) {
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
     s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {}; if (!s.ignored || typeof s.ignored !== 'object' || Array.isArray(s.ignored)) s.ignored = {};
-    s.archive = Array.isArray(s.archive) ? s.archive : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
+    s.archive = Array.isArray(s.archive) ? s.archive : [];  s.estimates = Array.isArray(s.estimates) ? s.estimates : []; s.migrations = Array.isArray(s.migrations) ? s.migrations : []; s.dividendImports = Array.isArray(s.dividendImports) ? s.dividendImports : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
     if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;
     s.holdings.forEach((h) => { if (!h.account || !s.accounts.some((a) => a.id === h.account)) h.account = s.accounts[0].id; migrateHolding(h); if (h.source === 'degiro' && h.derived === undefined) h.derived = true; });   // positions calculées par l'import d'historique
@@ -293,11 +293,10 @@ function mergeStates(local, remote) {
     if (ex) { idMap[h.id] = ex.id; return; }
     out.holdings.push(lh); have.set(hkey(lh), lh); idMap[h.id] = lh.id;
   });
-  const pk = new Set(out.payments.map(Engine.paymentKey));
-  local.payments.forEach((p) => {
+  local.payments.forEach((p) => {                // identifiant du versement ou identifiant stable d'import : jamais de rapprochement « à peu près » (deux versements identiques peuvent être légitimes)
     const lp = clone(p); lp.holdingId = idMap[lp.holdingId] || lp.holdingId;
-    if (out.payments.some((x) => x.id === lp.id) || pk.has(Engine.paymentKey(lp))) return;
-    out.payments.push(lp); pk.add(Engine.paymentKey(lp));
+    if (out.payments.some((x) => x.id === lp.id || (lp.extId && x.extId === lp.extId))) return;
+    out.payments.push(lp);
   });
   const tk = new Set(out.transactions.map((t) => t.id));
   local.transactions.forEach((t) => { if (tk.has(t.id)) return; const lt = clone(t); lt.holdingId = idMap[lt.holdingId] || lt.holdingId; out.transactions.push(lt); });
@@ -617,11 +616,12 @@ function csvPositions() {
   return csvText(head, rows);
 }
 function csvDividends() {
-  const ids = visibleIds(), cur = baseCur();
-  const rows = state.payments.filter((p) => !ids || ids.has(p.holdingId)).slice().sort((a, b) => String(a.payDate).localeCompare(String(b.payDate))).map((p) => [
-    p.payDate || '', p.exDate || '', p.ticker || '', p.name || '', p.qty, p.perShare, p.gross, p.tax, p.fees, p.net, p.currency || '', p.verified === false ? 'À vérifier' : 'Vérifié', p.source || '']);
-  void cur;
-  return csvText(['Date de paiement', 'Date de détachement', 'Ticker', 'Nom', 'Quantité', 'Par titre', 'Brut', 'Retenue', 'Frais', 'Net', 'Devise', 'Statut', 'Source'], rows);
+  const ids = visibleIds();
+  const rows = Dividends.realPayments(state).filter((p) => !ids || ids.has(p.holdingId)).slice().sort((x, y) => String(x.payDate || x.exDate).localeCompare(String(y.payDate || y.exDate))).map((p) => {
+    const h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId), am = Dividends.amounts(p), o = p.origin || {};
+    return [p.payDate || '', p.exDate || '', p.ticker || '', p.name || '', accountName(h && h.account), p.qty, p.perShare, am.gross, am.tax, p.fees, am.net, p.currency || '', p.source || '', o.file || '', o.line || '', p.extId || ''];
+  });
+  return csvText(['Date de paiement', 'Date de détachement', 'Ticker', 'Nom', 'Courtier / compte', 'Quantité', 'Par titre', 'Brut', 'Retenue', 'Frais', 'Net', 'Devise', 'Source', 'Fichier', 'Ligne', 'Identifiant'], rows);
 }
 function csvTransactions() {
   const ids = visibleIds(), L = { buy: 'Achat', sell: 'Vente' };
@@ -667,13 +667,13 @@ function openCsvExport() {
 /* Retour arrière d'un import d'historique : photographie des données juste avant la modification (chiffrée avec le reste si un code est défini). */
 function snapshotForUndo(label) {
   state.undo = { at: new Date().toISOString(), label: label, holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []), accounts: clone(state.accounts),
-    corp: clone(state.corp || []), isinAlias: clone(state.isinAlias || {}), imports: clone(state.imports || []).map((x) => { delete x.raw; return x; }), reference: state.reference ? clone(state.reference) : null };
+    corp: clone(state.corp || []), estimates: clone(state.estimates || []), migrations: clone(state.migrations || []), isinAlias: clone(state.isinAlias || {}), imports: clone(state.imports || []).map((x) => { delete x.raw; return x; }), reference: state.reference ? clone(state.reference) : null };
 }
 async function undoLastImport() {
   const u = state.undo; if (!u) return;
   const c = await confirmDialog({ title: 'Annuler la dernière modification ?', body: 'Les positions, opérations, opérations sur titres et versements reviennent à leur état d\'avant « ' + esc(u.label) + ' » (' + esc(fmtDate(u.at.slice(0, 10))) + '). <b>Les modifications faites depuis seront perdues.</b>', confirmLabel: 'Annuler', danger: true });
   if (!c.ok) return;
-  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; state.corp = u.corp || []; state.isinAlias = u.isinAlias || {}; if (u.imports) { const rawById = {}; (state.imports || []).forEach((x) => { if (x.raw) rawById[x.id] = x.raw; }); state.imports = u.imports.map((x) => Object.assign(x, rawById[x.id] ? { raw: rawById[x.id] } : {})); } if (u.reference) state.reference = u.reference; else delete state.reference; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
+  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; state.estimates = u.estimates || []; state.migrations = u.migrations || []; state.corp = u.corp || []; state.isinAlias = u.isinAlias || {}; if (u.imports) { const rawById = {}; (state.imports || []).forEach((x) => { if (x.raw) rawById[x.id] = x.raw; }); state.imports = u.imports.map((x) => Object.assign(x, rawById[x.id] ? { raw: rawById[x.id] } : {})); } if (u.reference) state.reference = u.reference; else delete state.reference; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
   saveState(); renderPage(); toast('Import annulé : données restaurées.');
 }
 function importBackup(file) {

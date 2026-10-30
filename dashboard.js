@@ -32,22 +32,19 @@ function cvAtFor(today) { const nowYM = Engine.ymOf(today); return (a_, c_, y_) 
 function perfStripHtml(o) {
   const today = o.today, ids = o.ids, per = o.per, cvAt = cvAtFor(today), perLbl = (HOME_PERIODS.find((q) => q[0] === per) || [0, 'Tout'])[1];
   const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
-  const divAll = (state.payments || []).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
+  const divAll = Dividends.realPayments(state).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
     const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
-    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: p_.verified === false, estimated: !!p_.estimated };
+    return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: false, estimated: false };
   }).filter((d_) => d_.v !== null);
   const pr = Engine.periodReturn(o.hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
   const WHY = { 'aucune donnée': 'pas encore d\'historique de cours (actualisez les données)', 'cours manquants à la date de fin': 'cours du jour indisponibles', 'cours manquants sur la période': 'cours historiques manquants sur la période', 'aucun investissement sur la période': 'aucun investissement sur cette période' };
   const sgn = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? '+' : '−') + money(Math.abs(v_), 0), cl = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? 'pos' : 'neg');
   if (!pr.ok) return { pr, html: '<div class="perf-strip off"><div class="ind"><span>Performance · ' + esc(perLbl) + '</span><b class="muted">—</b><small>Non calculable : ' + esc(WHY[pr.reason] || pr.reason) + '</small></div></div>' };
-  const unv = divAll.filter((d_) => d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0), nt = [];
+  const nt = [];
   nt.push('Du ' + esc(fmtDate(pr.from)) + ' au ' + esc(fmtDate(pr.to)) + ' · ' + esc(o.scope) + ' · valeur ' + sens(money(pr.V0, 0) + ' → ' + money(pr.V1, 0)));
   if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
   if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
   if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations complet ou sans prix d\'achat (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
-  const est = divAll.filter((d_) => d_.estimated && !d_.unverified && d_.date > pr.from && d_.date <= pr.to).reduce((a_, d_) => a_ + d_.v, 0);
-  if (est > 0.5) nt.push('dont ' + sens(money(est, 0)) + ' de dividendes <b>estimés</b> d\'après l\'historique de marché (retenue et date de paiement non confirmées).');
-  if (unv > 0.5) nt.push('+ ' + sens(money(unv, 0)) + ' de dividendes « à vérifier » non comptés (validez-les dans Dividendes → Historique).');
   const reliable = !pr.retro && !pr.truncated && !pr.endPartial && pr.pct !== null;
   const sub = o.showPct ? (reliable ? sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' pondéré dans le temps' : 'pourcentage non affiché (historique incomplet)') : 'gain de marché + dividendes';
   const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte' + (o.showPct ? ' ; le pourcentage est pondéré dans le temps (l\'effet de chaque versement est neutralisé) et n\'est affiché que si l\'historique d\'achats de toutes les positions est complet.' : '.');
@@ -121,10 +118,9 @@ function renderHome(host) {
   const yEvs = Engine.buildEvents(state, new Date(y, 0, 1), new Date(y, 11, 31), today, ids);
   const yUp = Engine.sumEvents(yEvs.filter((e) => e.status === 'forecast' || e.status === 'confirmed'), mode, convert);
   const series = Engine.monthlySeries(state, y, mode, convert, today, ids);
-  const divBars = (h_, w_) => stackedBars({ w: w_, tipLabels: w_ ? MOIS_C : null, labels: w_ ? MOIS_C.map((m_) => m_.charAt(0).toUpperCase()) : MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: h_, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À vérifier', color: 'var(--chart-3)', values: series.unverified }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] });
-  const estY = Engine.sumEvents((state.payments || []).filter((p_) => p_.estimated && p_.verified !== false && (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate) >= y + '-01-01' && (p_.payDate || p_.exDate) <= todayS).map((p_) => ({ currency: p_.currency || 'EUR', gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) })), mode, convert).total;
+  const divBars = (h_, w_) => stackedBars({ w: w_, tipLabels: w_ ? MOIS_C : null, labels: w_ ? MOIS_C.map((m_) => m_.charAt(0).toUpperCase()) : MOIS_C, cur: baseCur(), title: 'Dividendes perçus et à venir', mask, h: h_, layers: [{ name: 'Perçus', color: 'var(--chart-1)', values: series.received }, { name: 'À venir', color: 'var(--chart-1)', faded: true, values: series.upcoming }, { name: 'Non enregistrés', color: 'var(--warn)', dashed: true, values: series.unrecorded }] });
   const divCard = '<section class="card card-pad" id="divCardEl"><div class="card-head"><h3>Dividendes ' + y + '</h3><button class="link-btn" type="button" data-goto="calendar">Calendrier →</button></div>' +
-    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (state.transactions.some((t_) => t_.type === 'buy') && state.settings.relayUrl && !state.payments.some((p_) => p_.estimated || p_.source === 'degiro') ? '<button class="link-btn" type="button" data-goto="history-fill" style="font-size:11.5px;padding:0">Compléter l\'historique →</button>' : '') + (estY > 0.5 ? '<small class="sens" title="Reconstitués d\'après vos opérations et l\'historique de marché : retenue et date de paiement non confirmées">dont ' + money(estY, 0) + ' estimés</small>' : '') + (rec.unverified ? '<small class="sens">+ ' + money(rec.unverifiedSum.total, 0) + ' à vérifier</small>' : '') + '</div>' +
+    '<div class="mini-kv"><div><span>Perçus</span>' + sens('<b class="pos">' + (rec.count ? money(rec.verified.total, 0) : '—') + '</b>') + (rec.netUnknown ? '<small class="sens" title="Certains versements n\'ont ni retenue ni net connus : non estimés">net partiel (' + rec.netUnknown + ' sans net connu)</small>' : '') + '</div>' +
     '<div><span>À venir</span>' + sens('<b>' + money(yUp.total, 0) + '</b>') + '</div><div><span>Prochain</span><b>' + (first ? esc(first.ticker) + '</b><small>' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '</small>' : '—</b>') + '</div></div>' +
     '<div id="divChart">' + divBars(150) + '</div></section>';
 

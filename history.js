@@ -88,7 +88,7 @@ function sniffImport(rows) {
 /* Point d'entrée unique de tous les boutons d'import : le fichier est lu une fois (encodage détecté), reconnu, puis envoyé au bon écran.
    « want » : ce que le bouton cliqué attendait ('history' | 'positions' | 'generic'). */
 async function routeImport(want) {
-  const file = await pickFile(IMPORT_ACCEPT); if (!file) return;
+  const file = await pickFile(IMPORT_ACCEPT); if (!file) return; lastImportName = file.name;
   let data; try { data = await readHistoryRows(file); } catch (e) { toast(e.message, { error: true }); return; }
   if (!data.rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
   let kind = sniffImport(data.rows);
@@ -135,8 +135,7 @@ function renderDegiroModal(rows, enc, fileName, hIdx, ctx) {
     '<div id="dgSummary" class="dg-summary"></div>' +
     '<div class="sec">Actifs du fichier</div><div id="dgInst"></div>' +
     '<label class="chk"><input type="checkbox" id="dgZero" checked><span>Importer aussi les <b>mouvements de titres sans montant</b> (actions gratuites, droits, retraits, échanges) <small>— sans eux, certaines positions restent à tort ouvertes ou négatives</small></span></label>' +
-    '<label class="chk hide" id="dgDivRow"><input type="checkbox" id="dgDiv" checked><span>Ajouter les <b>dividendes du relevé de compte</b> (montants <b>réels</b> du courtier : date de paiement, brut, retenue à la source, net), y compris pour les sociétés que vous ne détenez plus <small>— un dividende déjà enregistré n\'est jamais dupliqué ; une estimation de marché du même versement est remplacée par le montant réel</small></span></label>' +
-    '<label class="chk hide" id="dgUnconfRow"><input type="checkbox" id="dgUnconf" checked><span id="dgUnconfTxt"></span></label>' +
+    '<label class="chk hide" id="dgDivRow"><input type="checkbox" id="dgDiv" checked><span>Ajouter les <b>dividendes du relevé de compte</b> (montants <b>réels</b> du courtier : date de paiement, brut, retenue à la source, net), y compris pour les sociétés que vous ne détenez plus <small>— un dividende déjà importé n\'est jamais dupliqué (réimporter le même fichier donne le même résultat) ; les estimations ne sont jamais mélangées aux montants perçus</small></span></label>' +
     '<label class="chk hide" id="dgOpsRow"><input type="checkbox" id="dgOps"><span>Importer aussi les <b>achats et ventes</b> de ce relevé de compte <small>— à ne cocher que s\'ils n\'ont pas déjà été importés avec le fichier « Transactions » (sinon doublons)</small></span></label>' +
     '<label class="chk"><input type="checkbox" id="dgFill" checked><span>Compléter uniquement les informations <b>manquantes</b> des positions existantes (PRU vide, ISIN absent)</span></label>' +
     '<details class="dg-cols" id="dgPrevBox"><summary>Aperçu des opérations reconnues</summary><div id="dgPrev"></div></details>' +
@@ -169,7 +168,7 @@ function renderDegiroModal(rows, enc, fileName, hIdx, ctx) {
     const det = detNow(), res = Ledger.parseOps(rows, det, { zeroMode: $('#dgZero', m).checked ? 'import' : 'skip' }), acc = $('#dgAcc', m).value;
     if (det.statement && !$('#dgOps', m).checked) { res.ops = []; res.corp = []; }      // relevé de compte : par défaut seuls les dividendes sont importés (les achats / ventes viennent du fichier Transactions)
     const pl = Ledger.plan(state, res.ops, { account: acc === '__new__' ? '__new__' : acc, reference: buildRef(acc === '__new__' ? '__new__' : acc) });
-    const divGroups = Ledger.groupDividends(res.divs || []), pv = Ledger.brokerDividendPayments(state, divGroups, () => 'preview', { createMissing: true, coverage: { from: res.meta.from, to: res.meta.to }, account: acc === '__new__' ? null : acc });
+    const divGroups = Ledger.groupDividends(res.divs || []), pv = divImportPlan(divGroups, () => 'preview', acc === '__new__' ? null : acc, fileName, 'preview');
     const willHave = new Set(pl.instruments.map((i) => String(i.isin || '').toUpperCase())); pv.stubs = pv.stubs.filter((x) => !willHave.has(String(x.isin || '').toUpperCase()));      // les positions créées par cet import n'ont pas besoin d'archive « relevé seul »
     cur = { det, res, pl, acc, ctx, fileName, rows: rows.length, divGroups, divPlan: pv };
     drawDegiro(m, cur);
@@ -246,7 +245,7 @@ function drawDegiro(m, cur, keepChoices) {
   const refMode = pl.reference && pl.reference.mode;
   $('#dgSummary', m).innerHTML = '<ul>' + li(t.detected, 'transaction(s) détectée(s)') + li(t.dups, 'déjà connue(s) / doublon(s) ignoré(s)') + li(t.newTx, 'nouvelle(s) à ajouter', 'pos') + li(res.ops.filter((o) => o.zero).length, 'mouvement(s) de titres sans montant importé(s) (livraisons gratuites, retraits : quantité modifiée, coût inchangé, aucun résultat inventé)') + li(t.corp - res.ops.filter((o) => o.zero).length, 'autre(s) opération(s) sur titres détectée(s) (split, échange…) : listées, jamais appliquées sans votre validation') +
     li(t.newPos, 'position(s) nouvelle(s) à créer') + li(t.kept, 'position(s) existante(s) conservée(s)' + (t.recomputed ? ' (dont <b>' + t.recomputed + ' recalculée(s)</b> depuis les transactions : positions issues de l\'import)' : '') + (t.filled ? ' (dont ' + t.filled + ' complétée(s) d\'une information manquante)' : '') + (t.aligned ? ', <b>' + t.aligned + ' alignée(s) : quantité et PRU remplacés sur votre demande</b>' : '')) +
-    (t.divGroups ? li(t.divGroups, 'dividende(s) du relevé de compte' + (res.meta.from ? ' (du ' + esc(fmtDate(res.meta.from)) + ' au ' + esc(fmtDate(res.meta.to)) + ')' : '') + ' — source <b>confirmée</b> (brut, retenue, net réels) : <b>' + cur.divPlan.add.length + '</b> à ajouter' + (cur.divPlan.stubs.length ? ', dont des sociétés que vous ne détenez plus (' + cur.divPlan.stubs.length + ' ajoutée(s) aux positions clôturées)' : '') + ', <b>' + cur.divPlan.replace.length + '</b> estimation(s) remplacée(s) par le montant réel, ' + cur.divPlan.dups.length + ' déjà enregistré(s)' + (cur.divPlan.unmatched.length ? ', ' + cur.divPlan.unmatched.length + ' non rattaché(s)' : ''), 'pos') : '') + li(t.closed, 'position(s) vendue(s) en totalité, non ajoutée(s) au portefeuille actuel') + li(t.check, 'actif(s) à vérifier, conservés dans l\'historique mais non ajoutés au portefeuille actuel', t.check ? 'warn-t' : '') + li(t.review, 'opération(s)/ligne(s) nécessitant une vérification', t.review ? 'warn-t' : '') + '</ul>' +
+    (t.divGroups ? li(t.divGroups, 'dividende(s) du relevé de compte' + (res.meta.from ? ' (du ' + esc(fmtDate(res.meta.from)) + ' au ' + esc(fmtDate(res.meta.to)) + ')' : '') + ' — montants <b>réels</b> (brut, retenue, net) : <b>' + cur.divPlan.rec.fresh.length + '</b> nouveau(x), <b>' + (cur.divPlan.rec.known.length + cur.divPlan.rec.adopted.length) + '</b> déjà connu(s) (ignorés), <b>' + cur.divPlan.rec.updated.length + '</b> mis à jour' + (cur.divPlan.stubs.length ? ', dont des sociétés que vous ne détenez plus (' + cur.divPlan.stubs.length + ' ajoutée(s) aux positions clôturées)' : '') + (cur.divPlan.rec.ignored.length ? ', ' + cur.divPlan.rec.ignored.length + ' ignoré(s)' : '') + (cur.divPlan.unmatched.length ? ', ' + cur.divPlan.unmatched.length + ' non rattaché(s)' : ''), 'pos') : '') + li(t.closed, 'position(s) vendue(s) en totalité, non ajoutée(s) au portefeuille actuel') + li(t.check, 'actif(s) à vérifier, conservés dans l\'historique mais non ajoutés au portefeuille actuel', t.check ? 'warn-t' : '') + li(t.review, 'opération(s)/ligne(s) nécessitant une vérification', t.review ? 'warn-t' : '') + '</ul>' +
     (!refMode ? '<div class="notice warn" style="margin-top:6px">Aucune position réelle de référence : une position calculée est créée sans contre-vérification (risque d\'anciennes positions fantômes après un changement d\'ISIN ou un split). Chargez le relevé de portefeuille DEGIRO pour fiabiliser.</div>' : '') +
     (t.diverg.length ? '<div class="notice warn" style="margin-top:6px">Divergences de quantité : ' + t.diverg.map((i) => '<b>' + esc(i.name || i.isin) + '</b> (application ' + fmtQ(i.divergence.app) + ', historique ' + fmtQ(i.divergence.file) + ')').join(' · ') + '. Rien n\'est modifié sans votre accord.</div>' : '') +
     (missing ? '<div class="notice warn" style="margin-top:6px">Colonnes essentielles non reconnues : <b>' + esc(det.missing.join(', ')) + '</b>. Indiquez-les dans « Colonnes reconnues ».</div>' : '') +
@@ -264,7 +263,6 @@ function drawDegiro(m, cur, keepChoices) {
   if (!m.dataset.drawn) { m.dataset.drawn = '1'; $('#dgIssuesBox', m).open = pl.instruments.some((i) => i.status === 'check') || res.bad.length > 0 || res.corp.length > 0; }
   const dRow = $('#dgDivRow', m); if (dRow) dRow.classList.toggle('hide', !t.divGroups);
   $('#dgOpsRow', m).classList.toggle('hide', !det.statement);
-  const uRow = $('#dgUnconfRow', m), nU = cur.divPlan ? cur.divPlan.unconfirmed.length : 0; if (uRow) { uRow.classList.toggle('hide', !(t.divGroups && nU)); $('#dgUnconfTxt', m).innerHTML = 'Marquer « à vérifier » les <b>' + nU + '</b> dividende(s) <b>estimé(s)</b> de la période couverte que le relevé <b>ne confirme pas</b> (ils ne comptent plus dans vos revenus tant qu\'ils ne sont pas confirmés ; rien n\'est supprimé)'; }
   const addDivs = t.divGroups > 0 && $('#dgDiv', m) && $('#dgDiv', m).checked;
   const goBtn = $('#dgGo', m); goBtn.disabled = missing > 0 || (!addDivs && t.newTx === 0 && t.aligned === 0 && t.recomputed === 0 && t.filled === 0 && t.newPos === 0 && t.closed === 0 && t.check === 0 && !(pl.instruments.some((i) => i.status === 'archive' && !!i.check !== !!(i.ref && i.ref.ref.check))));
   goBtn.textContent = goBtn.disabled ? 'Rien à importer' : 'Importer (' + t.newTx + ' opération' + (t.newTx > 1 ? 's' : '') + (addDivs ? ' + ' + t.divGroups + ' dividende' + (t.divGroups > 1 ? 's' : '') : '') + ')';
@@ -286,26 +284,34 @@ async function confirmDegiro(m, cur) {
   const refChoice = $('#dgRef', m).value;
   if (refChoice === 'file' && cur.ctx.pendingRef) state.reference = Object.assign({ account: accId }, cur.ctx.pendingRef);
   const r = Ledger.apply(state, cur.pl, ch, { uid, account: accId });
-  // dividendes du relevé de compte : source confirmée (versements existants intacts ; seule une estimation de marché du même versement est remplacée)
-  let divRes = null;
+  // dividendes du relevé de compte : montants réels, import idempotent (identifiant stable, compte rendu) ; rien n'est supprimé
+  let divRes = null; const impId = uid();
   if (cur.divGroups && cur.divGroups.length && $('#dgDiv', m) && $('#dgDiv', m).checked) {
-    divRes = Ledger.brokerDividendPayments(state, cur.divGroups, uid, { createMissing: true, coverage: { from: cur.res.meta.from, to: cur.res.meta.to }, account: accId });
-    if (divRes.stubs.length) { state.archive = state.archive || []; state.archive.push.apply(state.archive, divRes.stubs); }
-    if (divRes.replace.length) state.payments = state.payments.filter((p) => !divRes.replace.includes(p.id));
-    state.payments.push.apply(state.payments, divRes.add);
-    if ($('#dgUnconf', m).checked && divRes.unconfirmed.length) { const set = new Set(divRes.unconfirmed); state.payments.forEach((p) => { if (set.has(p.id)) { p.verified = false; p.unconfirmedAt = new Date().toISOString(); } }); }
+    const plan = divImportPlan(cur.divGroups, uid, accId, cur.fileName, impId);
+    if (plan.stubs.length) { state.archive = state.archive || []; state.archive.push.apply(state.archive, plan.stubs); }
+    divRes = Object.assign({ stubs: plan.stubs }, Dividends.applyReconcile(state, plan.rec, { uid, importId: impId }));
+    Dividends.logImport(state, { id: impId, kind: 'statement', name: cur.fileName, account: accId, report: { fresh: divRes.fresh, known: divRes.known, adopted: divRes.adopted, updated: divRes.updated, ignored: divRes.ignored, anomalies: divRes.anomalies } });
   }
   // la source d'import (CSV d'origine) et son rapport restent enregistrés ; les anciens fichiers bruts sont allégés (3 derniers conservés)
   state.imports = state.imports || [];
-  state.imports.push({ id: uid(), at: new Date().toISOString(), name: cur.fileName, size: cur.ctx.size || 0, rows: cur.rows, account: accId, report: Object.assign({}, cur.res.report, { newTx: r.tx, dups: t.dups, created: r.created.length, archived: r.archived.length, checked: r.checked.length, corp: cur.res.corp.map((x) => ({ date: x.date, isin: x.isin, name: x.name, desc: x.desc, ratio: x.ratio, zero: !!x.zero })) }),
+  state.imports.push({ id: impId, kind: 'statement', at: new Date().toISOString(), name: cur.fileName, size: cur.ctx.size || 0, rows: cur.rows, account: accId, report: Object.assign({}, cur.res.report, { dividends: divRes ? { fresh: divRes.fresh, known: divRes.known + divRes.adopted, updated: divRes.updated, ignored: divRes.ignored, anomalies: divRes.anomalies } : null, newTx: r.tx, dups: t.dups, created: r.created.length, archived: r.archived.length, checked: r.checked.length, corp: cur.res.corp.map((x) => ({ date: x.date, isin: x.isin, name: x.name, desc: x.desc, ratio: x.ratio, zero: !!x.zero })) }),
     raw: cur.ctx.text && cur.ctx.text.length < 3e6 ? cur.ctx.text : null });
   state.imports.slice(0, -3).forEach((x) => { delete x.raw; });
   saveState(); closeModal();
   view.port.tab = 'ops'; view.ops.asset = 'all';
-  const parts = [r.tx + ' opération(s)']; if (divRes && divRes.add.length) parts.push(divRes.add.length + ' dividende(s) confirmé(s)' + (divRes.replace.length ? ' (dont ' + divRes.replace.length + ' estimation(s) remplacée(s))' : '') + (divRes.stubs.length ? ', ' + divRes.stubs.length + ' société(s) non détenue(s)' : '') + ($('#dgUnconf', m) && $('#dgUnconf', m).checked && divRes.unconfirmed.length ? ', ' + divRes.unconfirmed.length + ' estimation(s) à vérifier' : '')); if (r.created.length) parts.push(r.created.length + ' position(s) créée(s)'); if (r.archived.length) parts.push(r.archived.length + ' soldée(s) archivée(s)'); if (r.checked.length) parts.push(r.checked.length + ' à vérifier'); if (r.filled) parts.push(r.filled + ' complétée(s)'); if (r.aligned) parts.push(r.aligned + ' alignée(s)');
+  const parts = [r.tx + ' opération(s)']; if (divRes) parts.push('dividendes : ' + divRes.fresh + ' nouveau(x), ' + (divRes.known + divRes.adopted) + ' déjà connu(s), ' + divRes.updated + ' mis à jour, ' + divRes.ignored + ' ignoré(s)' + (divRes.stubs.length ? ', ' + divRes.stubs.length + ' société(s) non détenue(s)' : '')); if (r.created.length) parts.push(r.created.length + ' position(s) créée(s)'); if (r.archived.length) parts.push(r.archived.length + ' soldée(s) archivée(s)'); if (r.checked.length) parts.push(r.checked.length + ' à vérifier'); if (r.filled) parts.push(r.filled + ' complétée(s)'); if (r.aligned) parts.push(r.aligned + ' alignée(s)');
   go('portfolio'); renderPage();
   toast('Import terminé : ' + parts.join(' · ') + '.', { ms: 14000, action: { label: 'Annuler l\'import', fn: undoLastImport } });
   enrichAfterImport(r.created, r.archived.concat(r.checked));
+}
+
+/* Plan d'import des dividendes d'un relevé de compte : positions (même compte), identifiants stables, rapprochement avec l'existant (Dividends.reconcile). Pur : n'écrit rien. */
+function divImportPlan(groups, uidFn, account, fileName, importId) {
+  const sd = Ledger.statementDividends(state, groups, uidFn, { createMissing: true, account, file: fileName });
+  const view_ = { payments: state.payments, holdings: (state.holdings || []).concat(sd.stubs), archive: state.archive || [], isinAlias: state.isinAlias };
+  Dividends.stableIds(sd.incoming, 'dgd2');
+  const rec = Dividends.reconcile(view_, sd.incoming, { legacyIds: (it) => [Ledger.legacyStatementId(it.holdingId, it.payDate, it.currency, it.gross)] });
+  return { incoming: sd.incoming, stubs: sd.stubs, unmatched: sd.unmatched, rec, importId };
 }
 
 /* Cours, dividendes, secteur et fractionnements (relais Yahoo) des nouveaux actifs et des positions soldées / à vérifier, puis contrôle automatique.
