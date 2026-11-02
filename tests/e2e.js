@@ -113,13 +113,15 @@ async function device(o) {
 }
 async function test(name, fn) {
   if (FILTER && !name.toLowerCase().includes(FILTER.toLowerCase())) return;
-  try { await fn(); results.ok++; console.log('ok   ' + name); } catch (e) { results.fail++; console.log('FAIL ' + name + '\n     ' + String(e.message).split('\n').slice(0, 4).join('\n     ') + (global.__lastPage && global.__lastPage.errors.length ? '\n     erreurs JS : ' + global.__lastPage.errors.join(' | ') : '')); }
+  try { await fn(); results.ok++; console.log('ok   ' + name); } catch (e) { results.fail++; console.log('FAIL ' + name + '\n     ' + String(e.message).split("\n").slice(0, 14).join('\n     ') + (global.__lastPage && global.__lastPage.errors.length ? '\n     erreurs JS : ' + global.__lastPage.errors.join(' | ') : '')); }
 }
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((m || 'eq') + ' : attendu ' + JSON.stringify(b) + ', obtenu ' + JSON.stringify(a)); };
 const ok = (c, m) => { if (!c) throw new Error(m || 'assertion'); };
 const H = (i, o) => Object.assign({ id: 'h' + i, ticker: 'T' + i, displayTicker: 'T' + i, name: 'Société ' + i, type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, account: 'main', logo: null, source: 'test', addedAt: '2025-01-01',
   dividend: { lastAmount: 1, anchorMonth: (i % 12) + 1, frequency: 'quarterly', dateKind: 'ex', updatedAt: '2026-10-01' } }, o || {});
 const SEED = (n, extra) => Object.assign({ v: 2, meta: {}, holdings: Array.from({ length: n }, (_, i) => H(i)), payments: [], transactions: [], accounts: [{ id: 'main', name: 'Mon portefeuille' }], settings: { relayUrl: 'https://dividende-relais.adam-teixeira89.workers.dev', baseCurrency: 'EUR', incomeMode: 'gross', tickerAuto: false, autoRefresh: false, columns: {} }, sent: { days: {}, months: {} } }, extra || {});
+const bellOpen = async (p) => { await p.waitForTimeout(500); if (await p.locator('#bellPanel.hide').count()) await p.click('#bellBtn'); await p.waitForSelector('#bellPanel:not(.hide)'); return (await p.locator('#bellPanel').innerText()).replace(/\n/g, ' | '); };
+const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
 const storeOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('dividendCalendarApp_v1')));
 const cloudState = (uid) => { const m = fsOps.get('users/' + uid); if (!m.exists) return null; let s = ''; for (let i = 0; i < m.data.chunks; i++) s += fsOps.get('users/' + uid + '/chunks/' + i).data.data; return JSON.parse(s); };
 const csvFile = (name, text) => ({ name, mimeType: 'text/csv', buffer: Buffer.from(text, 'utf-8') });
@@ -464,10 +466,10 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const n3 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
     ok(n1 >= 12 && n3 >= n1, 'périodes : ' + n1 + ' → ' + n3 + ' points'); ok(await p.locator('#perSeg [data-per="60"].on').count(), 'période active');
     await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(150);
-    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').last().hover(); await p.waitForTimeout(150);
+    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').nth(-2).hover(); await p.waitForTimeout(150);
     const tip = await p.locator('.tip').innerText(); ok(/€/.test(tip), 'infobulle de la courbe : ' + tip.replace(/\n/g, ' | '));
     await p.click('#eyeBtn'); await p.waitForTimeout(150);
-    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').last().hover(); await p.waitForTimeout(150);
+    await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').nth(-2).hover(); await p.waitForTimeout(150);
     ok(!/\d\s?€/.test(await p.locator('.tip').innerText()), 'courbe : chiffres masqués dans l\'infobulle');
     // sans historique de cours : message clair et bouton d'actualisation
     const q = await device({ guest: true, seed: SEED(2) }); await q.open();
@@ -569,8 +571,6 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     '01-11-2023,09:00,"NOVO NORDISK A/S B",DK0062498333,CPH,XCSE,10,"800,00",DKK,"-8000,00",DKK,"-1 072,00","7,4627",,"-3,00","-1 075,00",o1'];
   const DG_CSV = [HEAD_DG].concat(DG_ROWS).join('\n');
   const dgOpen = async (p, csv, name) => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportDegiro(); })]); await fc.setFiles(typeof csv === 'string' ? csvFile(name || 'Transactions.csv', csv) : csv); await p.waitForSelector('#dgSummary li'); await p.waitForTimeout(100); };
-  const bellOpen = async (p) => { await p.waitForTimeout(500); if (await p.locator('#bellPanel.hide').count()) await p.click('#bellBtn'); await p.waitForSelector('#bellPanel:not(.hide)'); return (await p.locator('#bellPanel').innerText()).replace(/\n/g, ' | '); };
-  const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
   const shot = async (p, n) => { if (process.env.SHOTS) await p.screenshot({ path: process.env.SHOTS + '/' + n + '.png' }); };
   const dgConfirm = async (p) => { await p.click('#dgGo'); await p.waitForTimeout(100); await p.click('#dgGo'); await p.waitForTimeout(300); };
   const waitIdle = async (p) => { await p.waitForFunction(() => !document.querySelector('#rfBar'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(500); };
@@ -689,13 +689,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
       H(1, { ticker: 'XYZ', displayTicker: 'XYZ', isin: 'FR0000000001', name: 'Sans cours', quantity: 5, avgCost: 20, price: 30, hist: { from: ymAgo(3), c: [25, 27, 28, 30] } })];
     seed.transactions = [{ id: 't1', holdingId: 'h0', date: y + '-15', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'degiro' }, { id: 't2', holdingId: 'h1', date: ymAgo(8) + '-10', type: 'buy', qty: 5, price: 20, fees: 0, currency: 'EUR', amountAcct: 100, acctCur: 'EUR', source: 'degiro' }];
     const p = await device({ guest: true, seed }); await p.open(); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300);
-    const note = await p.locator('.hero .chart-note').innerText(); ok(/Cours historiques indisponibles pour Sans cours/.test(note) && /pointillés/.test(note), 'message explicatif : ' + note.replace(/\n/g, ' | '));
+    const note = await bellOpen(p); ok(/Cours historiques indisponibles/.test(note) && /Sans cours/.test(note) && /pointillés/.test(note), 'message explicatif dans la cloche : ' + note.slice(0, 400)); await bellClose(p);
     ok(await p.locator('svg.chart path[stroke-dasharray="3 4"]').count() >= 1, 'portion partielle dessinée en pointillés');
     const part = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 12, today: new Date() }); return { nPartial: h.points.filter((q) => q.partial).length, withVal: h.points.some((q) => !q.partial && q.value > 0), pre: h.points.filter((q) => q.partial && q.value >= 0).every((q) => q.parts.every((x) => x[0] !== 'Sans cours')) }; });
     ok(part.nPartial > 0 && part.withVal && part.pre, 'points partiels exclus de la valeur (aucun cours inventé)');
     // ancien relais : pas de cours quotidiens
     RELAY.old = true; const q = await device({ guest: true }); await q.open(); await dgOpen(q, DG_CSV); await dgConfirm(q); await waitIdle(q); await q.evaluate(() => go('home')); await q.waitForTimeout(400);
-    await q.click('#perSeg [data-per="3"]'); await q.waitForTimeout(250); ok(/Cours quotidiens indisponibles/.test(await q.locator('.hero .chart-note').innerText()), 'ancien relais : points mensuels annoncés'); ok(!(await storeOf(q)).holdings[0].hist.d, 'pas de série quotidienne enregistrée'); RELAY.old = false;
+    await q.click('#perSeg [data-per="3"]'); await q.waitForTimeout(250); ok(/Cours quotidiens indisponibles/.test(await bellOpen(q)), 'ancien relais : points mensuels annoncés (cloche)'); await bellClose(q); ok(!(await storeOf(q)).holdings[0].hist.d, 'pas de série quotidienne enregistrée'); RELAY.old = false;
     eq(p.errors.concat(q.errors), [], 'aucune erreur JS');
   });
 
@@ -870,7 +870,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(await p.locator('#newsBox .news-row').count(), 1, 'un seul article retenu'); ok(/rien pour AI\.PA/.test(t), 'titre sans actualité signalé, rien d\'inventé');
     eq((await p.locator('#newsBox .news-row').getAttribute('rel')), 'noopener noreferrer', 'lien sûr'); eq(RELAY.newsCalls.sort(), ['AAI.PA'.slice(1), 'AAPL'].sort(), 'chaque actif interrogé une fois');
     RELAY.trFail = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); localStorage.removeItem('dca_tr'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(/MM: Apple relève/.test(await p.locator('#newsBox').innerText()), 'le relais ne traduit pas : secours MyMemory depuis le navigateur : ' + (await p.locator('#newsBox').innerText()).replace(/\n/g, ' | ')); RELAY.mmFail = true;
-    await p.evaluate(() => { localStorage.removeItem('dca_news'); localStorage.removeItem('dca_tr'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); const tt = await p.locator('#newsBox').innerText(); ok(/Apple relève ses prévisions/.test(tt) && !/MM:|FR:/.test(tt) && /Service de traduction indisponible/.test(tt), 'tout indisponible : titre d\'origine + message : ' + tt.replace(/\n/g, ' | ')); RELAY.trFail = false; RELAY.mmFail = false;
+    await p.evaluate(() => { localStorage.removeItem('dca_news'); localStorage.removeItem('dca_tr'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); const tt = await p.locator('#newsBox').innerText(); ok(/Apple relève ses prévisions/.test(tt) && !/MM:|FR:/.test(tt) && /Service de traduction indisponible/.test(await bellOpen(p)), 'tout indisponible : titre d\'origine + message dans la cloche : ' + tt.replace(/\n/g, ' | ')); await bellClose(p); RELAY.trFail = false; RELAY.mmFail = false;
     RELAY.trOld = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); localStorage.removeItem('dca_tr'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(/MM: Apple relève/.test(await p.locator('#newsBox').innerText()), 'ancien relais (sans /translate) : le secours traduit quand même'); RELAY.mmFail = true; await p.evaluate(() => { localStorage.removeItem('dca_news'); localStorage.removeItem('dca_tr'); newsMem.data = null; renderPage(); }); await p.waitForSelector('#newsBox .news-row'); ok(/relais n'est pas à jour/i.test(await p.locator('#newsBox').innerText()), 'ancien relais ET secours en panne : message explicite'); RELAY.trOld = false; RELAY.mmFail = false;
     await p.evaluate(() => { state.settings.news = false; saveState(); renderPage(); }); await p.waitForTimeout(200); eq(await p.locator('#newsBox').count(), 0, 'désactivable'); eq(p.errors, [], 'aucune erreur JS');
   });
@@ -1321,7 +1321,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     let t = await bellOpen(p); ok(/Mise à jour des dividendes disponible/.test(t) && /Voir et appliquer/.test(t) && /Ignorer/.test(t), 'panneau : titre, détail, actions — ' + t.slice(0, 300));
     await p.click('[data-nt="div:migration"] [data-nt-act=ignore]'); await p.waitForTimeout(200); ok(!/Mise à jour des dividendes disponible/.test((await p.locator('#bellPanel .nt-list').count()) ? await p.locator('#bellPanel .nt-list').first().innerText() : ''), 'ignorée : retirée de la liste'); ok(/Traitées \(1\)/.test(await p.locator('#bellPanel').innerText()), 'rangée dans « Traitées »');
     eq(Object.keys((await storeOf(p)).notices.handled), ['div:migration'], 'état conservé dans les données');
-    await bellClose(p); await p.evaluate(() => go('home')); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(700); ok(await p.locator('#bellBtn .bell-badge.hide').count() === 1, 'après navigation : toujours ignorée (pas de pastille)');
+    await bellClose(p); await p.evaluate(() => go('home')); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(700); { const bt = await bellOpen(p); ok(!/Voir et appliquer/.test(bt.split('Traitées')[0]) && /Traitées \(1\)/.test(bt), 'après navigation : toujours ignorée (rangée dans Traitées) — ' + bt.slice(0, 400)); await bellClose(p); }
     await bellOpen(p); await p.click('[data-nt-toggle]'); await p.click('[data-nt="div:migration"] [data-nt-act=restore]'); await p.waitForTimeout(200); ok(/Voir et appliquer/.test(await p.locator('#bellPanel').innerText()), 'rétablie');
     await p.click('[data-nt="div:migration"] [data-nt-act=accept]'); await p.waitForSelector('#auGo'); ok(await p.locator('#bellPanel.hide').count() === 1, 'accepter ouvre la correction proposée et ferme la cloche'); await p.keyboard.press('Escape'); await p.waitForTimeout(200);
     await p.evaluate(() => { toast('Erreur de test : échec de l\'actualisation', { error: true }); }); await p.waitForTimeout(200); ok(await p.locator('#bellBtn .bell-badge[data-level="error"]').count() === 1, 'une erreur affichée en bulle est conservée dans la cloche (niveau erreur)');
