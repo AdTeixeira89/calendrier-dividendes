@@ -95,6 +95,14 @@ Sous la courbe de l'Accueil, une bande « **Performance · {période}** » suit 
 - **Périodes disponibles** : si l'historique est plus court que la période choisie (ex. « 5 ans » avec 2 ans de données), le calcul part du début réel, le dit, et le bouton est atténué ; il démarre aussi à la première date où toutes les positions sont valorisées (jamais de cours inventé). Positions sans historique d'opérations : quantité actuelle supposée constante, signalé.
 - Calcul : `Engine.periodReturn` (testé : apports, retraits, dividendes, périodes tronquées).
 
+## Cloche de notifications
+
+Les défauts, avertissements, erreurs et informations « à lire » ne prennent plus de place dans les pages : ils sont regroupés dans la **cloche** (barre du haut, à gauche du bouton d'actualisation), avec une pastille (couleur = gravité la plus haute : erreur, avertissement, information).
+- Chaque notification a un titre, un détail et jusqu'à trois actions : **Accepter** (appliquer la correction proposée — ex. « Voir et appliquer », « Actualiser » — ou « Compris » pour une simple information), **Modifier** (ouvrir l'endroit où corriger à la main) et **Ignorer**.
+- Une notification ignorée ou acceptée est rangée dans **Traitées** (rétablissable, conservée dans les données) et ne revient que si son contenu change. « Tout ignorer » vide la liste.
+- Sont dans la cloche : période de performance raccourcie ou arrêtée, positions sans historique d'opérations complet, cours / taux de change historiques ou actuels indisponibles, anomalies de l'historique, mise à jour des dividendes disponible, net partiel / versements non convertis, répartition incomplète, actualités ou traduction indisponibles, mise à jour de l'application, erreur de synchronisation, et **toute erreur affichée en bulle** (conservée jusqu'à ce qu'on la traite).
+- Les messages propres à une fenêtre (validation d'un formulaire, aperçu d'import) restent dans la fenêtre.
+
 ## Dividendes : perçu, dû et prévision (moteur central `dividends.js`)
 
 Trois catégories **indépendantes**, calculées par un seul module pur (`dividends.js`, testé sous Node) :

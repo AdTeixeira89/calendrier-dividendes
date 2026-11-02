@@ -68,7 +68,7 @@ function hydrateState(parsed) {
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
     s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {}; if (!s.ignored || typeof s.ignored !== 'object' || Array.isArray(s.ignored)) s.ignored = {};
-    s.archive = Array.isArray(s.archive) ? s.archive : [];  s.estimates = Array.isArray(s.estimates) ? s.estimates : []; s.migrations = Array.isArray(s.migrations) ? s.migrations : []; s.dividendImports = Array.isArray(s.dividendImports) ? s.dividendImports : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
+    s.archive = Array.isArray(s.archive) ? s.archive : [];  if (!s.notices || typeof s.notices !== 'object') s.notices = { handled: {} }; if (!s.notices.handled || typeof s.notices.handled !== 'object') s.notices.handled = {}; s.estimates = Array.isArray(s.estimates) ? s.estimates : []; s.migrations = Array.isArray(s.migrations) ? s.migrations : []; s.dividendImports = Array.isArray(s.dividendImports) ? s.dividendImports : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
     if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;
     s.holdings.forEach((h) => { if (!h.account || !s.accounts.some((a) => a.id === h.account)) h.account = s.accounts[0].id; migrateHolding(h); if (h.source === 'degiro' && h.derived === undefined) h.derived = true; });   // positions calculées par l'import d'historique
@@ -223,7 +223,7 @@ function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Dat
    SYNCHRONISATION CLOUD
    --------------------------------------------------------------- */
 let syncTimer = null, syncing = false, syncQueued = false;
-function setSync(st, msg) { view.sync = { state: st, msg: msg || '', at: Date.now() }; renderSyncChip(); }
+function setSync(st, msg) { view.sync = { state: st, msg: msg || '', at: Date.now() }; renderSyncChip(); Notify.set('sync', st === 'err' ? [{ id: 'sync:err', level: 'error', title: 'Synchronisation en erreur', body: esc(msg || 'La synchronisation a échoué.'), accept: { label: 'Réessayer', run: () => { try { pullIfChanged(); } catch (e) { /* ignoré */ } }, ack: false } }] : []); }
 
 function cloudPayload() {
   const c = clone(state);
@@ -490,10 +490,11 @@ function buildShell() {
   const tabs = Object.keys(PAGES).map((k) => '<button type="button" data-go="' + k + '">' + icon(PAGES[k].icon) + '<span>' + (PAGES[k].short || PAGES[k].label) + '</span></button>').join('');
   $('#app').innerHTML = '<aside class="sidebar"><div class="brand"><img src="logo.svg" alt="">Dividendes</div>' + nav + '<div class="spacer"></div>' +
     '<div class="side-foot"><div id="syncChipSide"></div><div class="muted" style="font-size:12px;padding:0 4px" id="whoSide"></div></div></aside>' +
-    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">Dividendes</span></div><span class="grow"></span><button class="rf-btn" type="button" data-rf-btn aria-label="Actualiser">' + icon('refresh') + '</button>' +
+    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">Dividendes</span></div><span class="grow"></span><button class="rf-btn bell-btn" type="button" id="bellBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="Notifications">' + icon('bell') + '<span class="bell-badge hide"></span></button><button class="rf-btn" type="button" data-rf-btn aria-label="Actualiser">' + icon('refresh') + '</button>' +
     '<label class="sr" for="acctSel">Portefeuille</label><select id="acctSel" style="min-height:36px"></select><span id="syncChipTop"></span></header>' +
     '<main id="page" tabindex="-1"></main></div><nav class="tabbar" aria-label="Navigation">' + tabs + '</nav>';
   $$('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
+  Notify.init();
   $('#acctSel').onchange = (e) => { if (e.target.value === '__new__') { e.target.value = view.account; openNewAccountModal(); return; } view.account = e.target.value; renderPage(); };
   $$('#syncChipSide,#syncChipTop').forEach((c) => c.addEventListener('click', () => go('settings')));
 }
@@ -524,7 +525,8 @@ function renderPage() {
   if (!$('#page')) return;
   renderShell();
   try { PAGES[view.page].render($('#page')); }
-  catch (e) { console.error(e); $('#page').innerHTML = '<div class="card card-pad"><div class="notice err">Une erreur est survenue en affichant cette page : ' + esc(e.message) + '</div></div>'; }
+  catch (e) { console.error(e); $('#page').innerHTML = '<div class="card card-pad"><div class="notice err">Une erreur est survenue en affichant cette page : ' + esc(e.message) + '</div></div>'; Notify.push({ level: 'error', title: 'Erreur d\'affichage', body: esc(e.message) }); }
+  clearTimeout(renderPage.gt); renderPage.gt = setTimeout(collectGlobalNotices, 200);      // notifications globales, hors du chemin critique d'affichage
 }
 
 /* Rafraîchissement discret (actualisation en arrière-plan, synchro) : ne coupe jamais une saisie ni une fenêtre ouverte. */

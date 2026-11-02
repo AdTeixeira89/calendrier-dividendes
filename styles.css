@@ -537,3 +537,22 @@ html{overscroll-behavior-y:contain}
 @media (prefers-reduced-motion: reduce){ #ptr.run svg,.rf-btn.spin svg{animation:none} }
 
 .choice-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}.choice-list .btn{justify-content:flex-start;text-align:left;white-space:normal;height:auto;padding:10px 12px}
+
+/* ---------- cloche de notifications (notify.js) ---------- */
+.bell-btn{position:relative}
+.bell-badge{position:absolute;top:2px;right:1px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--warn);color:#fff;font-size:10.5px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px var(--bg)}
+.bell-badge[data-level="error"]{background:var(--danger)} .bell-badge[data-level="info"]{background:var(--info)}
+.bell-panel{position:fixed;z-index:60;top:54px;right:12px;width:min(390px,calc(100vw - 24px));max-height:min(72vh,640px);overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:10px 12px 12px;outline:0}
+.nt-top{display:flex;align-items:center;gap:6px;margin-bottom:6px;position:sticky;top:-10px;background:var(--surface);padding:4px 0}
+.nt-top .grow{flex:1}
+.nt-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.nt{border:1px solid var(--border);border-left-width:4px;border-radius:var(--radius-sm);padding:9px 11px;background:var(--surface-2)}
+.nt-error{border-left-color:var(--danger)} .nt-warn{border-left-color:var(--warn)} .nt-info{border-left-color:var(--info)}
+.nt-h{display:flex;gap:7px;align-items:flex-start;font-size:13px} .nt-ic{flex:none;font-size:12px;line-height:19px}
+.nt-error .nt-ic{color:var(--danger)} .nt-warn .nt-ic{color:var(--warn)} .nt-info .nt-ic{color:var(--info)}
+.nt-b{margin:4px 0 0 19px;font-size:12.5px;color:var(--muted);line-height:1.45}
+.nt-a{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0 19px}
+.nt-empty{padding:18px 6px;color:var(--muted);font-size:13px;text-align:center}
+.nt-toggle{margin-top:10px;background:none;border:0;color:var(--muted);font-size:12.5px;cursor:pointer;padding:4px 2px}
+.nt-done{margin-top:6px;opacity:.8}
+@media print{ .bell-panel,.bell-btn{display:none} }

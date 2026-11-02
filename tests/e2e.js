@@ -409,10 +409,10 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/Dividendes nets perçus depuis le 1er janvier \| 10,00\s?€ \| Brut 10,00\s?€ · retenues 0,00\s?€ \| 1 versement\(s\) réel\(s\)/.test(k), 'statistiques : net 10 €, brut 10 € — ' + k.slice(0, 500));
     ok(/Dividendes bruts perçus \| 10,00\s?€/.test(k) && /Total net perçu depuis le début \| 10,00\s?€ \| Brut 10,00\s?€ · retenues 0,00\s?€ \| 1 versement\(s\) depuis le/.test(k), 'statistiques : brut et total depuis le début — ' + k.slice(0, 700));
     ok(/Prévision : dividendes annuels/.test(k) && /perçus \+ .* à venir/.test(k), 'les prévisions sont étiquetées et séparées du perçu');
-    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(250); ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau : 2 estimations encore mélangées'); eq(await p.locator('#tblHost tbody tr').count(), 1, 'la liste ne montre que le versement réel');
-    await p.click('[data-do=div-migrate]'); await p.waitForSelector('#auGo'); eq((await storeOf(p)).payments.length, 3, 'simulation : rien n\'est modifié avant validation'); await p.click('#auGo'); await p.waitForTimeout(400);
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(250); ok(/Mise à jour des dividendes disponible/.test(await bellOpen(p)), 'cloche : 2 estimations encore mélangées'); ok(!/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'plus de gros bandeau dans la page'); eq(await p.locator('#tblHost tbody tr').count(), 1, 'la liste ne montre que le versement réel');
+    await p.click('[data-nt="div:migration"] [data-nt-act=accept]'); await p.waitForSelector('#auGo'); eq((await storeOf(p)).payments.length, 3, 'simulation : rien n\'est modifié avant validation'); await p.click('#auGo'); await p.waitForTimeout(400);
     let st = await storeOf(p); eq([st.payments.map((x) => x.id), st.estimates.map((x) => x.id).sort(), st.migrations.length], [['v1'], ['u1', 'u2'], 1], 'estimations rangées (conservées), versement réel intact, migration enregistrée');
-    ok(!/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau disparu');
+    await p.waitForTimeout(500); ok(!/Mise à jour des dividendes disponible/.test(await bellOpen(p)), 'notification disparue'); await bellClose(p);
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); st = await storeOf(p); eq([st.payments.length, (st.estimates || []).length], [3, 0], 'annulation : état d\'origine rétabli');
     await p.evaluate(() => go('home')); await p.waitForTimeout(250); ok(/Perçus\s+10\s?€/.test(await p.locator('#page').innerText()), 'perçu inchangé : 10 €');
   });
@@ -569,6 +569,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     '01-11-2023,09:00,"NOVO NORDISK A/S B",DK0062498333,CPH,XCSE,10,"800,00",DKK,"-8000,00",DKK,"-1 072,00","7,4627",,"-3,00","-1 075,00",o1'];
   const DG_CSV = [HEAD_DG].concat(DG_ROWS).join('\n');
   const dgOpen = async (p, csv, name) => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportDegiro(); })]); await fc.setFiles(typeof csv === 'string' ? csvFile(name || 'Transactions.csv', csv) : csv); await p.waitForSelector('#dgSummary li'); await p.waitForTimeout(100); };
+  const bellOpen = async (p) => { await p.waitForTimeout(500); if (await p.locator('#bellPanel.hide').count()) await p.click('#bellBtn'); await p.waitForSelector('#bellPanel:not(.hide)'); return (await p.locator('#bellPanel').innerText()).replace(/\n/g, ' | '); };
+  const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
   const shot = async (p, n) => { if (process.env.SHOTS) await p.screenshot({ path: process.env.SHOTS + '/' + n + '.png' }); };
   const dgConfirm = async (p) => { await p.click('#dgGo'); await p.waitForTimeout(100); await p.click('#dgGo'); await p.waitForTimeout(300); };
   const waitIdle = async (p) => { await p.waitForFunction(() => !document.querySelector('#rfBar'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(500); };
@@ -915,7 +917,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(!/à vérifier/i.test(t), 'le brouillon de 400 € (« auto ») n\'est ni compté ni affiché : seuls 50 € de dividendes réels');
     await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t) && /Apports nets\s+0\s?€/i.test(t), 'DEGIRO, 1 an : 2 400 → 2 640 + 50 de dividendes = 290, aucun apport : ' + t.slice(0, 300));
     ok(!/hors apports/i.test(t) && !/Performance · 1 an\s+\+\s?290\s?€\s+[+−-]?\d+,\d\s?%/i.test(t), 'le ratio « % hors apports » n\'est plus affiché : ' + t.slice(0, 200));
-    await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(300); t = await strip(); ok(/raccourcie/i.test(t), '5 ans : historique plus court signalé : ' + t.slice(-250)); ok(await p.locator('#perSeg [data-per="60"].dim').count() === 1, 'bouton 5 ans atténué (historique plus court)');
+    await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(300); t = await strip(); ok(!/raccourcie/i.test(t), 'plus de gros message dans le bandeau de performance'); ok(/raccourcie/i.test(await bellOpen(p)), '5 ans : historique plus court signalé dans la cloche'); await bellClose(p); ok(await p.locator('#perSeg [data-per="60"].dim').count() === 1, 'bouton 5 ans atténué (historique plus court)');
     await p.selectOption('#acctSel', 'all'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300); t = await strip();
     ok(/Performance · 1 an/i.test(t) && /\+\s?290\s?€/i.test(t), 'tous les portefeuilles, 1 an : Alpha +290, Beta 0 → 290 : ' + t.slice(0, 300));
     await p.selectOption('#acctSel', 'main'); await p.waitForTimeout(300); t = await strip(); ok(/Performance · 1 an\s+0\s?€/i.test(t) || /0\s?€/i.test(t.slice(0, 60)), 'Mon portefeuille (Beta à cours constant) : performance nulle malgré l\'achat : ' + t.slice(0, 200));
@@ -1035,7 +1037,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.payments = [{ id: 'draft', holdingId: 'aapl', ticker: 'AAPL', name: 'Apple', exDate: '2026-02-09', payDate: null, qty: 10, perShare: .25, gross: 2.5, currency: 'USD', source: 'auto', verified: false }];
     const p = await device({ guest: true, seed }); p.setDefaultTimeout(15000); await p.open(); await p.evaluate(() => go('home')); await p.waitForTimeout(400);
     ok(!/Compléter l'historique/.test(await p.locator('#divCardEl').innerText()), 'accueil : plus d\'invitation à ajouter des estimations aux dividendes');
-    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'historique : le brouillon est signalé comme estimation à ranger');
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300); ok(/Mise à jour des dividendes disponible/.test(await bellOpen(p)), 'cloche : le brouillon est signalé comme estimation à ranger'); await bellClose(p);
     await p.click('[data-do=div-history]'); await p.waitForSelector('[data-rec]', { timeout: 60000 }); const t = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
     ok(/Air Liquide \(ancienne\) clôturée/.test(t), 'position clôturée : dividendes dus tant qu\'elle était détenue : ' + t.slice(0, 500));
     const rows = await p.locator('.modal tbody tr').allInnerTexts(); ok(rows.filter((r) => /Air Liquide/.test(r)).length === 2, '2 détachements pour l\'ancienne position (2024 et 2025 ; pas 2026 après la vente) : ' + rows.length + ' lignes'); ok(rows.some((r) => /Apple/.test(r) && /2026/.test(r)), 'le brouillon n\'est pas un versement réel : le dû d\'Apple reste à confirmer');
@@ -1301,12 +1303,30 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const pay = (id, h, d, g, src, more) => Object.assign({ id, holdingId: h, ticker: 'SAP', name: 'SAP', payDate: d, qty: 12, gross: g, net: g, currency: 'EUR', source: src, verified: true }, more || {});
     seed.payments = [pay('r', 'sap', y + '-02-10', 37.91, 'csv', { net: 30, tax: 7.91, extId: '0573ed03-1d4d-435e-a0cd-5a810eb5711f' }), pay('a', 'sap', y + '-02-08', 30, 'auto'), pay('o', 'gone', y + '-03-10', 50, 'csv', { ticker: 'DE0007164600', extId: 'zz' })];
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(300);
-    ok(/Mise à jour des dividendes disponible/.test(await p.locator('#page').innerText()), 'bandeau affiché');
-    await p.click('[data-do=div-migrate]'); await p.waitForSelector('#auGo'); eq(await p.locator('[data-au]:checked').count(), 2, 'deux corrections cochées (rattachement, brut)'); eq((await storeOf(p)).payments.length, 3, 'rien de modifié avant validation');
+    ok(/Mise à jour des dividendes disponible/.test(await bellOpen(p)), 'notification affichée');
+    await p.click('[data-nt="div:migration"] [data-nt-act=accept]'); await p.waitForSelector('#auGo'); eq(await p.locator('[data-au]:checked').count(), 2, 'deux corrections cochées (rattachement, brut)'); eq((await storeOf(p)).payments.length, 3, 'rien de modifié avant validation');
     await p.click('#auGo'); await p.waitForTimeout(400); const st = await storeOf(p); eq(st.payments.map((x) => x.id).sort(), ['o', 'r'], 'estimation rangée ; réels conservés'); eq(st.estimates.map((x) => x.id), ['a'], 'estimation conservée à part');
     eq([st.payments.find((x) => x.id === 'o').holdingId, st.payments.find((x) => x.id === 'r').gross, st.payments.find((x) => x.id === 'r').net], ['sap', 30, 22.09], 'orphelin rattaché à SAP ; brut = montant de l\'export (30), net = 30 − 7,91');
     const tot = await p.evaluate(() => Dividends.summary(state, { convert: (v) => v }).gross); eq(tot, 80, 'perçu = 30 + 50');
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); eq((await storeOf(p)).payments.length, 3, 'annulable');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('cloche de notifications : défauts et erreurs regroupés (plus de gros bandeaux), accepter / modifier / ignorer, état conservé, rétablissement, erreurs de l\'application conservées', async () => {
+    RELAY.old = false; const y = new Date().getFullYear();
+    const seed = SEED(0); seed.holdings = [{ id: 'sap', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 12, avgCost: 100, price: 150, account: 'main', logo: null, source: 'manual', addedAt: y + '-01-01', dividend: {} }];
+    seed.payments = [{ id: 'a', holdingId: 'sap', ticker: 'SAP', name: 'SAP', payDate: y + '-02-08', qty: 12, gross: 30, net: 30, currency: 'EUR', source: 'auto', verified: true }];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(700);
+    ok(await p.locator('#bellBtn .bell-badge:not(.hide)').count() === 1, 'pastille visible sur la cloche (coin supérieur droit)'); eq(await p.locator('#page .notice').count(), 0, 'aucun gros bandeau d\'avertissement dans la page');
+    let t = await bellOpen(p); ok(/Mise à jour des dividendes disponible/.test(t) && /Voir et appliquer/.test(t) && /Ignorer/.test(t), 'panneau : titre, détail, actions — ' + t.slice(0, 300));
+    await p.click('[data-nt="div:migration"] [data-nt-act=ignore]'); await p.waitForTimeout(200); ok(!/Mise à jour des dividendes disponible/.test((await p.locator('#bellPanel .nt-list').count()) ? await p.locator('#bellPanel .nt-list').first().innerText() : ''), 'ignorée : retirée de la liste'); ok(/Traitées \(1\)/.test(await p.locator('#bellPanel').innerText()), 'rangée dans « Traitées »');
+    eq(Object.keys((await storeOf(p)).notices.handled), ['div:migration'], 'état conservé dans les données');
+    await bellClose(p); await p.evaluate(() => go('home')); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(700); ok(await p.locator('#bellBtn .bell-badge.hide').count() === 1, 'après navigation : toujours ignorée (pas de pastille)');
+    await bellOpen(p); await p.click('[data-nt-toggle]'); await p.click('[data-nt="div:migration"] [data-nt-act=restore]'); await p.waitForTimeout(200); ok(/Voir et appliquer/.test(await p.locator('#bellPanel').innerText()), 'rétablie');
+    await p.click('[data-nt="div:migration"] [data-nt-act=accept]'); await p.waitForSelector('#auGo'); ok(await p.locator('#bellPanel.hide').count() === 1, 'accepter ouvre la correction proposée et ferme la cloche'); await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+    await p.evaluate(() => { toast('Erreur de test : échec de l\'actualisation', { error: true }); }); await p.waitForTimeout(200); ok(await p.locator('#bellBtn .bell-badge[data-level="error"]').count() === 1, 'une erreur affichée en bulle est conservée dans la cloche (niveau erreur)');
+    t = await bellOpen(p); ok(/Erreur de test/.test(t), 'erreur listée'); await p.click('#bellPanel [data-nt^="ev:"] [data-nt-act=accept]'); await p.waitForTimeout(150); ok(!/Erreur de test/.test(await p.locator('#bellPanel').innerText().then((x) => x.split('Traitées')[0])), 'accepter une information la marque comme lue');
+    await p.keyboard.press('Escape'); await p.waitForTimeout(100); ok(await p.locator('#bellPanel.hide').count() === 1, 'Échap ferme le panneau');
     eq(p.errors, [], 'aucune erreur JS');
   });
 

@@ -39,12 +39,16 @@ function perfStripHtml(o) {
   const pr = Engine.periodReturn(o.hist, divAll.filter((d_) => !d_.unverified), today, { from: reqFrom });
   const WHY = { 'aucune donnée': 'pas encore d\'historique de cours (actualisez les données)', 'cours manquants à la date de fin': 'cours du jour indisponibles', 'cours manquants sur la période': 'cours historiques manquants sur la période', 'aucun investissement sur la période': 'aucun investissement sur cette période' };
   const sgn = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? '+' : '−') + money(Math.abs(v_), 0), cl = (v_) => (Math.round(Math.abs(v_)) === 0 ? '' : v_ > 0 ? 'pos' : 'neg');
+  const psrc = o.src || 'perf';
+  if (!pr.ok) { Notify.set(psrc, [{ id: psrc + ':off', level: 'info', title: 'Performance non calculable', body: esc(WHY[pr.reason] || pr.reason) + '.', edit: { label: 'Actualiser les données', run: () => runFullRefresh('button') } }]); }
   if (!pr.ok) return { pr, html: '<div class="perf-strip off"><div class="ind"><span>Performance · ' + esc(perLbl) + '</span><b class="muted">—</b><small>Non calculable : ' + esc(WHY[pr.reason] || pr.reason) + '</small></div></div>' };
   const nt = [];
   nt.push('Du ' + esc(fmtDate(pr.from)) + ' au ' + esc(fmtDate(pr.to)) + ' · ' + esc(o.scope) + ' · valeur ' + sens(money(pr.V0, 0) + ' → ' + money(pr.V1, 0)));
-  if (pr.truncated) nt.push('<span class="warn-t">Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.</span>');
-  if (pr.endPartial) nt.push('<span class="warn-t">Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).</span>');
-  if (pr.retro) nt.push('<span class="warn-t">' + pr.retroNames.length + ' position(s) sans historique d\'opérations complet ou sans prix d\'achat (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.</span>');
+  const pn = [];       // défauts et réserves : dans la cloche, pas dans la page
+  if (pr.truncated) pn.push({ id: psrc + ':truncated', level: 'warn', title: 'Période raccourcie', body: 'Historique disponible seulement depuis le ' + esc(fmtDate(pr.from)) + ' : la période « ' + esc(perLbl) + ' » est raccourcie.', edit: { label: 'Afficher « Tout »', run: () => { view.home.period = 0; renderPage(); } } });
+  if (pr.endPartial) pn.push({ id: psrc + ':endPartial', level: 'warn', title: 'Période arrêtée avant aujourd\'hui', body: 'Arrêtée au ' + esc(fmtDate(pr.to)) + ' (cours plus récents indisponibles).', edit: { label: 'Actualiser les cours', run: () => runFullRefresh('button') } });
+  if (pr.retro) pn.push({ id: psrc + ':retro', level: 'warn', title: 'Historique d\'opérations incomplet', body: pr.retroNames.length + ' position(s) sans historique d\'opérations complet ou sans prix d\'achat (' + esc(pr.retroNames.slice(0, 3).join(', ')) + (pr.retroNames.length > 3 ? '…' : '') + ') : quantité actuelle supposée constante, apports inconnus.', edit: { label: 'Contrôler l\'historique', run: () => openDiagnostic() } });
+  Notify.set(psrc, pn);
   const reliable = !pr.retro && !pr.truncated && !pr.endPartial && pr.pct !== null;
   const sub = o.showPct ? (reliable ? sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' pondéré dans le temps' : 'pourcentage non affiché (historique incomplet)') : 'gain de marché + dividendes';
   const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte' + (o.showPct ? ' ; le pourcentage est pondéré dans le temps (l\'effet de chaque versement est neutralisé) et n\'est affiché que si l\'historique d\'achats de toutes les positions est complet.' : '.');
@@ -86,23 +90,24 @@ function renderHome(host) {
   const chart = hasValue
     ? lineChart({ points: pts, cur: baseCur(), mask, title: 'Évolution de la valeur du portefeuille', costLine, tLabel: tLabel(view.home.period) })
     : '<div class="empty" style="padding:28px 8px"><h3>Pas encore d\'historique de cours</h3><p>Actualisez les données de marché pour tracer l\'évolution de la valeur' + (state.transactions.length ? ' à partir de vos opérations importées' : '') + '.</p><button class="btn primary" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>';
-  const notes = [];
+  const notes = [], hn = [];
   if (hasValue) {
     if (hist.allTx && state.transactions.length) notes.push('Valeur reconstituée : <b>opérations importées × cours historiques</b>' + (costLine ? ' · pointillés ocre : capital investi' : ''));
-    else if (hist.retro) notes.push('Cours passés × quantités <b>actuelles</b> pour ' + (hist.coverage.retro.length > 3 ? hist.coverage.retro.length + ' actifs' : esc(hist.coverage.retro.join(', '))) + ' (pas d\'historique d\'opérations complet : rétrospectif)');
+    else if (hist.retro) hn.push({ id: 'home:retro', level: 'info', title: 'Valeur passée estimée', body: 'Cours passés × quantités <b>actuelles</b> pour ' + (hist.coverage.retro.length > 3 ? hist.coverage.retro.length + ' actifs' : esc(hist.coverage.retro.join(', '))) + ' (pas d\'historique d\'opérations complet : rétrospectif).', edit: { label: 'Contrôler l\'historique', run: () => openDiagnostic() } });
     const miss = hist.coverage.missing;
-    if (miss.length) notes.push('<span class="warn-t">⚠ Cours historiques indisponibles pour ' + miss.slice(0, 3).map((m) => esc(m.name)).join(', ') + (miss.length > 3 ? ' et ' + (miss.length - 3) + ' autre(s)' : '') + ' (' + esc(miss[0].reason) + ' dès le ' + esc(fmtDate(miss[0].first)) + ') : les portions en <b>pointillés</b> sont partielles, ces actifs n\'y sont pas valorisés.</span>');
+    if (miss.length) hn.push({ id: 'home:missHist', level: 'warn', title: 'Cours historiques indisponibles', body: 'Pour ' + miss.slice(0, 3).map((m) => esc(m.name)).join(', ') + (miss.length > 3 ? ' et ' + (miss.length - 3) + ' autre(s)' : '') + ' (' + esc(miss[0].reason) + ' dès le ' + esc(fmtDate(miss[0].first)) + ') : les portions en <b>pointillés</b> sont partielles, ces actifs n\'y sont pas valorisés.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } });
     const curs = new Set(state.holdings.concat(state.archive || []).map((x) => x.currency || 'EUR').concat(state.transactions.map((t) => t.acctCur || 'EUR'))); curs.delete(baseCur());
-    if (curs.size && !(typeof fxHist !== 'undefined' && fxHist && Object.keys(fxHist).length)) notes.push('<span class="warn-t">⚠ Taux de change historiques indisponibles : le taux actuel est utilisé pour valoriser le passé (devises : ' + esc(Array.from(curs).join(', ')) + ').</span>');
-    if (hist.coverage.noDaily && view.home.period > 0 && view.home.period <= 6) notes.push('Cours quotidiens indisponibles (mettre à jour le relais Cloudflare) : points mensuels.');
+    if (curs.size && !(typeof fxHist !== 'undefined' && fxHist && Object.keys(fxHist).length)) hn.push({ id: 'home:fxHist', level: 'warn', title: 'Taux de change historiques indisponibles', body: 'Le taux actuel est utilisé pour valoriser le passé (devises : ' + esc(Array.from(curs).join(', ')) + ').', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } });
+    if (hist.coverage.noDaily && view.home.period > 0 && view.home.period <= 6) hn.push({ id: 'home:noDaily', level: 'info', title: 'Cours quotidiens indisponibles', body: 'Mettre à jour le relais Cloudflare : le graphique affiche des points mensuels.', edit: { label: 'Paramètres', run: () => go('settings') } });
   }
+  Notify.set('home', hn);
   const unitNote = un.count < pv.count ? un.count + ' / ' + pv.count + ' positions avec PRU' : un.count + ' position(s) avec PRU';
   const indGain = '<div class="ind"><span>Plus-value totale</span>' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + signed(un.gain) + '</b>') + '<small>' + sens(fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis') + ' · ' + unitNote + '</small>' : '<b>—</b><small>Nécessite un PRU fiable et le cours</small>') + '</div>';
   const indDay = '<div class="ind"><span>Plus-value journalière</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + ' · séance du ' + esc(fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' })) + ' vs clôture précédente' + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + '</small>'
     : '<b>—</b><small>Données insuffisantes (clôture précédente indisponible : actualisez avec le relais à jour)</small>') + '</div>';
   /* --- Rentabilité réelle de la période choisie pour le portefeuille affiché : gain = marché + dividendes, apports neutralisés --- */
   const per = view.home.period, acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);
-  const perfStrip = perfStripHtml({ ids, per, scope: acctLbl, hist, today, showPct: false }).html;
+  const perfStrip = perfStripHtml({ ids, per, scope: acctLbl, hist, today, showPct: false, src: 'perfHome' }).html;
   const availFrom = (() => { const ha = histFor(0); return ha && !ha.empty ? (ha.summary && ha.summary.firstTx) || (ha.points[0] && ha.points[0].date) : null; })();
   const perBtn = (q) => { const rf = q[0] > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - q[0], today.getDate())) : null; const short = !!(rf && availFrom && Date.parse(availFrom) - Date.parse(rf) > 35 * 86400000);
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
@@ -215,13 +220,15 @@ async function drawNews(box) {
     if (!document.body.contains(box)) return;
     const ago = (iso) => { const h = Math.max(0, (Date.now() - Date.parse(iso)) / 3600e3); return h < 1 ? 'il y a moins d\'1 h' : h < 24 ? 'il y a ' + Math.round(h) + ' h' : fmtDate(iso.slice(0, 10), { day: 'numeric', month: 'short' }); };
     const rows = d.items.slice(0, 8).map((n) => '<a class="news-row" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer"><span class="news-h"><b>' + esc(n.symbol) + '</b><small class="muted">' + esc(n.publisher) + ' · ' + esc(ago(n.at)) + '</small></span><span class="news-t"' + (n.fr ? ' title="' + esc('Original : ' + n.title) + '"' : '') + '>' + esc(n.fr || n.title) + '</span></a>').join('');
-    const trNote = d.trStatus === 'oldrelay' ? '<div class="notice warn" style="margin-bottom:8px"><span>Traduction impossible : le relais n\'est pas à jour (route /translate absente) et le service de secours ne répond pas. Titres affichés en anglais.</span></div>'
-      : d.trStatus === 'unavailable' ? '<div class="notice warn" style="margin-bottom:8px"><span>Service de traduction indisponible pour le moment : titres affichés en anglais.</span></div>' : '';
+    Notify.set('news', d.trStatus === 'oldrelay' ? [{ id: 'news:tr', level: 'warn', title: 'Traduction des actualités impossible', body: 'Le relais n\'est pas à jour (route /translate absente) et le service de secours ne répond pas. Titres affichés en anglais.', edit: { label: 'Paramètres', run: () => go('settings') } }]
+      : d.trStatus === 'unavailable' ? [{ id: 'news:tr', level: 'info', title: 'Traduction indisponible', body: 'Service de traduction indisponible pour le moment : titres affichés en anglais.' }] : []);
+    const trNote = '';
     box.innerHTML = newsCard(trNote + (rows || '<div class="muted" style="font-size:13px;padding:6px 0">Aucune actualité trouvée pour vos actifs.</div>') +
       '<p class="hint" style="margin:8px 0 0">Articles Yahoo Finance qui citent vos titres' + (state.settings.newsFr === false ? ' (titres d\'origine, souvent en anglais)' : ', titres traduits automatiquement en français (original en infobulle)') + '. Couverture surtout américaine' + (d.none.length ? ' : rien pour ' + d.none.slice(0, 6).map(esc).join(', ') + (d.none.length > 6 ? '…' : '') : '') + '. Informatif, pas un conseil.</p>');
   } catch (e) {
     if (!document.body.contains(box)) return;
-    box.innerHTML = newsCard('<div class="notice warn"><span>' + esc(/404|invalide/i.test(e.message) ? 'Mettez à jour le relais Cloudflare (route /news absente).' : e.message) + '</span></div>');
+    Notify.set('news', [{ id: 'news:err', level: 'warn', title: 'Actualités indisponibles', body: esc(/404|invalide/i.test(e.message) ? 'Mettez à jour le relais Cloudflare (route /news absente).' : e.message), edit: { label: 'Paramètres', run: () => go('settings') }, accept: { label: 'Réessayer', run: () => renderPage(), ack: false } }]);
+    box.innerHTML = newsCard('<div class="muted" style="font-size:13px;padding:6px 0">Actualités indisponibles (voir la cloche).</div>');
   }
 }
 
@@ -241,14 +248,15 @@ function renderAllocation(host) {
   const notes = [];
   if (basis === 'value' && aSec.fallback) notes.push(aSec.fallback + ' actif(s) sans cours, pondérés par leur montant investi');
   if (aSec.excluded) notes.push(aSec.excluded + ' actif(s) sans valeur, exclus');
+  Notify.set('alloc', [].concat(notes.length ? [{ id: 'alloc:notes', level: 'info', title: 'Répartition : actifs particuliers', body: notes.map(esc).join(' · ') + '.' }] : [],
+    (unsorted || gaps.noHist) && state.settings.relayUrl ? [{ id: 'alloc:gaps', level: 'info', title: 'Données de répartition incomplètes', body: (unsorted ? '<b>' + unsorted + '</b> action(s) sans secteur ou sans pays. ' : '') + 'Actualisez les données ou renseignez-les dans la fiche de l\'actif (secteur et pays modifiables).', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } }] : []));
   host.innerHTML = pageHead('Répartition', 'Diversification de votre portefeuille · montants en ' + esc(baseCur()), '<div class="seg" id="basisSeg" role="group" aria-label="Pondération">' + BASIS.map((b) => '<button type="button" data-basis="' + b[0] + '" class="' + (basis === b[0] ? 'on' : '') + '">' + b[1] + '</button>').join('') + '</div><button class="btn icon" type="button" id="eyeBtn" aria-pressed="' + !!state.settings.hideNumbers + '" aria-label="Masquer les chiffres">' + icon(state.settings.hideNumbers ? 'eyeoff' : 'eye') + '</button>') +
     '<div class="' + (state.settings.hideNumbers ? 'hide-nums' : '') + '"><div class="chips-row">' +
     '<div class="card stat-chip"><span>Secteurs</span><b>' + nSec + '</b></div><div class="card stat-chip"><span>Pays</span><b>' + nCty + '</b></div><div class="card stat-chip"><span>5 premières positions</span><b>' + fmtPct(top5, 0) + '</b></div><div class="card stat-chip"><span>Plus gros secteur</span><b>' + ((topSec = aSec.all.find((x) => x.key !== 'Non classé' && x.key !== 'Autres')) ? esc(topSec.key) + ' · ' + fmtPct(topSec.pct, 0) : '—') + '</b></div></div>' +
     '<div class="grid two even">' + allocDonutCard('Par secteur', aSec, state.settings.hideNumbers) + allocDonutCard('Par pays', aCty, state.settings.hideNumbers) + '</div>' +
     '<div class="grid three section-gap">' + allocDonutCard('Par devise', aCur, state.settings.hideNumbers) + allocDonutCard('Par type d\'actif', aTyp, state.settings.hideNumbers) + allocDonutCard('Par compte', aAcc, state.settings.hideNumbers) + '</div>' +
     '<section class="card card-pad section-gap"><h3>Principales positions</h3>' + (bars || '<div class="muted">Aucune donnée.</div>') + '</section>' +
-    (notes.length ? '<p class="hint" style="margin-top:10px">' + notes.map(esc).join(' · ') + '.</p>' : '') +
-    ((unsorted || gaps.noHist) && state.settings.relayUrl ? '<div class="notice section-gap"><span>' + (unsorted ? '<b>' + unsorted + '</b> action(s) sans secteur ou sans pays. ' : '') + 'Actualisez les données ou renseignez-les dans la fiche de l\'actif (secteur et pays modifiables).</span><button class="btn sm" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser</button></div>' : '') + '</div>';
+    '</div>';
   wireDo(host);
   $$('#basisSeg [data-basis]', host).forEach((b) => b.onclick = () => { view.alloc.basis = b.dataset.basis; renderAllocation(host); });
   $('#eyeBtn', host).onclick = () => { state.settings.hideNumbers = !state.settings.hideNumbers; saveState(); renderAllocation(host); };

@@ -4,7 +4,7 @@
    2. cours / dividendes / historique Yahoo des actifs affichés, 3. taux de change, 4. actualités, 5. synchronisation du compte.
    APP_BUILD doit rester égal au numéro de version du cache du service worker (sw.js : dividendes-shell-vNN) : un test le vérifie.
    ================================================================== */
-const APP_BUILD = 32;
+const APP_BUILD = 33;
 let pullBusy = false, updateAvail = false;
 
 /* Version publiée (sw.js lu sans cache). null = injoignable / hors-ligne. */
@@ -33,7 +33,7 @@ function ptrHide() { ptrShow('', { hide: true, anim: true }); }
 
 function rfButtons(on) { $$('[data-rf-btn]').forEach((b) => { b.classList.toggle('spin', !!on); b.disabled = !!on; }); }
 function markUpdate(v) {
-  updateAvail = !!v; $$('[data-rf-btn]').forEach((b) => { b.classList.toggle('has-update', updateAvail); b.title = updateAvail ? 'Mise à jour disponible : toucher pour mettre à jour et actualiser' : 'Actualiser (cours, taux, actualités) et rechercher une mise à jour'; });
+  updateAvail = !!v; Notify.set('app', v ? [{ id: 'app:update', level: 'info', title: 'Mise à jour disponible', body: 'Une nouvelle version de l\'application est publiée.', accept: { label: 'Mettre à jour', run: () => runFullRefresh('button'), ack: false } }] : []); $$('[data-rf-btn]').forEach((b) => { b.classList.toggle('has-update', updateAvail); b.title = updateAvail ? 'Mise à jour disponible : toucher pour mettre à jour et actualiser' : 'Actualiser (cours, taux, actualités) et rechercher une mise à jour'; });
 }
 
 /* Actualisation complète. source : 'pull' | 'button'. */
