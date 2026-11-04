@@ -1364,6 +1364,25 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
+    const p = await device({ guest: true, seed: SEED(0) }); await p.open();
+    const r = await p.evaluate(() => {
+      const acc = (id) => ({ id, name: 'DEGIRO' }), H = (id, a, isin, extra) => Object.assign({ id, account: a, isin, ticker: isin, name: isin, currency: 'EUR', quantity: 1, dividend: {} }, extra || {});
+      const pay = (id, h, d, g, ext) => ({ id, holdingId: h, payDate: d, gross: g, currency: 'EUR', source: 'degiro', verified: true, extId: ext });
+      const tx = (id, h, d, ext) => ({ id, holdingId: h, date: d, type: 'buy', qty: 2, price: 10, currency: 'EUR', source: 'degiro', extId: ext });
+      const A = { v: 2, accounts: [acc('a1')], holdings: [H('h1', 'a1', 'FR1')], archive: [H('c1', 'a1', 'FR9', { statementOnly: true })], settings: {}, meta: {}, transactions: [tx('t1', 'h1', '2026-01-02', 'dg:x:1')],
+        payments: [pay('p1', 'h1', '2026-02-10', 5, 'dgd2:aaa:1'), pay('p2', 'h1', '2026-05-10', 7, 'dgd2:bbb:1'), pay('p3', 'h1', '2026-05-10', 7, 'dgd2:bbb:2'), pay('p4', 'c1', '2026-03-03', 1, 'dgd2:ccc:1')] };
+      const B = { v: 2, accounts: [acc('b9')], holdings: [H('hx', 'b9', 'FR1'), H('hy', 'b9', 'FR2')], archive: [], settings: {}, meta: {}, transactions: [tx('t9', 'hx', '2026-01-02', 'dg:x:1'), tx('t8', 'hy', '2026-03-05')],
+        payments: [pay('q1', 'hx', '2026-02-10', 5, 'dgd2:zzz:1'), pay('q2', 'hx', '2026-05-10', 7, 'dgd2:yyy:1'), pay('q3', 'hy', '2026-06-01', 3)] };
+      const m = mergeStates(A, B);       // B = compte (cloud), A = cet appareil
+      return { acc: m.accounts.length, h: m.holdings.map((x) => x.isin).sort(), arch: m.archive.map((x) => x.isin), pay: m.payments.map((x) => [x.holdingId, x.payDate, x.gross].join('/')).sort(), tx: m.transactions.map((x) => x.holdingId + '/' + x.date).sort() };
+    });
+    eq(r.acc, 1, 'compte DEGIRO rapproché par nom (pas de doublon)'); eq(r.h, ['FR1', 'FR2'], 'positions détenues rapprochées par ISIN'); eq(r.arch, ['FR9'], 'position clôturée de cet appareil conservée');
+    eq(r.pay, ['c1/2026-03-03/1', 'hx/2026-02-10/5', 'hx/2026-05-10/7', 'hx/2026-05-10/7', 'hy/2026-06-01/3'], 'versements : 5 € et 7 € importés des deux côtés comptés une fois ; le 2e versement identique du 10/05 (cet appareil) conservé ; le versement 3 € du compte et celui de la position clôturée conservés');
+    eq(r.tx.length, 2, 'opérations : le même achat importé sur les deux appareils n\'est compté qu\'une fois, l\'autre est conservé');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
     const p = await device({}); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');

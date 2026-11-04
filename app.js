@@ -285,9 +285,13 @@ async function pullIfChanged() {
   } catch (e) { setSync('err', Cloud.friendly(e)); }
 }
 
-/* Fusion : ajoute à la version cloud ce qui n'existe pas encore (ni écrasement, ni doublon). */
+/* Fusion de deux appareils : ajoute à la version cloud ce qui n'y est pas encore (ni écrasement, ni doublon, rien de perdu).
+   - positions détenues ET clôturées rapprochées par compte + ISIN (ou ticker / nom) ;
+   - versements et opérations : identifiant d'import stable d'abord, sinon rapprochement « en multi-ensemble » (même position, date, devise, montant) : deux versements
+     légitimes identiques sur un appareil restent deux, mais un versement importé séparément sur les deux appareils n'est compté qu'une fois. */
 function mergeStates(local, remote) {
-  const out = clone(remote);
+  const out = clone(remote), cents = (v) => Math.round((Number(v) || 0) * 100);
+  ['holdings', 'archive', 'payments', 'transactions', 'estimates', 'migrations', 'imports', 'dividendImports', 'corp'].forEach((k) => { out[k] = Array.isArray(out[k]) ? out[k] : []; });
   const accMap = {}, byName = new Map(out.accounts.map((a) => [a.name.trim().toLowerCase(), a.id]));
   local.accounts.forEach((a) => {
     if (out.accounts.some((x) => x.id === a.id)) { accMap[a.id] = a.id; return; }
@@ -295,22 +299,39 @@ function mergeStates(local, remote) {
     if (same) { accMap[a.id] = same; return; }
     out.accounts.push(clone(a)); accMap[a.id] = a.id;
   });
-  const hkey = (h) => h.account + '|' + String(h.isin || h.ticker || '').toUpperCase();
-  const have = new Map(out.holdings.map((h) => [hkey(h), h]));
+  const hkey = (h) => h.account + '|' + String(h.isin || h.ticker || h.name || '').toUpperCase();
+  const have = new Map(out.holdings.concat(out.archive).map((h) => [hkey(h), h]));
   const idMap = {};
-  local.holdings.forEach((h) => {
+  const addInst = (list, h) => {
     const lh = clone(h); lh.account = accMap[lh.account] || lh.account;
-    const ex = have.get(hkey(lh)) || out.holdings.find((x) => x.id === lh.id);
+    const ex = have.get(hkey(lh)) || out.holdings.concat(out.archive).find((x) => x.id === lh.id);
     if (ex) { idMap[h.id] = ex.id; return; }
-    out.holdings.push(lh); have.set(hkey(lh), lh); idMap[h.id] = lh.id;
-  });
-  local.payments.forEach((p) => {                // identifiant du versement ou identifiant stable d'import : jamais de rapprochement « à peu près » (deux versements identiques peuvent être légitimes)
+    list.push(lh); have.set(hkey(lh), lh); idMap[h.id] = lh.id;
+  };
+  (local.holdings || []).forEach((h) => addInst(out.holdings, h));
+  (local.archive || []).forEach((h) => addInst(out.archive, h));
+  const bag = (list, keyOf) => { const m = new Map(); list.forEach((x) => { const k = keyOf(x); m.set(k, (m.get(k) || 0) + 1); }); return m; };
+  const pkey = (p) => [p.holdingId, p.payDate || p.exDate || '', p.currency || '', cents(p.gross), p.source === 'auto' || p.estimated ? 'est' : 'reel'].join('|');
+  const payBag = bag(out.payments, pkey), payExt = new Set(out.payments.map((x) => x.extId).filter(Boolean)), payIds = new Set(out.payments.map((x) => x.id));
+  (local.payments || []).forEach((p) => {
     const lp = clone(p); lp.holdingId = idMap[lp.holdingId] || lp.holdingId;
-    if (out.payments.some((x) => x.id === lp.id || (lp.extId && x.extId === lp.extId))) return;
+    if (payIds.has(lp.id) || (lp.extId && payExt.has(lp.extId))) return;
+    const k = pkey(lp), n = payBag.get(k) || 0; if (n > 0) { payBag.set(k, n - 1); return; }
     out.payments.push(lp);
   });
-  const tk = new Set(out.transactions.map((t) => t.id));
-  local.transactions.forEach((t) => { if (tk.has(t.id)) return; const lt = clone(t); lt.holdingId = idMap[lt.holdingId] || lt.holdingId; out.transactions.push(lt); });
+  const tkey = (t) => [t.holdingId, t.date || '', t.type, Number(t.qty) || 0, t.price == null ? '' : Number(t.price)].join('|');
+  const txBag = bag(out.transactions, tkey), txExt = new Set(out.transactions.map((x) => x.extId).filter(Boolean)), txIds = new Set(out.transactions.map((x) => x.id));
+  (local.transactions || []).forEach((t) => {
+    const lt = clone(t); lt.holdingId = idMap[lt.holdingId] || lt.holdingId;
+    if (txIds.has(lt.id) || (lt.extId && txExt.has(lt.extId))) return;
+    const k = tkey(lt), n = txBag.get(k) || 0; if (n > 0) { txBag.set(k, n - 1); return; }
+    out.transactions.push(lt);
+  });
+  // estimations rangées, opérations sur titres, journaux : réunis sans doublon d'identifiant
+  const union = (k, idOf) => { const ids = new Set(out[k].map(idOf)); (local[k] || []).forEach((x) => { if (!ids.has(idOf(x))) out[k].push(clone(x)); }); };
+  union('estimates', (x) => x.id); union('dividendImports', (x) => x.id); union('imports', (x) => x.id); union('corp', (x) => [x.isin, x.date, x.kind, x.ratio].join('|'));
+  const hand = Object.assign({}, (local.notices || {}).handled || {}, (out.notices || {}).handled || {}); out.notices = { handled: hand };
+  out.isinAlias = Object.assign({}, local.isinAlias || {}, out.isinAlias || {});
   out.settings = Object.assign({}, local.settings, out.settings);
   out.settings.columns = Object.assign({}, local.settings.columns || {}, out.settings.columns || {});
   return out;

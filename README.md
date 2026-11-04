@@ -59,6 +59,14 @@ Connexion / création de compte par e-mail + mot de passe, déconnexion, récup�
 6. **Authentication → Paramètres → Domaines autorisés** : ajoutez `adteixeira89.github.io`.
 7. Collez `firebaseConfig` dans [`config.js`](config.js) (clé `firebase`). Ces identifiants sont publics par conception : la sécurité repose sur les règles de l'étape 4.
 
+### Premier branchement de deux appareils (ordre à respecter)
+
+1. Connectez d'abord **l'appareil qui contient toutes vos données** (créez le compte e-mail + mot de passe) : le compte reçoit ses données.
+2. Sur le second appareil, connectez-vous au **même compte**. Si cet appareil contient déjà des données, l'application propose : **Fusionner** (ajoute au compte ce qui manque, sans doublon : positions détenues et clôturées, versements et opérations importés des deux côtés comptés une fois, deux versements légitimes identiques conservés), **Utiliser les données du compte** (remplace celles de l'appareil) ou **Envoyer vers le compte**. Exportez une sauvegarde avant si vous hésitez.
+3. Ensuite, chaque modification est synchronisée ; en cas de modification simultanée sur deux appareils, le même choix est proposé (rien n'est écrasé en silence).
+
+Confidentialité : vos positions et versements sont stockés dans votre projet Firebase (Google), accessibles uniquement avec votre compte (règles Firestore) mais **non chiffrés de bout en bout**. Le forfait gratuit « Spark » suffit largement (quelques centaines de Ko par sauvegarde).
+
 Tant que `accountsEnabled` est `false` ou `firebase` vide, l'application fonctionne en **mode local** (données sur l'appareil).
 
 Les données du cloud ne sont pas chiffrées de bout en bout (elles sont protégées par l'authentification et les règles Firestore). Le **code de verrouillage** de l'appareil (Paramètres) chiffre en plus la copie locale.
