@@ -28,6 +28,8 @@ function migrationNotices(mig) {
 /* Notifications calculées hors du rendu d'une page (au démarrage et après chaque affichage) : la cloche est complète dès l'ouverture. */
 function collectGlobalNotices() {
   try {
+    const lm = state.meta.lastMarketUpdate, age = lm ? (Date.now() - lm) / 3600e3 : null;
+    Notify.set('stale', state.settings.relayUrl && state.holdings.length && (age === null || age > 36) ? [{ id: 'market:stale', level: 'warn', title: 'Données de marché anciennes', body: (age === null ? 'Aucune actualisation enregistrée.' : 'Dernière actualisation il y a ' + Math.round(age / 24 * 10) / 10 + ' jour(s).') + ' Les dividendes détachés récemment n\'apparaissent qu\'après une actualisation.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } }] : []);
     Notify.set('divmig', migrationNotices(Dividends.planMigration(state)));
     Notify.set('divkpi2', dividendNotices(Dividends.summary(state, { to: Engine.toISO(new Date()), ids: visibleIds(), convert })));
     diagBannerHtml();
@@ -143,7 +145,7 @@ function dividendKpisHtml() {
     kpi('Retenues fiscales', sm.count ? money(sm.tax) : '—', sm.count ? 'Retenues connues depuis le 1er janvier' + (sm.taxUnknown ? ' (' + sm.taxUnknown + ' sans retenue connue)' : '') : 'Aucune donnée'),
     kpi('Total net perçu depuis le début', all.count ? money(all.net) : '—', all.count ? 'Brut ' + money(all.gross) + ' · retenues ' + money(all.tax) + '<br>' + all.count + ' versement(s)' + (firstPay ? ' depuis le ' + esc(fmtDate(firstPay, { day: 'numeric', month: 'short', year: 'numeric' })) : '') + partial(all) : 'Aucun versement réel enregistré', all.count ? 'income' : ''),
     kpi('Prévision pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
-    kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
+    kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status, first)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
     kpi('Rendement sur coût', yoc.rate === null ? '—' : fmtPct(yoc.rate, 2), yoc.rate === null ? 'Renseignez le prix de revient de vos actifs' : 'Calculé sur ' + yoc.withCost + ' / ' + yoc.payers + ' actif(s) avec prix de revient'),
     kpi('Actifs détenus', String(hs.length), payers + ' versent un dividende' + (missing.length ? ' · ' + missing.length + ' sans données' : '')),
     kpi('Évolution vs année précédente', yo.hasPrev ? fmtPct(yo.pct, 1, true) : '—', yo.hasPrev ? 'Revenus reçus depuis le 1er janvier, comparés à la même période de ' + (y - 1) + '' : 'Données insuffisantes (historique ' + (y - 1) + ' absent)', yo.hasPrev && yo.pct >= 0 ? 'income' : '')
@@ -191,7 +193,7 @@ function portfolioColumns(nextMap, wMap, names) {
     { key: 'perShare', label: 'Dividende / titre', align: 'r', sort: (h) => (h.dividend || {}).lastAmount, html: (h) => cur(h, (h.dividend || {}).lastAmount, 3) },
     { key: 'freq', label: 'Fréquence', sort: (h) => (h.dividend || {}).frequency, html: (h) => Engine.isPayer(h) ? esc(freqLabel(h.dividend.frequency)) : '—' },
     { key: 'annual', label: 'Dividendes annuels est.', essential: true, align: 'r', sort: (h) => Engine.annualPerShare(h) * h.quantity, html: (h) => Engine.isPayer(h) ? '<span class="pos">' + cur(h, Engine.annualPerShare(h) * h.quantity) + '</span>' : '—' },
-    { key: 'next', label: 'Prochain versement', essential: true, sort: (h) => nextMap[h.id] ? nextMap[h.id].date : '9999', html: (h) => { const e = nextMap[h.id]; return e ? esc(fmtDate(e.date)) + ' <span class="muted">· ' + esc(kindLabel(e.dateKind, e.status)) + '</span>' : '—'; } },
+    { key: 'next', label: 'Prochain versement', essential: true, sort: (h) => nextMap[h.id] ? nextMap[h.id].date : '9999', html: (h) => { const e = nextMap[h.id]; return e ? esc(fmtDate(e.date)) + ' <span class="muted">· ' + esc(kindLabel(e.dateKind, e.status, e)) + '</span>' : '—'; } },
     { key: 'yoc', label: 'Rendement / coût', align: 'r', sort: (h) => { const i = Engine.invested(h); return i && Engine.isPayer(h) ? Engine.annualPerShare(h) * h.quantity / i : null; }, html: (h) => { const i = Engine.invested(h); return i && Engine.isPayer(h) ? fmtPct(Engine.annualPerShare(h) * h.quantity / i, 2) : '—'; } },
     { key: 'tax', label: 'Retenue (%)', align: 'r', sort: (h) => Engine.taxRate(h), html: (h) => Engine.taxRate(h) === null ? '—' : fmtNum(Engine.taxRate(h), 1) + ' %' },
     { key: 'status', label: 'Données dividende', sort: (h) => Engine.dividendStatus(h), html: (h) => divStatusBadge(Engine.dividendStatus(h)) },
@@ -306,7 +308,7 @@ function calEvents(from, to) {
 function eventRowHtml(e) {
   const a = Engine.amount(e, incomeMode());
   return '<div class="list-row">' + avatar(e.ticker, e.logo, '', e.isin) + '<div class="grow"><div><b>' + esc(e.name || e.ticker) + '</b> <span class="muted">' + esc(e.ticker) + '</span></div>' +
-    '<div class="muted" style="font-size:12.5px">' + esc(fmtDate(e.date)) + ' · ' + esc(kindLabel(e.dateKind, e.status)) + ' · ' + fmtNum(e.qty) + ' × ' + fmtMoney(e.perShare, e.currency, { d: 3 }) + '</div></div>' +
+    '<div class="muted" style="font-size:12.5px">' + esc(fmtDate(e.date)) + ' · ' + esc(kindLabel(e.dateKind, e.status, e)) + ' · ' + fmtNum(e.qty) + ' × ' + fmtMoney(e.perShare, e.currency, { d: 3 }) + '</div></div>' +
     '<div style="text-align:right"><div class="amt pos">' + fmtMoney(a.v, e.currency) + '</div>' + statusBadge(e.status, e.verified === false) + '</div></div>';
 }
 function openDay(dateISO, evs) {

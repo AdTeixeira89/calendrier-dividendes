@@ -103,6 +103,14 @@ Les défauts, avertissements, erreurs et informations « à lire » ne prennent 
 - Sont dans la cloche : période de performance raccourcie ou arrêtée, positions sans historique d'opérations complet, cours / taux de change historiques ou actuels indisponibles, anomalies de l'historique, mise à jour des dividendes disponible, net partiel / versements non convertis, répartition incomplète, actualités ou traduction indisponibles, mise à jour de l'application, erreur de synchronisation, et **toute erreur affichée en bulle** (conservée jusqu'à ce qu'on la traite).
 - Les messages propres à une fenêtre (validation d'un formulaire, aperçu d'import) restent dans la fenêtre.
 
+## Calendrier des dividendes : dates de paiement, dividendes détachés, actualisation
+
+- **Un dividende déjà détaché est acquis** : dès que la date de détachement est passée (données de marché), il apparaît dans le calendrier comme **« Détaché le … · paiement attendu »** (statut Confirmé), à la date **détachement + délai**, avec la quantité détenue la veille du détachement. Il disparaît dès que le versement réel est enregistré (relevé, CSV, saisie) ; si la date attendue est passée sans versement, il passe en « Non enregistré ».
+- **Le délai détachement → paiement est appris de vos versements réels**, position par position (médiane des 6 derniers : ex. ASML 9 j, Air Liquide 2 j, Qualcomm 21 j, Pfizer 37 j). Sans versement réel, le délai par défaut est de 10 jours (indicatif). Il est recalculé après chaque actualisation, import ou saisie.
+- Les prévisions (dividendes pas encore détachés) sont calculées sur les dates de **paiement** (mois, jour habituel, créneaux), plus sur le mois de détachement au 15 du mois.
+- **Actualisation automatique** : à l'ouverture de l'application **et** quand vous y revenez, si les dernières données ont plus de **12 h** (soit deux fois par jour au plus). Une application fermée ne peut pas se mettre à jour toute seule (limite des navigateurs, surtout sur iPhone). Un échec ou des données de plus de 36 h sont signalés dans la cloche.
+- **Limite** : la source de marché ne publie les dividendes qu'une fois détachés (pas de calendrier officiel à l'avance) ; les dates et montants des détachements futurs restent donc des prévisions d'après l'historique.
+
 ## Dividendes : perçu, dû et prévision (moteur central `dividends.js`)
 
 Trois catégories **indépendantes**, calculées par un seul module pur (`dividends.js`, testé sous Node) :

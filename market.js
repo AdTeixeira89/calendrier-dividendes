@@ -260,6 +260,22 @@
     return months.sort((a, b) => a - b).map((m) => ({ month: m, amount: Math.round(byM[m] * 1e6) / 1e6 }));
   }
 
+  /* Calendrier de PAIEMENT d'un actif : le versement tombe en moyenne « délai » jours après la date de détachement.
+     Le délai est appris des versements réels (Dividends.learnPayLags) ; à défaut, 10 jours (valeur indicative). Mois, jour habituel et créneaux sont calculés sur les dates de PAIEMENT estimées. */
+  const LAG_DEFAUT = 10;
+  const addDaysISO = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
+  function deriveSchedule(h, nowISO, divs) {
+    const d = h.dividend; if (!d || d.none) return;
+    const src = Array.isArray(divs) && divs.length ? divs : (Array.isArray(d.history) ? d.history.map((x) => ({ exDate: x.exDate, amount: x.amount })) : []);
+    if (!src.length) return;
+    const lag = Number(d.payLagDays) >= 0 && d.payLagDays !== null ? Number(d.payLagDays) : LAG_DEFAUT;
+    const pays = src.map((x) => ({ exDate: addDaysISO(x.exDate, lag), amount: x.amount }));
+    const active = pays.filter((x) => x.exDate >= shiftMonths(nowISO, -18)); if (!active.length) return;
+    const last = active[active.length - 1];
+    d.anchorMonth = Number(last.exDate.slice(5, 7)); d.payDayApi = Number(last.exDate.slice(8, 10)); d.dateKind = 'pay';
+    d.slots = buildSlots(pays, nowISO);
+  }
+
   /* Applique les données de marché à un actif. Ne touche jamais aux champs saisis
      à la main (quantité, prix de revient, compte, retenue fiscale, jour de paiement). */
   function applyToHolding(h, a, nowISO) {
@@ -279,7 +295,7 @@
       else if (a.instrumentType === 'ETF' && !h.sector) h.sector = 'ETF';
       if (!h.country) h.country = deriveCountry(a.resolved ? a.symbol : h.ticker, h.isin, a.instrumentType === 'ETF' || h.type === 'etf_dist' || h.type === 'etf_acc');
     }
-    const recent = a.dividends.slice(-12);
+    const recent = a.dividends.slice(-16);
     d.history = recent.map((x) => ({ exDate: x.exDate, payDate: null, amount: x.amount }));
     d.updatedAt = nowISO;
     // Un actif est considéré comme versant un dividende s'il en a versé un dans les 18 derniers mois.
@@ -292,12 +308,10 @@
       d.none = false;
       const last = active[active.length - 1];
       d.lastAmount = last.amount;
-      d.anchorMonth = Number(last.exDate.slice(5, 7));
       let freq = detectFrequency(a.dividends.slice(-8).map((x) => x.exDate));
       if (freq === 'irregular' && active.length === 1) freq = 'annual';
       d.frequency = freq;
-      d.dateKind = 'ex';
-      d.slots = buildSlots(a.dividends, nowISO);
+      deriveSchedule(h, nowISO, a.dividends);          // mois, jour et créneaux de PAIEMENT (détachement + délai)
       if (a.instrumentType === 'ETF' && !h.typeLocked && h.type === 'stock') h.type = 'etf_dist';
     }
     return h;
@@ -340,6 +354,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

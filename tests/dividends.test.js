@@ -216,4 +216,35 @@ t('Migration réversible : estimations rangées à part (rien de supprimé), orp
   assert.strictEqual(D.undoMigration(st, st.migrations[0].id), true); assert.strictEqual(JSON.stringify(Object.assign({}, st, { migrations: [] })), JSON.stringify(Object.assign(JSON.parse(before), { migrations: [] })), 'annulation : état d\'origine rétabli');
 });
 
+/* =====================================================================
+   CALENDRIER : dates de PAIEMENT (détachement + délai appris), dividendes déjà détachés = « à recevoir »
+   ===================================================================== */
+const M = require('../market.js');
+const asmlState = (payments) => ({ holdings: [{ id: 'a', name: 'ASML', ticker: 'ASML.AS', displayTicker: 'ASML.AS', isin: 'NL0010273215', type: 'stock', currency: 'EUR', quantity: 5, account: 'tr', addedAt: '2025-01-01',
+  dividend: { lastAmount: 1.88, frequency: 'quarterly', anchorMonth: 10, dateKind: 'ex', none: false, history: [{ exDate: '2026-02-09', amount: 1.6 }, { exDate: '2026-04-24', amount: 2.7 }, { exDate: '2026-07-27', amount: 1.88 }, { exDate: '2026-10-26', amount: 1.88 }] } }],
+  archive: [], accounts: [{ id: 'tr', name: 'Trade Republic' }], transactions: [], payments: payments || [] });
+const rp = (id, d, g) => ({ id, holdingId: 'a', payDate: d, gross: g, currency: 'EUR', source: 'csv', verified: true, extId: id });
+
+t('13. Délai détachement → paiement appris des versements réels (médiane) ; sans versement réel, délai par défaut de 10 jours', () => {
+  const st = asmlState([rp('r1', '2026-02-18', 8), rp('r2', '2026-05-05', 13.5), rp('r3', '2026-08-05', 9.4)]);   // délais : 9, 11, 9 jours
+  assert.strictEqual(D.learnPayLags(st, M, '2026-11-04'), 1); assert.deepStrictEqual([st.holdings[0].dividend.payLagDays, st.holdings[0].dividend.payLagN], [9, 3], 'médiane 9 jours');
+  assert.strictEqual(D.learnPayLags(st, M, '2026-11-04'), 0, 'idempotent');
+  assert.deepStrictEqual([st.holdings[0].dividend.anchorMonth, st.holdings[0].dividend.payDayApi, st.holdings[0].dividend.dateKind], [11, 4, 'pay'], 'calendrier recalculé sur le PAIEMENT : dernier détachement 26/10 + 9 j = 4 novembre');
+  const none = asmlState([]); assert.strictEqual(D.learnPayLags(none, M, '2026-11-04'), 0); assert.strictEqual(none.holdings[0].dividend.payLagDays, undefined, 'rien d\'appris : le délai par défaut reste indicatif');
+});
+t('14. Dividende DÉJÀ DÉTACHÉ non reçu : événement confirmé « à recevoir » à détachement + délai (le cas ASML du 4 novembre) ; disparaît dès que le versement réel est enregistré ; pas de prévision en double ce mois-là', () => {
+  const today = new Date(2026, 10, 4), st = asmlState([rp('r1', '2026-02-18', 8), rp('r2', '2026-05-05', 13.5), rp('r3', '2026-08-05', 9.4)]); D.learnPayLags(st, M, '2026-11-04');
+  const nov = E.buildEvents(st, new Date(2026, 10, 1), new Date(2026, 10, 30), today, null).filter((e) => e.holdingId === 'a');
+  assert.deepStrictEqual(nov.map((e) => [e.date, e.status, !!e.detached, e.qty, Math.round(e.gross * 100) / 100, e.exDate]), [['2026-11-04', 'confirmed', true, 5, 9.4, '2026-10-26']], 'un seul événement : 5 titres × 1,88 € payés le 4 novembre (26/10 + 9 j)');
+  st.payments.push(rp('r4', '2026-11-04', 9.4)); const after = E.buildEvents(st, new Date(2026, 9, 1), new Date(2026, 11, 31), today, null).filter((e) => e.holdingId === 'a' && e.date >= '2026-10-15');
+  assert.deepStrictEqual(after.map((e) => [e.date, e.status, !!e.detached]), [['2026-11-04', 'received', false]], 'reçu : plus d\'événement « à recevoir », ni prévision en double');
+  const late = E.buildEvents(asmlState([]), new Date(2026, 10, 1), new Date(2026, 10, 30), new Date(2026, 10, 25), null).filter((e) => e.detached); assert.deepStrictEqual(late.map((e) => [e.date, e.status]), [['2026-11-05', 'unrecorded']], 'délai par défaut 10 j : 05/11 ; date passée sans versement = « non enregistré »');
+});
+t('15. Un détachement futur n\'est pas « à recevoir » ; deux détachements proches ne se confondent pas (un versement réel ne couvre qu\'un seul détachement)', () => {
+  const st = asmlState([]); st.holdings[0].dividend.history.push({ exDate: '2026-11-20', amount: 2 });
+  const ev = E.buildEvents(st, new Date(2026, 10, 1), new Date(2026, 11, 31), new Date(2026, 10, 4), null).filter((e) => e.detached); assert.ok(!ev.some((e) => e.exDate === '2026-11-20'), 'détachement du 20/11 pas encore passé : ni droit acquis ni « à recevoir »');
+  const m = asmlState([rp('x', '2026-11-04', 9.4)]); m.holdings[0].dividend.history.push({ exDate: '2026-10-28', amount: 1 });
+  const e2 = E.buildEvents(m, new Date(2026, 9, 1), new Date(2026, 11, 31), new Date(2026, 10, 4), null).filter((e) => e.detached); assert.strictEqual(e2.length, 1, 'le versement du 4/11 couvre un seul des deux détachements (26/10 et 28/10) : l\'autre reste à recevoir');
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

@@ -333,6 +333,7 @@ function openPaymentModal(id, preset) {
     if (dup && !(await confirmDialog({ title: 'Versement identique déjà enregistré', body: 'Un versement du même actif, à la même date et pour le même montant existe déjà. Deux versements légitimes peuvent être identiques : l\'ajouter quand même ?', confirmLabel: 'Ajouter quand même' })).ok) return;
     const i = state.payments.findIndex((x) => x.id === np.id);
     if (i >= 0) state.payments[i] = np; else state.payments.push(np);
+    Dividends.learnPayLags(state, Market, todayISO());
     saveState(); closeModal(); toast('Versement enregistré.'); renderPage();
   };
 }
@@ -661,6 +662,7 @@ function commitTransactions(p, o) {
   // dividendes : identifiants stables, rapprochement avec l'existant (réimporter le même fichier ne crée rien), compte rendu et journal
   const impId = uid(); Dividends.stableIds(incoming, 'csv');
   const rec = Dividends.reconcile(state, incoming, {}), dv = Dividends.applyReconcile(state, rec, { uid, importId: impId });
+  Dividends.learnPayLags(state, Market, todayISO());
   Dividends.logImport(state, { id: impId, kind: 'transactions', name: lastImportName, account: o.acc, report: Object.assign({ newTx: newTx.length, dupTx }, dv) });
   // quantité et prix de revient : actifs créés (toujours) ; existants (si demandé)
   touched.forEach((h) => {

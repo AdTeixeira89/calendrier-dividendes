@@ -196,7 +196,8 @@ async function refreshMarket(list, o) {
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;
-  if (res.ok || (ares && ares.ok)) { state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
+  Notify.set('market', res.fail ? [{ id: 'market:fail', level: res.ok ? 'warn' : 'error', title: 'Actualisation incomplète', body: res.fail + ' actif(s) non actualisé(s)' + (res.errors && res.errors[0] ? ' : ' + esc(res.errors[0].message) : '') + '. Les dernières données connues sont conservées.', accept: { label: 'Réessayer', run: () => runFullRefresh('button'), ack: false } }] : []);
+  if (res.ok || (ares && ares.ok)) { Dividends.learnPayLags(state, Market, nowISO); state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
   if (!o.silent) renderPage(); else if (res.ok) renderPageSoft();
   if (!o.silent) {
@@ -217,7 +218,15 @@ async function refreshArchive(entries, nowISO) {
   }
   return out;
 }
-function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Date.now() - t > 24 * 3600 * 1000; }
+const REFRESH_EVERY_H = 12;      // actualisation automatique : deux fois par jour au plus (à l'ouverture et au retour au premier plan)
+function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Date.now() - t > REFRESH_EVERY_H * 3600 * 1000; }
+let lastAutoTry = 0;
+function autoRefreshIfStale() {
+  if (!state.settings.autoRefresh || !state.settings.relayUrl || !state.holdings.length || refreshing || !navigator.onLine || !staleMarket() || Date.now() - lastAutoTry < 10 * 60 * 1000) return;
+  lastAutoTry = Date.now(); refreshMarket(null, { silent: true });
+}
+/* Délais « détachement → paiement » appris des versements réels (sert au calendrier) : à rappeler après un import, une saisie ou une actualisation. */
+function refreshPayLags() { try { if (Dividends.learnPayLags(state, Market, todayISO())) saveState(); } catch (e) { console.error(e); } }
 
 /* ---------------------------------------------------------------
    SYNCHRONISATION CLOUD
@@ -707,10 +716,10 @@ function startApp() {
     window.addEventListener('hashchange', () => { const tab = view.divTab, p = pageFromHash(); if (p !== view.page || (p === 'dividends' && tab !== view.divTab)) { view.page = p; renderPage(); } });
     window.addEventListener('online', () => { if (Cloud.user()) { pullIfChanged(); if (state.meta.dirty) scheduleSync(); } });
     window.addEventListener('offline', () => { if (Cloud.user()) setSync('offline', 'Hors-ligne'); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); } });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); setTimeout(autoRefreshIfStale, 1500); } });
     ensureFx(); ensureFxHistory(); initPullRefresh();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(() => { snapshotForWorker(); checkNotifications(); }).catch(() => {});
-    setTimeout(() => { if (state.settings.autoRefresh && state.settings.relayUrl && state.holdings.length && staleMarket()) refreshMarket(null, { silent: true }); }, 2500);
+    refreshPayLags(); setTimeout(autoRefreshIfStale, 2500);
   }
   renderPage();
 }

@@ -21,6 +21,7 @@
   const parse = (s) => { if (!s) return null; const a = s.split('-').map(Number); return new Date(a[0], a[1] - 1, a[2]); };
   const toISO = (d) => iso(d.getFullYear(), d.getMonth() + 1, d.getDate());
   const ym = (s) => (s || '').slice(0, 7);
+  const addDaysISO = (s, n) => new Date(Date.parse(s) + n * 86400000).toISOString().slice(0, 10);
   const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
   const TYPES = { stock: 'Action', etf_dist: 'ETF distribuant', etf_acc: 'ETF capitalisant' };
@@ -130,6 +131,21 @@
       if (!keep(h.id) || !isPayer(h) && !((h.dividend || {}).confirmed || []).length) return;
       const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', logo: h.logo, isin: h.isin, currency: h.currency || 'EUR', account: h.account };
       const rate = taxRate(h);
+      // Dividendes DÉJÀ DÉTACHÉS (date de détachement passée, données de marché) mais pas encore reçus : paiement attendu à « détachement + délai » (délai appris de vos versements réels).
+      // Le droit est acquis : c'est un dividende confirmé « à recevoir », pas une prévision. Rapproché de vos versements réels : dès que le versement est enregistré, il disparaît ici.
+      const dvd = h.dividend || {}, lag = Number(dvd.payLagDays) >= 0 && dvd.payLagDays !== null ? Number(dvd.payLagDays) : 10, mine = D.realPayments(state).filter((p) => p.holdingId === h.id), usedPay = new Set();
+      (Array.isArray(dvd.history) ? dvd.history.slice().sort((a, b) => (a.exDate < b.exDate ? -1 : 1)) : []).forEach((x) => {
+        if (!x.exDate || x.exDate > todayISO || !(num(x.amount) > 0)) return;
+        const exp = addDaysISO(x.exDate, lag), hi = addDaysISO(exp, 21);
+        const rec = mine.find((p) => { const pd = p.payDate || p.exDate; return !usedPay.has(p.id) && pd >= x.exDate && pd <= hi; });
+        if (rec) { usedPay.add(rec.id); return; }
+        taken.add(h.id + '|' + ym(exp));
+        if (exp < fromISO || exp > toISO_ || exp < oldestUnrecorded || (h.addedAt && exp < h.addedAt)) return;
+        const q = quantityAt(state, h, x.exDate); if (!(q > 0)) return;
+        const g = num(x.amount) * q;
+        events.push(makeEvent(base, { id: 'd-' + h.id + '-' + x.exDate, date: exp, dateKind: 'pay', status: exp >= todayISO ? 'confirmed' : 'unrecorded', detached: true, exDate: x.exDate, perShare: num(x.amount), qty: q, gross: g,
+          tax: rate === null ? null : g * rate / 100, net: rate === null ? null : g * (1 - rate / 100) }));
+      });
       for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
         for (let m = 1; m <= 12; m++) {
           const key = h.id + '|' + y + '-' + pad2(m);

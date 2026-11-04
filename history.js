@@ -290,6 +290,7 @@ async function confirmDegiro(m, cur) {
     const plan = divImportPlan(cur.divGroups, uid, accId, cur.fileName, impId);
     if (plan.stubs.length) { state.archive = state.archive || []; state.archive.push.apply(state.archive, plan.stubs); }
     divRes = Object.assign({ stubs: plan.stubs }, Dividends.applyReconcile(state, plan.rec, { uid, importId: impId }));
+    Dividends.learnPayLags(state, Market, todayISO());
     Dividends.logImport(state, { id: impId, kind: 'statement', name: cur.fileName, account: accId, report: { fresh: divRes.fresh, known: divRes.known, adopted: divRes.adopted, updated: divRes.updated, ignored: divRes.ignored, anomalies: divRes.anomalies } });
   }
   // la source d'import (CSV d'origine) et son rapport restent enregistrés ; les anciens fichiers bruts sont allégés (3 derniers conservés)

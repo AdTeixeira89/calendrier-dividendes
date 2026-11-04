@@ -136,6 +136,25 @@
     return { fresh: res.fresh.length, known: res.known.length, updated: res.updated.length, adopted: res.adopted.length, ignored: res.ignored.length, anomalies: res.anomalies.length };
   }
 
+  /* Délai « détachement → paiement » appris des versements RÉELS de chaque position (médiane des 6 derniers), puis calendrier de paiement recalculé.
+     Les versements ne sont jamais modifiés : seule la prévision de date en profite. Sans versement réel, le délai par défaut (10 j) reste indicatif. */
+  function learnPayLags(state, M, nowISO) {
+    const today = nowISO || new Date().toISOString().slice(0, 10), dn = (s) => Date.parse(s) / 86400000; let changed = 0;
+    const real = realPayments(state).filter((p) => p.payDate);
+    (state.holdings || []).forEach((h) => {
+      const dv = h.dividend; if (!dv || !Array.isArray(dv.history) || !dv.history.length) return;
+      const hist = dv.history.map((x) => x.exDate).filter(Boolean).sort(), used = new Set(), lags = [];
+      real.filter((p) => p.holdingId === h.id).sort((a, b) => (a.payDate < b.payDate ? -1 : 1)).forEach((p) => {
+        let ex = null; hist.forEach((e) => { if (e <= p.payDate && !used.has(e) && dn(p.payDate) - dn(e) <= 100) ex = e; });
+        if (ex) { used.add(ex); lags.push(Math.round(dn(p.payDate) - dn(ex))); }
+      });
+      if (!lags.length) return;
+      const r = lags.slice(-6).sort((a, b) => a - b), med = Math.round(r.length % 2 ? r[(r.length - 1) / 2] : (r[r.length / 2 - 1] + r[r.length / 2]) / 2);
+      if (dv.payLagDays !== med || dv.payLagN !== lags.length) { dv.payLagDays = med; dv.payLagN = lags.length; changed++; if (M && M.deriveSchedule) M.deriveSchedule(h, today); }
+    });
+    return changed;
+  }
+
   /* Journal des importations de dividendes (conservé : nom du fichier, date, compte rendu). */
   function logImport(state, e) { state.dividendImports = (state.dividendImports || []).concat([{ id: e.id, at: e.at || new Date().toISOString(), kind: e.kind, name: e.name || null, account: e.account || null, report: e.report }]).slice(-300); }
 
@@ -164,6 +183,6 @@
     state.payments = m.before.payments; state.archive = m.before.archive; state.estimates = m.before.estimates; state.migrations = state.migrations.filter((x) => x.id !== id); return true;
   }
 
-  root.Dividends = { isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, planMigration, applyMigration, undoMigration, dateOf };
+  root.Dividends = { isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

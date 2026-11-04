@@ -1342,6 +1342,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('calendrier : dividende déjà détaché = « à recevoir » à détachement + délai (jamais oublié) ; actualisation automatique à l\'ouverture si les données ont plus de 12 h', async () => {
+    RELAY.old = false; const ago = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'ASML', quantity: 5, avgCost: 600, price: 700, dividend: { lastAmount: 1.88, anchorMonth: 5, frequency: 'quarterly', dateKind: 'pay', none: false, history: [{ exDate: ago(3), payDate: null, amount: 1.88 }] } })];
+    seed.meta = { lastMarketUpdate: Date.now() - 30 * 3600 * 1000 }; seed.settings.autoRefresh = true;
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open();
+    const ev = await p.evaluate(() => Engine.buildEvents(state, new Date(), new Date(Date.now() + 40 * 86400000), new Date(), null).filter((e) => e.detached).map((e) => [e.status, e.qty, Math.round(e.gross * 100) / 100]));
+    eq(ev, [['confirmed', 5, 9.4]], 'dividende détaché il y a 3 jours : confirmé, 5 × 1,88 €, paiement attendu dans 7 jours (délai par défaut 10 j)');
+    await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300); const k = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
+    ok(/Prochain dividende \| 9,40\s?€ \| ASML · .* \| Détaché le .* · paiement attendu/.test(k), 'prochain dividende : « Détaché le … · paiement attendu » — ' + k.slice(0, 700));
+    await p.waitForFunction(() => state.meta.lastMarketUpdate && Date.now() - state.meta.lastMarketUpdate < 120000, null, { timeout: 15000 }).catch(async () => { throw new Error('pas actualisé : ' + JSON.stringify(await p.evaluate(() => ({ meta: state.meta, auto: state.settings.autoRefresh, relay: !!state.settings.relayUrl, stale: staleMarket(), busy: refreshing, notes: Notify.pending().map((x) => x.title) })))); }); eq((await storeOf(p)).meta.lastMarketUpdate > Date.now() - 120000, true, 'données de 30 h : actualisées automatiquement à l\'ouverture (seuil 12 h)');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
     const p = await device({}); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');
