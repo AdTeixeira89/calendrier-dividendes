@@ -224,7 +224,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('#mGo'); await p.waitForFunction(() => state.holdings.length === 3 && state.holdings.every((h) => h.dividend.updatedAt), null, { timeout: 8000 }); await p.waitForTimeout(500);
     const s = await storeOf(p); const by = (t) => s.holdings.find((h) => h.ticker === t);
     ok(by('AI.PA') && by('AAPL') && by('IWDA.AS'), 'ISIN résolus en tickers : ' + s.holdings.map((h) => h.ticker));
-    eq(by('AI.PA').isin, 'FR0000120073', 'ISIN conservé'); eq(by('AI.PA').dividend.lastAmount, 3.4, 'dernier dividende'); eq(by('AI.PA').dividend.anchorMonth, 5, 'mois de détachement'); eq(by('AI.PA').dividend.dateKind, 'ex', 'date = détachement'); eq(by('AI.PA').dividend.frequency, 'annual', 'fréquence annuelle');
+    eq(by('AI.PA').isin, 'FR0000120073', 'ISIN conservé'); eq(by('AI.PA').dividend.lastAmount, 3.4, 'dernier dividende'); eq(by('AI.PA').dividend.anchorMonth, 5, 'mois de paiement estimé (détachement + délai)'); eq(by('AI.PA').dividend.dateKind, 'pay', 'date = paiement estimé'); eq(by('AI.PA').dividend.frequency, 'annual', 'fréquence annuelle');
     eq(by('AAPL').dividend.frequency, 'quarterly', 'trimestriel'); eq(by('AAPL').currency, 'USD', 'devise');
     eq(by('IWDA.AS').type, 'etf_acc', 'ETF sans dividende → capitalisant'); eq(by('IWDA.AS').dividend.none, true, 'aucun dividende inventé');
     eq(s.holdings.length, 3, 'doublon ignoré'); ok(!JSON.stringify(s).includes('financialmodelingprep'), 'plus de FMP dans les données');
@@ -283,7 +283,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   await test('actif : recherche par nom (suggestions), récupération automatique, modification, passage en ETF capitalisant, suppression avec annulation', async () => {
     const p = await device({ guest: true }); await p.open(); await p.click('[data-do=add]');
     await p.fill('#hTicker', 'Apple'); await p.waitForSelector('#hSuggest [data-sym]', { timeout: 4000 }); await p.click('#hSuggest [data-sym]'); await p.waitForTimeout(600);
-    eq(await p.inputValue('#hTicker'), 'AAPL', 'ticker choisi'); eq(await p.inputValue('#hCur'), 'USD', 'devise récupérée'); eq(await p.inputValue('#hFreq'), 'quarterly', 'fréquence'); eq(await p.inputValue('#hKind'), 'ex', 'date = détachement');
+    eq(await p.inputValue('#hTicker'), 'AAPL', 'ticker choisi'); eq(await p.inputValue('#hCur'), 'USD', 'devise récupérée'); eq(await p.inputValue('#hFreq'), 'quarterly', 'fréquence'); eq(await p.inputValue('#hKind'), 'pay', 'date = paiement estimé');
     ok(Number(await p.inputValue('#hDiv')) > 0, 'dividende récupéré'); await p.fill('#hQty', '8'); await p.fill('#hCost', '150'); await p.click('#hSave'); await p.waitForTimeout(300);
     let s = await storeOf(p); eq(s.holdings.length, 1); eq(s.holdings[0].quantity, 8); eq(s.holdings[0].dividend.history.length > 0, true, 'historique de dividendes conservé');
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(150); await p.click('.asset'); await p.waitForSelector('#hType'); await p.selectOption('#hType', 'etf_acc'); ok(await p.locator('#hDivFields.hide').count(), 'champs dividende masqués pour un capitalisant');

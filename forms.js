@@ -54,7 +54,7 @@ function openHoldingModal(id) {
     '<div id="hDivFields"><div class="row2">' + fld('Dividende par titre (dernier)', '<input type="number" id="hDiv" step="any" inputmode="decimal" value="' + esc(dv.lastAmount === null || dv.lastAmount === undefined ? '' : dv.lastAmount) + '">', '', 'hDiv') +
     fld('Fréquence', '<select id="hFreq">' + ['monthly', 'quarterly', 'semiannual', 'annual'].map((f) => opt(f, FREQ_LABEL[f], dv.frequency === f)).join('') + '</select>', '', 'hFreq') + '</div>' +
     '<div class="row2">' + fld('Mois d\'un versement', '<select id="hMonth"><option value="">—</option>' + MOIS.map((mm, i) => opt(i + 1, mm, Number(dv.anchorMonth) === i + 1)).join('') + '</select>', 'Les autres mois sont déduits de la fréquence.', 'hMonth') +
-    fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement.', 'hKind') + '</div>' +
+    fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement ; le paiement est estimé (détachement + délai habituel).', 'hKind') + '</div>' +
     '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
     fld('Retenue à la source (%)', '<input type="number" id="hTax" min="0" max="100" step="any" inputmode="decimal" value="' + esc(dv.taxRate === null || dv.taxRate === undefined ? '' : dv.taxRate) + '" placeholder="facultatif">', 'Permet d\'estimer le net.', 'hTax') + '</div></div></div>' +
     '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex ? '<button class="btn" type="button" id="hBuys">Achats…</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
@@ -107,8 +107,8 @@ async function fetchIntoHoldingForm(m) {
     if ($('#hType', m).value !== tmp.type && !hDraft.typeLocked) $('#hType', m).value = tmp.type;
     const d = tmp.dividend;
     $('#hPays', m).value = d.none ? '0' : '1';
-    if (!d.none) { $('#hDiv', m).value = d.lastAmount; $('#hFreq', m).value = d.frequency === 'irregular' ? 'quarterly' : d.frequency; $('#hMonth', m).value = d.anchorMonth; $('#hKind', m).value = 'ex'; }
-    hDraft.dividend.history = d.history; hDraft.dividend.updatedAt = d.updatedAt;
+    if (!d.none) { $('#hDiv', m).value = d.lastAmount; $('#hFreq', m).value = d.frequency === 'irregular' ? 'quarterly' : d.frequency; $('#hMonth', m).value = d.anchorMonth; $('#hKind', m).value = d.dateKind || 'pay'; }
+    hDraft.dividend.history = d.history; hDraft.dividend.updatedAt = d.updatedAt; hDraft.dividend.payDayApi = d.payDayApi || null;
     $('#hType', m).dispatchEvent(new Event('change'));
     msg.textContent = d.none ? 'Aucun dividende récent trouvé : actif marqué « sans dividende ».' : '✓ Données récupérées (détachement estimé d\'après l\'historique) : vérifiez et complétez.';
   } catch (e) { msg.textContent = '✗ ' + e.message; }
