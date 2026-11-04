@@ -1330,6 +1330,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('devises : un achat saisi en HKD s\'affiche en HKD (jamais « $ ») ; les devises ambiguës ($ HK / CA / AU, kr, ¥) affichent leur code', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: '3750.HK', displayTicker: '3750.HK', name: 'CATL', currency: 'HKD', quantity: 50, avgCost: 300, price: 373 })];
+    const p = await device({ guest: true, seed }); await p.open();
+    await p.evaluate(() => openBuysModal('h0')); await p.waitForSelector('#byDate'); ok(/Prix par action \(HKD/.test(await p.locator('.modal').innerText()), 'libellé du prix en HKD');
+    await p.fill('#byDate', '2026-01-15'); await p.fill('#byQty', '10'); await p.fill('#byPrice', '373'); await p.click('#byAdd'); await p.waitForSelector('.modal tbody tr'); const row = (await p.locator('.modal tbody tr').first().innerText()).replace(/\s+/g, ' ');
+    ok(/373,0000\s?HKD/.test(row) && !/\$/.test(row), 'le prix saisi s\'affiche en HKD, sans « $ » : ' + row);
+    const fm = await p.evaluate(() => ({ eur: fmtMoney(1.5, 'EUR'), usd: fmtMoney(1.5, 'USD'), hkd: fmtMoney(1.5, 'HKD'), cad: fmtMoney(1.5, 'CAD'), dkk: fmtMoney(1.5, 'DKK'), jpy: fmtMoney(1500, 'JPY') }));
+    ok(/€/.test(fm.eur) && /\$/.test(fm.usd) && /HKD/.test(fm.hkd) && !/\$/.test(fm.hkd) && /CAD/.test(fm.cad) && /DKK/.test(fm.dkk) && /JPY/.test(fm.jpy), 'formats : ' + JSON.stringify(fm));
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
     const p = await device({}); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');

@@ -16,13 +16,15 @@ const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'SEK', 'DKK', 'NOK', 'JPY
 
 /* ---------- formats ---------- */
 const _nf = {};
+/* Symboles sans ambiguïté : les autres devises affichent leur code (HKD, CAD, AUD… pas « $ » ; DKK, SEK, NOK… pas « kr » ; JPY, CNY… pas « ¥ »). */
+const SYMBOLE_SUR = { EUR: 1, USD: 1, GBP: 1 };
 function fmtMoney(n, cur, o) {
   o = o || {};
   if (n === null || n === undefined || !isFinite(n)) return '—';
   const d = o.d === undefined ? 2 : o.d;
   const key = (cur || '') + d;
   try {
-    if (!_nf[key]) _nf[key] = new Intl.NumberFormat('fr-FR', cur ? { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: d, maximumFractionDigits: d } : { minimumFractionDigits: d, maximumFractionDigits: d });
+    if (!_nf[key]) _nf[key] = new Intl.NumberFormat('fr-FR', cur ? { style: 'currency', currency: cur, currencyDisplay: SYMBOLE_SUR[cur] ? 'narrowSymbol' : 'code', minimumFractionDigits: d, maximumFractionDigits: d } : { minimumFractionDigits: d, maximumFractionDigits: d });
     return _nf[key].format(n);
   } catch (e) { return n.toFixed(d).replace('.', ',') + ' ' + (cur || ''); }
 }
