@@ -46,6 +46,8 @@ function migrateHolding(h) {
   }
   if (d.frequency === 'none' && !d.lastAmount) { d.none = true; }
   if (!d.dateKind) d.dateKind = 'pay';
+  // calendrier sur la date de PAIEMENT (ancien calendrier : mois de détachement) : converti d'après l'historique des détachements + délai
+  if (d.dateKind === 'ex' && !d.none && Array.isArray(d.history) && d.history.length) { try { Market.deriveSchedule(h, todayISO()); } catch (e) { /* inchangé */ } }
   if (!h.type) h.type = 'stock';
   if (h.avgCost === undefined) h.avgCost = null;
   if (!h.isin && Market.isISIN(h.ticker)) h.isin = String(h.ticker).toUpperCase();

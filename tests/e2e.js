@@ -1350,8 +1350,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const ev = await p.evaluate(() => Engine.buildEvents(state, new Date(), new Date(Date.now() + 40 * 86400000), new Date(), null).filter((e) => e.detached).map((e) => [e.status, e.qty, Math.round(e.gross * 100) / 100]));
     eq(ev, [['confirmed', 5, 9.4]], 'dividende détaché il y a 3 jours : confirmé, 5 × 1,88 €, paiement attendu dans 7 jours (délai par défaut 10 j)');
     await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300); const k = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
-    ok(/Prochain dividende \| 9,40\s?€ \| ASML · .* \| Détaché le .* · paiement attendu/.test(k), 'prochain dividende : « Détaché le … · paiement attendu » — ' + k.slice(0, 700));
+    ok(/Prochain dividende \| 9,40\s?€ \| ASML · .* \| Paiement attendu · détaché le/.test(k), 'prochain dividende : « Paiement attendu · détaché le … » — ' + k.slice(0, 700));
     await p.waitForFunction(() => state.meta.lastMarketUpdate && Date.now() - state.meta.lastMarketUpdate < 120000, null, { timeout: 15000 }).catch(async () => { throw new Error('pas actualisé : ' + JSON.stringify(await p.evaluate(() => ({ meta: state.meta, auto: state.settings.autoRefresh, relay: !!state.settings.relayUrl, stale: staleMarket(), busy: refreshing, notes: Notify.pending().map((x) => x.title) })))); }); eq((await storeOf(p)).meta.lastMarketUpdate > Date.now() - 120000, true, 'données de 30 h : actualisées automatiquement à l\'ouverture (seuil 12 h)');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('calendrier sur les dates de PAIEMENT : un ancien calendrier basé sur le détachement est converti (détachement + délai), plus de « Détachement estimé » par défaut', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'ASML', quantity: 5, price: 700, dividend: { lastAmount: 1.88, anchorMonth: 10, frequency: 'quarterly', dateKind: 'ex', none: false, payLagDays: 9, history: [{ exDate: '2026-07-27', amount: 1.88 }, { exDate: '2026-10-26', amount: 1.88 }] } })];
+    const p = await device({ guest: true, seed }); await p.open();
+    const dv = (await storeOf(p)).holdings[0].dividend; eq([dv.dateKind, dv.anchorMonth, dv.payDayApi], ['pay', 11, 4], 'ancien calendrier converti : dernier détachement 26/10 + 9 j = paiement le 4 novembre');
+    const ev = await p.evaluate(() => Engine.buildEvents(state, new Date(2027, 0, 1), new Date(2027, 11, 31), new Date(2026, 10, 4), null).filter((e) => e.holdingId === 'h0').map((e) => [e.date.slice(5), e.dateKind])); ok(ev.length >= 4 && ev.every((x) => x[1] === 'pay'), 'prévisions en dates de paiement : ' + JSON.stringify(ev));
     eq(p.errors, [], 'aucune erreur JS');
   });
 

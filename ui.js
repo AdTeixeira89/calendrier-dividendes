@@ -109,7 +109,7 @@ function statusBadge(s, unverified) {
   return '<span class="badge ' + s + '">' + (STATUS_LABEL[s] || s) + '</span>';
 }
 function kindLabel(kind, status, e) {
-  if (e && e.detached) return 'Détaché le ' + fmtDate(e.exDate, { day: 'numeric', month: 'short' }) + ' · paiement attendu';
+  if (e && e.detached) return 'Paiement attendu · détaché le ' + fmtDate(e.exDate, { day: 'numeric', month: 'short' });
   const base = kind === 'ex' ? 'Détachement' : 'Paiement';
   return status === 'forecast' ? base + ' estimé' : base;
 }
