@@ -323,3 +323,10 @@ finances/
 ## 6 undecies. Dépenses récurrentes retirées
 
 Le suivi se fait par import mensuel de relevé : le menu « Dépenses récurrentes », l'option « Même montant chaque mois », le type « Récurrente » (pour les nouvelles dépenses) et les créations automatiques (abonnements, reprises du mois précédent, mensualités de prêt) sont retirés pour ne pas doubler ce que le relevé contient. Les dépenses déjà créées restent ; le code pur (`utils/recurringExpenses`, `recurringCopies`, `debtExpenses`) est conservé, non branché.
+
+## 6 duodecies. Frais d'entreprise
+
+- Dans un **espace personnel**, chaque dépense peut être marquée `business: 'subscription' | 'other'` (abonnement pro / autres frais pro) : à l'import (case par ligne, type deviné par mots-clés) ou dans le formulaire. Jamais dans l'espace commun.
+- Catégories « Abonnements pro » et « Frais pro » créées au besoin (identifiants fixes `pro-abonnements`, `pro-autres`), proposées d'office aux lignes cochées sans autre catégorie.
+- Mémoire (`settings/categoryRules.business`) : un commerçant coché l'est d'office aux relevés suivants ; décocher l'oublie.
+- Les frais d'entreprise sont suivis à part (carte « Frais d'entreprise » sur la page Dépenses) et exclus des totaux, graphiques et du rythme des dépenses personnelles.

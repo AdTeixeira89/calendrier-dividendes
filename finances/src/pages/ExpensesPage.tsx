@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Camera, FileUp, Plus, Receipt, Settings2 } from 'lucide-react'
+import { Briefcase, Camera, FileUp, Plus, Receipt, Settings2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BudgetSection } from '@/components/finance/BudgetSection'
 import { ExpenseFormSheet, type ExpenseFormInitial } from '@/components/finance/ExpenseFormSheet'
@@ -17,8 +17,10 @@ import { useHousehold } from '@/hooks/useHousehold'
 import { useMonthNav } from '@/hooks/useMonthNav'
 import { useMonthlyExpenses } from '@/hooks/useMonthlyExpenses'
 import type { Expense } from '@/types'
+import { formatCents } from '@/utils/money'
 import { currentBudgetMonthKey, formatBudgetPeriod } from '@/utils/budgetMonth'
 import { previousMonthKey } from '@/utils/month'
+import { businessTotals, withoutBusiness } from '@/utils/business'
 import { COMMON_SPACE, inSpace, type Space } from '@/utils/spaces'
 import { spendingPace } from '@/utils/spendingPace'
 import { sumCents } from '@/utils/monthlyStats'
@@ -70,10 +72,13 @@ export function ExpensesPage() {
     closeParam('ajouter')
   }
 
-  const total = expenses ? sumCents(expenses) : null
+  // Frais d'entreprise : suivis à part, hors du total et du rythme des dépenses personnelles.
+  const business = expenses ? businessTotals(expenses) : null
+  const spending = expenses && withoutBusiness(expenses)
+  const total = spending ? sumCents(spending) : null
   const loading = categories === undefined || expenses === undefined
   const toPaceInput = (list: Expense[]) => list.map((e) => ({ amountCents: e.amountCents, date: e.date.toDate() }))
-  const pace = expenses && prevExpenses && (expenses.length > 0 || prevExpenses.length > 0) ? spendingPace(month, toPaceInput(expenses), prevMonth, toPaceInput(prevExpenses)) : null
+  const pace = spending && prevExpenses && (spending.length > 0 || prevExpenses.length > 0) ? spendingPace(month, toPaceInput(spending), prevMonth, toPaceInput(withoutBusiness(prevExpenses))) : null
   // Budget global des dépenses communes : repère du graphique, affiché dans l'espace Communes seulement.
   const budgetTotal = space === COMMON_SPACE && commonBudget && commonBudget.split.budgetCents > 0 ? commonBudget.split.budgetCents : null
 
@@ -98,6 +103,16 @@ export function ExpensesPage() {
       <SegmentedControl label="Espace" value={space} onChange={setSpace} options={[{ value: COMMON_SPACE, label: 'Communes' }, ...members.map((m) => ({ value: m.uid, label: m.displayName }))]} />
 
       <StatCard label={spaceMember ? `Dépenses de ${spaceMember.displayName}` : 'Total des dépenses communes'} amount={total} tone="expense" icon={<Receipt size={16} />} higherIsBetter={false} />
+
+      {business && business.count > 0 && (
+        <StatCard
+          label="Frais d'entreprise"
+          amount={business.totalCents}
+          tone="warning"
+          icon={<Briefcase size={16} />}
+          footnote={`Abonnements ${formatCents(business.subscriptionCents, 'EUR', { compact: true })} · Autres frais ${formatCents(business.otherCents, 'EUR', { compact: true })}`}
+        />
+      )}
 
       {pace && (
         <Card title="Rythme des dépenses" subtitle="Cumul jour après jour, comparé au mois précédent">

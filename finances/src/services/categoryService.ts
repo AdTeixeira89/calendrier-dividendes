@@ -3,7 +3,8 @@ import { db } from '@/firebase/client'
 import { householdCol } from '@/firebase/paths'
 import type { Category, EntityInput } from '@/types'
 import { DEFAULT_CATEGORIES } from '@/utils/defaultCategories'
-import { createItem, deleteItem, updateItem } from './repository'
+import { PRO_CATEGORIES, findProCategory } from '@/utils/business'
+import { createItem, createItemOnce, deleteItem, updateItem } from './repository'
 
 interface Actor {
   uid: string
@@ -51,4 +52,13 @@ export function watchCategories(householdId: string, onChange: (categories: Cate
     (snap) => onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Category)),
     onError,
   )
+}
+
+/** Crée « Abonnements pro » et « Frais pro » si elles n'existent pas (identifiants fixes : jamais en double). */
+export async function ensureProCategories(householdId: string, categories: Category[], actor: Actor): Promise<void> {
+  for (const kind of ['subscription', 'other'] as const) {
+    if (findProCategory(categories, kind)) continue
+    const pro = PRO_CATEGORIES[kind]
+    await createItemOnce(householdId, 'categories', pro.id, { name: pro.name, kind: 'expense', parentId: null, icon: pro.icon, color: pro.color, order: 997, archived: false }, actor)
+  }
 }

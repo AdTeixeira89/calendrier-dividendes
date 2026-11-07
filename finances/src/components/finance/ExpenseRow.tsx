@@ -1,4 +1,5 @@
 import type { Category, Expense } from '@/types'
+import { BUSINESS_LABELS } from '@/types/expense'
 import { formatCents } from '@/utils/money'
 import { CategoryIcon } from './CategoryIcon'
 import styles from './TransactionRow.module.css'
@@ -12,7 +13,7 @@ export function ExpenseRow({ expense, category, onClick }: { expense: Expense; c
         <strong>{expense.merchant || category?.name || 'Dépense'}</strong>
         <span className="subtle">
           {day} · {category?.name ?? 'Sans catégorie'}
-          {expense.scope === 'personal' && ' · Personnelle'}
+          {expense.business ? ` · ${BUSINESS_LABELS[expense.business]}` : expense.scope === 'personal' && ' · Personnelle'}
           {expense.recurrenceId && ' · Automatique'}
         </span>
       </span>

@@ -7,6 +7,7 @@ import { watchIncomesRange } from '@/services/incomeService'
 import type { Expense, Income } from '@/types'
 import { expenseFetchTimestampRange } from '@/utils/budgetMonth'
 import { type MonthKey } from '@/utils/month'
+import { withoutBusiness } from '@/utils/business'
 import { commonExpenses, inSpace } from '@/utils/spaces'
 import { buildPeriodPoints, periodFirstMonth, periodStart, type PeriodPoint, type TrendPeriod } from '@/utils/trendPeriod'
 import { useKeyedSnapshot } from './useKeyedSnapshot'
@@ -31,7 +32,7 @@ export function usePeriodTrend(householdId: string, month: MonthKey, period: Tre
   return useMemo(() => {
     if (expenses === undefined || incomes === undefined) return undefined
     return view === 'personal'
-      ? buildPeriodPoints(period, month, inSpace(expenses, user.uid), incomes.filter((i) => i.memberId === user.uid))
+      ? buildPeriodPoints(period, month, withoutBusiness(inSpace(expenses, user.uid)), incomes.filter((i) => i.memberId === user.uid))
       : buildPeriodPoints(period, month, commonExpenses(expenses), incomes)
   }, [expenses, incomes, view, period, month, user.uid])
 }

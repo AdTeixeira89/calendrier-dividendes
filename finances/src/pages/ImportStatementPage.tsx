@@ -11,7 +11,10 @@ import { useExpensesRange } from '@/hooks/useExpensesRange'
 import { useHousehold } from '@/hooks/useHousehold'
 import { useIncomesRange } from '@/hooks/useIncomesRange'
 import { importStatement, type ImportResult } from '@/services/statementImportService'
+import { BUSINESS_LABELS, type BusinessKind } from '@/types/expense'
 import { INCOME_TYPE_LABELS } from '@/types/income'
+import { guessBusinessKind, isProCategoryId, proCategoryId } from '@/utils/business'
+import { ensureProCategories } from '@/services/categoryService'
 import type { StatementRow } from '@/utils/bankStatement'
 import { readStatementFile } from '@/utils/statementFile'
 import { COMMON_SPACE, type Space } from '@/utils/spaces'
@@ -38,7 +41,7 @@ export function ImportStatementPage() {
   const categories = useCategories(household.id, 'expense')
   const inputRef = useRef<HTMLInputElement>(null)
   const [parsed, setParsed] = useState<Parsed | null>(null)
-  const [overrides, setOverrides] = useState<Record<string, Partial<Pick<PreviewRow, 'include' | 'categoryId' | 'merchant' | 'date' | 'amountCents' | 'kind'>>>>({})
+  const [overrides, setOverrides] = useState<Record<string, Partial<Pick<PreviewRow, 'include' | 'categoryId' | 'merchant' | 'date' | 'amountCents' | 'kind' | 'business'>>>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [space, setSpace] = useState<Space>(COMMON_SPACE)
   const [error, setError] = useState<string | null>(null)
@@ -48,14 +51,25 @@ export function ImportStatementPage() {
   // Historique des 12 derniers mois (apprentissage des catégories, détection des doublons), élargi à la période du relevé.
   const current = currentMonthKey()
   const expenses = useExpensesRange(household.id, parsed && parsed.from < shiftMonth(current, -11) ? parsed.from : shiftMonth(current, -11), parsed && parsed.to > current ? parsed.to : current)
-  const rules = useCategoryRules(household.id)
+  const memory = useCategoryRules(household.id)
   const incomes = useIncomesRange(household.id, parsed && parsed.from < shiftMonth(current, -11) ? parsed.from : shiftMonth(current, -11), parsed && parsed.to > current ? parsed.to : current)
 
   const preview = useMemo(
-    () => (parsed && categories && expenses && incomes && rules ? buildImportPreview(parsed.rows, { categories, expenses, incomes, rules }) : null),
-    [parsed, categories, expenses, incomes, rules],
+    () => (parsed && categories && expenses && incomes && memory ? buildImportPreview(parsed.rows, { categories, expenses, incomes, rules: memory.rules, business: memory.business }) : null),
+    [parsed, categories, expenses, incomes, memory],
   )
-  const rows = useMemo(() => preview?.map((p) => ({ ...p, ...overrides[p.id] })) ?? null, [preview, overrides])
+  // Frais d'entreprise : seulement dans un espace personnel. Une ligne cochée (ou retenue d'un relevé précédent) sans catégorie
+  // reconnue va d'office dans « Abonnements pro » ou « Frais pro ».
+  const personalSpace = space !== COMMON_SPACE
+  const rows = useMemo(
+    () =>
+      preview?.map((p) => {
+        const row = { ...p, ...overrides[p.id] }
+        if (!personalSpace || row.kind !== 'expense') return { ...row, business: null as BusinessKind | null }
+        return row.business && !row.categoryId && categories ? { ...row, categoryId: proCategoryId(categories, row.business) } : row
+      }) ?? null,
+    [preview, overrides, personalSpace, categories],
+  )
   const groups = categories ? groupByParent(categories) : []
 
   async function onFile(file: File) {
@@ -78,6 +92,17 @@ export function ImportStatementPage() {
     setOverrides((o) => ({ ...o, [id]: { ...o[id], ...changes } }))
   }
 
+  /** Coche / décoche « frais d'entreprise » ; la catégorie « pro » est proposée si la ligne n'en a pas choisi une autre. */
+  function setBusiness(row: PreviewRow, business: BusinessKind | null) {
+    const changes: Partial<Pick<PreviewRow, 'business' | 'categoryId'>> = { business }
+    if (business && categories) {
+      // L'écran réagit tout de suite ; les catégories « pro » sont créées en arrière-plan (au pire, à l'import).
+      void ensureProCategories(household.id, categories, user).catch(() => undefined)
+      if (!row.categoryId || isProCategoryId(row.categoryId)) changes.categoryId = proCategoryId(categories, business)
+    } else if (isProCategoryId(row.categoryId)) changes.categoryId = preview?.find((p) => p.id === row.id)?.categoryId ?? null
+    setRow(row.id, changes)
+  }
+
   function setAll(include: boolean) {
     if (!rows) return
     setOverrides((o) => Object.fromEntries(rows.map((r) => [r.id, { ...o[r.id], include: include && r.flag !== 'imported' }])))
@@ -94,7 +119,7 @@ export function ImportStatementPage() {
     setImporting(true)
     setError(null)
     try {
-      setResult(await importStatement(household.id, selected, fallbackCategoryId, user, space))
+      setResult(await importStatement(household.id, selected, fallbackCategoryId, user, space, categories ?? []))
     } catch (err) {
       setError(toUserMessage(err))
     } finally {
@@ -221,6 +246,28 @@ export function ImportStatementPage() {
                     </span>
                     {row.flag && <span className={`${styles.chip} ${styles.chipWarn}`}>{FLAG_LABELS[row.flag]}</span>}
                     {row.kind === 'expense' && (row.suggestion === 'memory' || row.suggestion === 'history') && <span className={styles.chip}>Catégorie retenue</span>}
+                    {personalSpace && row.kind === 'expense' && (
+                      <div className={styles.pro}>
+                        <label className={styles.proCheck}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(row.business)}
+                            onChange={(e) => setBusiness(row, e.target.checked ? guessBusinessKind(row.label) : null)}
+                            aria-label={`Frais d'entreprise : ${row.merchant}`}
+                          />
+                          Frais d’entreprise
+                        </label>
+                        {row.business && (
+                          <select className={styles.select} value={row.business} aria-label={`Type de frais pour ${row.merchant}`} onChange={(e) => setBusiness(row, e.target.value as BusinessKind)}>
+                            {(Object.keys(BUSINESS_LABELS) as BusinessKind[]).map((kind) => (
+                              <option key={kind} value={kind}>
+                                {BUSINESS_LABELS[kind]}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                     {editingId === row.id && (
                       <div className="stack" style={{ marginTop: 4 }}>
                         <TextField label="Libellé" maxLength={120} value={row.merchant} onChange={(e) => setRow(row.id, { merchant: e.target.value })} />

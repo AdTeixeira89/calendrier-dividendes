@@ -2,7 +2,9 @@ import { COMMON_SPACE, spaceFields, type Space } from '@/utils/spaces'
 import { Timestamp } from 'firebase/firestore'
 import { guessPaymentMethod } from '@/utils/categorize'
 import type { PreviewRow } from '@/utils/statementImport'
+import type { Category } from '@/types'
 import { saveCategoryRules } from './categoryRulesService'
+import { ensureProCategories } from './categoryService'
 import { createItemsOnce } from './repository'
 
 interface Actor {
@@ -23,8 +25,11 @@ export interface ImportResult {
  * relevé qui en chevauche un autre, ne crée jamais de doublon.
  */
 /** `space` : où ranger les dépenses importées (communes par défaut, ou l'espace personnel d'un membre). */
-export async function importStatement(householdId: string, rows: PreviewRow[], fallbackCategoryId: string, actor: Actor, space: Space = COMMON_SPACE): Promise<ImportResult> {
+export async function importStatement(householdId: string, rows: PreviewRow[], fallbackCategoryId: string, actor: Actor, space: Space = COMMON_SPACE, categories: Category[] = []): Promise<ImportResult> {
   const target = spaceFields(space, actor.uid)
+  // Frais d'entreprise : uniquement dans un espace personnel ; leurs catégories « pro » sont créées au besoin.
+  const personal = target.scope === 'personal'
+  if (personal && rows.some((r) => r.kind === 'expense' && r.business)) await ensureProCategories(householdId, categories, actor)
   const expenses = rows
     .filter((r) => r.kind === 'expense')
     .map((r) => ({
@@ -43,6 +48,7 @@ export async function importStatement(householdId: string, rows: PreviewRow[], f
         source: 'import',
         // Rangée par défaut (aucune catégorie reconnue ni choisie) : elle n'apprendra rien aux prochains relevés.
         ...(r.categoryId === null ? { categoryPending: true } : {}),
+        ...(personal && r.business ? { business: r.business } : {}),
       },
     }))
   const incomes = rows
@@ -64,8 +70,9 @@ export async function importStatement(householdId: string, rows: PreviewRow[], f
   // Chaque catégorie choisie ou confirmée est retenue pour les relevés suivants (la dernière choix remplace la précédente).
   const remembered = await saveCategoryRules(
     householdId,
-    rows.filter((r) => r.kind === 'expense').map((r) => ({ label: r.label, categoryId: r.categoryId })),
+    rows.filter((r) => r.kind === 'expense').map((r) => ({ label: r.label, categoryId: r.categoryId, business: r.business })),
     actor,
+    { business: personal },
   ).catch(() => 0)
   return { created, alreadyThere: rows.length - created, remembered }
 }

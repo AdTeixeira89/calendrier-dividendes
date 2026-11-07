@@ -3,6 +3,8 @@ import type { BaseEntity, Cents, Scope } from './common'
 
 export type PaymentMethod = 'card' | 'transfer' | 'cash' | 'check' | 'direct_debit' | 'other'
 export type ExpenseKind = 'one_off' | 'recurring' | 'exceptional'
+/** Frais d'entreprise payés depuis un espace personnel : abonnement professionnel ou autres frais. */
+export type BusinessKind = 'subscription' | 'other'
 
 /** households/{householdId}/expenses/{id} */
 export interface Expense extends BaseEntity {
@@ -22,6 +24,8 @@ export interface Expense extends BaseEntity {
   recurrenceId?: string | null
   /** Origine de la saisie quand elle n'est pas manuelle (relevé bancaire importé). */
   source?: 'import'
+  /** Frais d'entreprise (espace personnel seulement) : suivi à part, hors des dépenses personnelles. */
+  business?: BusinessKind | null
   /** Importée sans catégorie reconnue ni choisie (rangée par défaut) : ne sert pas à apprendre les catégories. */
   categoryPending?: boolean
   /** Reprise automatique d'une dépense récurrente du mois précédent. */
@@ -49,3 +53,5 @@ export const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
   recurring: 'Récurrente',
   exceptional: 'Exceptionnelle',
 }
+
+export const BUSINESS_LABELS: Record<BusinessKind, string> = { subscription: 'Abonnement pro', other: 'Autres frais pro' }

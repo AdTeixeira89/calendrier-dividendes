@@ -7,7 +7,7 @@ import { useHousehold } from '@/hooks/useHousehold'
 import { createExpense, deleteExpense, fromTimestamp, toTimestamp, updateExpense } from '@/services/expenseService'
 import { skipOccurrence } from '@/services/recurringExpenseService'
 import type { Cents, Category, Expense, PaymentMethod } from '@/types'
-import { EXPENSE_KIND_LABELS, PAYMENT_METHOD_LABELS, type ExpenseKind } from '@/types/expense'
+import { BUSINESS_LABELS, EXPENSE_KIND_LABELS, PAYMENT_METHOD_LABELS, type BusinessKind, type ExpenseKind } from '@/types/expense'
 import { toUserMessage } from '@/utils/firebaseErrors'
 import { COMMON_SPACE, expenseSpace, spaceFields, type Space } from '@/utils/spaces'
 import { CategoryPicker } from './CategoryPicker'
@@ -47,6 +47,7 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
   const [merchant, setMerchant] = useState(expense?.merchant ?? initial?.merchant ?? '')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(expense?.paymentMethod ?? 'card')
   const [space, setSpace] = useState<Space>(expense ? expenseSpace(expense) : (defaultSpace ?? COMMON_SPACE))
+  const [business, setBusiness] = useState<BusinessKind | ''>(expense?.business ?? '')
   const [privacy, setPrivacy] = useState<Privacy>(expense?.private ? 'private' : 'visible')
   const [kind, setKind] = useState<ExpenseKind>(expense?.kind ?? 'one_off')
   const [note, setNote] = useState(expense?.note ?? '')
@@ -74,6 +75,8 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
       kind,
       note: note.trim() || null,
       receiptPath,
+      // Frais d'entreprise : seulement dans un espace personnel.
+      business: space !== COMMON_SPACE && business ? business : null,
       // Enregistrée depuis le formulaire : la catégorie est maintenant confirmée.
       ...(expense?.categoryPending ? { categoryPending: false } : {}),
     }
@@ -130,6 +133,16 @@ export function ExpenseFormSheet({ open, onClose, categories, expense, defaultDa
           onChange={(e) => setMerchant(e.target.value)}
         />
         <SpaceFields space={space} onSpace={setSpace} privacy={privacy} onPrivacy={setPrivacy} />
+        {space !== COMMON_SPACE && (
+          <Select label="Frais d'entreprise" value={business} onChange={(e) => setBusiness(e.target.value as BusinessKind | '')}>
+            <option value="">Non : dépense personnelle</option>
+            {(Object.keys(BUSINESS_LABELS) as BusinessKind[]).map((kind) => (
+              <option key={kind} value={kind}>
+                {BUSINESS_LABELS[kind]}
+              </option>
+            ))}
+          </Select>
+        )}
         <Select label="Moyen de paiement" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
           {PAYMENT_METHODS.map((m) => (
             <option key={m} value={m}>

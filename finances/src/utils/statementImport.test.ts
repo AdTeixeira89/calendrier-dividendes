@@ -2,7 +2,7 @@ import { Timestamp } from 'firebase/firestore'
 import { describe, expect, it } from 'vitest'
 import type { Category } from '@/types'
 import type { StatementRow } from './bankStatement'
-import { buildHistoryIndex, cleanMerchant, guessIncomeType, guessPaymentMethod, isInternalTransfer, merchantKey, rememberCategories, suggestCategory } from './categorize'
+import { buildHistoryIndex, cleanMerchant, guessIncomeType, guessPaymentMethod, isInternalTransfer, merchantKey, rememberBusiness, rememberCategories, suggestCategory } from './categorize'
 import { buildImportPreview } from './statementImport'
 
 const stamp = Timestamp.now()
@@ -134,5 +134,20 @@ describe('mémoire des catégories choisies à l’import', () => {
   it('borne la taille de la mémoire en oubliant les plus anciennes', () => {
     const many = Array.from({ length: 2100 }, (_, i) => ({ label: `MAGASIN${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + (Math.floor(i / 26) % 26))}${String.fromCharCode(65 + Math.floor(i / 676))} BIO`, categoryId: 'loisirs' }))
     expect(Object.keys(rememberCategories(many)).length).toBeLessThanOrEqual(2000)
+  })
+})
+
+describe('frais d’entreprise retenus à l’import', () => {
+  it('coche d’office, au relevé suivant, un commerçant déjà coché ; le dernier choix compte', () => {
+    let memory = rememberBusiness([{ label: 'PRLV SEPA ADOBE SYSTEMS 11/10', business: 'subscription' }, { label: 'CB PAPETERIE', business: 'other' }])
+    const preview = buildImportPreview([row(3, 'PRLV SEPA ADOBE SYSTEMS 05/11', -5999), row(4, 'CB CARREFOUR MARKET', -2000)], { ...noHistory, business: memory })
+    expect(preview.map((p) => p.business)).toEqual(['subscription', null])
+    memory = rememberBusiness([{ label: 'CB PAPETERIE', business: null }], memory) // décoché : oublié
+    expect(Object.keys(memory)).toEqual(['ADOBE SYSTEMS'])
+  })
+
+  it('un revenu n’est jamais un frais d’entreprise', () => {
+    const [income] = buildImportPreview([row(3, 'VIR SALAIRE', 250000)], { ...noHistory, business: { SALAIRE: 'other' } })
+    expect(income!.business).toBeNull()
   })
 })

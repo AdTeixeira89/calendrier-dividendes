@@ -1,4 +1,4 @@
-import type { Category, Expense, IncomeType } from '@/types'
+import type { BusinessKind, Category, Expense, IncomeType } from '@/types'
 
 /** Majuscules sans accents, pour comparer des libellés bancaires. */
 export function fold(text: string): string {
@@ -32,7 +32,24 @@ export type Suggestion = 'memory' | 'history' | 'rule' | 'none'
 /** Mémoire des catégories choisies à l'import : commerçant (`merchantKey`) → catégorie. */
 export type CategoryRules = Record<string, string>
 
+/** Mémoire des frais d'entreprise : commerçant (`merchantKey`) → type. Un commerçant coché une fois l'est d'office ensuite. */
+export type BusinessRules = Record<string, BusinessKind>
+
 const MAX_RULES = 2000
+
+/** Retient les lignes cochées « frais d'entreprise » et oublie celles qu'on décoche (le dernier choix compte). */
+export function rememberBusiness(rows: { label: string; business: BusinessKind | null }[], existing: BusinessRules = {}): BusinessRules {
+  const rules: BusinessRules = { ...existing }
+  for (const { label, business } of rows) {
+    const key = merchantKey(label)
+    if (!key) continue
+    delete rules[key]
+    if (business) rules[key] = business
+  }
+  const keys = Object.keys(rules)
+  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RULES))) delete rules[old]
+  return rules
+}
 
 /** Ajoute à la mémoire les catégories choisies (la dernière choix remplace le précédent) ; borne la taille en oubliant les plus anciennes. */
 export function rememberCategories(rows: { label: string; categoryId: string | null }[], existing: CategoryRules = {}): CategoryRules {

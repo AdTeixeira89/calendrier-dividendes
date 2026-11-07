@@ -1,6 +1,6 @@
-import type { Category, Expense, Income, IncomeType } from '@/types'
+import type { BusinessKind, Category, Expense, Income, IncomeType } from '@/types'
 import type { StatementRow } from './bankStatement'
-import { buildHistoryIndex, cleanMerchant, type CategoryRules, guessIncomeType, isInternalTransfer, merchantKey, suggestCategory, type Suggestion } from './categorize'
+import { buildHistoryIndex, cleanMerchant, type BusinessRules, type CategoryRules, guessIncomeType, isInternalTransfer, merchantKey, suggestCategory, type Suggestion } from './categorize'
 
 export type PreviewFlag = 'imported' | 'duplicate' | 'transfer' | null
 
@@ -18,6 +18,8 @@ export interface PreviewRow {
   suggestion: Suggestion
   incomeType: IncomeType
   incomeMonthly: boolean
+  /** Frais d'entreprise (mémorisé pour ce commerçant, ou coché à la main) ; ne s'applique qu'à un espace personnel. */
+  business: BusinessKind | null
   flag: PreviewFlag
   /** Coché par défaut, sauf déjà importée, doublon probable ou virement entre ses comptes. */
   include: boolean
@@ -55,7 +57,7 @@ function matcher(existing: { amountCents: number; date: Date }[]) {
 
 export function buildImportPreview(
   rows: StatementRow[],
-  context: { categories: Category[]; expenses: Pick<Expense, 'id' | 'amountCents' | 'date' | 'merchant' | 'categoryId' | 'categoryPending'>[]; incomes: Pick<Income, 'id' | 'amountCents' | 'date'>[]; rules?: CategoryRules },
+  context: { categories: Category[]; expenses: Pick<Expense, 'id' | 'amountCents' | 'date' | 'merchant' | 'categoryId' | 'categoryPending'>[]; incomes: Pick<Income, 'id' | 'amountCents' | 'date'>[]; rules?: CategoryRules; business?: BusinessRules },
 ): PreviewRow[] {
   const history = buildHistoryIndex(context.expenses)
   const knownIds = new Set([...context.expenses.map((e) => e.id), ...context.incomes.map((i) => i.id)])
@@ -89,6 +91,7 @@ export function buildImportPreview(
       suggestion: suggestion.source,
       incomeType: income.type,
       incomeMonthly: income.monthly,
+      business: kind === 'expense' ? (context.business?.[merchantKey(row.label)] ?? null) : null,
       flag,
       include: flag === null,
     }

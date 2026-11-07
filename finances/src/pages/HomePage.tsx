@@ -17,6 +17,7 @@ import { useMonthlyIncomes } from '@/hooks/useMonthlyIncomes'
 import { usePeriodTrend } from '@/hooks/usePeriodTrend'
 import { ScopeFilter } from '@/components/finance/ScopeFilter'
 import { savingsTotal } from '@/utils/savingsView'
+import { withoutBusiness } from '@/utils/business'
 import { commonExpenses, inSpace } from '@/utils/spaces'
 import { greeting } from '@/utils/dates'
 import { currentBudgetMonthKey } from '@/utils/budgetMonth'
@@ -40,8 +41,8 @@ export function HomePage() {
   const allExpenses = useMonthlyExpenses(household.id, expenseMonth)
   const allPrevExpenses = useMonthlyExpenses(household.id, prevExpenseMonth)
   // « Dépenses » suit la préférence du titulaire : communes (par défaut) ou ses dépenses personnelles.
-  const expenses = allExpenses && (prefs.expenses === 'personal' ? inSpace(allExpenses, user.uid) : commonExpenses(allExpenses))
-  const prevExpenses = allPrevExpenses && (prefs.expenses === 'personal' ? inSpace(allPrevExpenses, user.uid) : commonExpenses(allPrevExpenses))
+  const expenses = allExpenses && (prefs.expenses === 'personal' ? withoutBusiness(inSpace(allExpenses, user.uid)) : commonExpenses(allExpenses))
+  const prevExpenses = allPrevExpenses && (prefs.expenses === 'personal' ? withoutBusiness(inSpace(allPrevExpenses, user.uid)) : commonExpenses(allPrevExpenses))
   const incomes = useMonthlyIncomes(household.id, month)
   const prevIncomes = useMonthlyIncomes(household.id, prevMonth)
   const savingsGoals = useSavingsGoals(household.id)
