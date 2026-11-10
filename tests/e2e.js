@@ -335,7 +335,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const seed = SEED(0); seed.holdings = [H(0, { ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', currency: 'USD', costCurrency: 'EUR', quantity: 10, avgCost: 100, dividend: { lastAmount: 0.26, anchorMonth: 8, frequency: 'quarterly', dateKind: 'ex' } })];
     const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200);
     ok(!/1\s?900/.test(await p.locator('tbody').innerText()), 'pas de cours avant actualisation');
-    await p.click('[data-do=refresh]'); await p.waitForFunction(() => state.holdings[0].price > 0, null, { timeout: 6000 }); await p.waitForTimeout(500);
+    await p.click('[data-rf-btn]'); await p.waitForFunction(() => state.holdings[0].price > 0, null, { timeout: 6000 }); await p.waitForTimeout(500);
     let s = await storeOf(p); eq([s.holdings[0].price, s.holdings[0].priceAt.slice(0, 10)], [190, '2026-10-12'], 'cours et date enregistrés');
     const g = await p.evaluate(() => [Engine.value(state.holdings[0]), Math.round(Engine.unrealized(state, convert, null).gain * 100) / 100, Math.round(Engine.unrealized(state, convert, null).pct * 1000) / 1000]);
     eq(g, [1900, 583.33, 0.583], 'valeur 1900 $ = 1583,33 €, coût 1000 € → +583,33 € (+58,3 %)');
@@ -474,7 +474,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(!/\d\s?€/.test(await p.locator('.tip').innerText()), 'courbe : chiffres masqués dans l\'infobulle');
     // sans historique de cours : message clair et bouton d'actualisation
     const q = await device({ guest: true, seed: SEED(2) }); await q.open();
-    ok(await q.locator('text=Pas encore d\'historique de cours').count(), 'état vide de la courbe'); ok(await q.locator('#page [data-do=refresh]').count(), 'bouton Actualiser proposé');
+    ok(await q.locator('text=Pas encore d\'historique de cours').count(), 'état vide de la courbe'); ok(await q.locator('[data-rf-btn]').count(), 'bouton Actualiser proposé');
     eq(q.errors, [], 'aucune erreur JS (vide)'); eq(p.errors, [], 'aucune erreur JS');
   });
 
@@ -632,7 +632,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(h1.avgCost, null, 'PRU non rempli : la quantité diverge, le PRU calculé ne s\'appliquerait pas'); eq(s.holdings.find((h) => h.id === 'h2'), before.holdings[2], 'position sans rapport : intacte');
     eq(s.holdings.length, 3 + 0, 'aucune position en double'); eq(s.transactions.filter((t) => t.holdingId === 'h0').length, 2, 'historique ajouté aux positions existantes');
     // retour arrière
-    await p.evaluate(() => go('settings')); await p.waitForTimeout(200); await p.click('#sUndo'); await p.click('#cdYes'); await p.waitForTimeout(300); s = await storeOf(p);
+    await p.evaluate(() => go('settings')); await p.waitForTimeout(200); await p.evaluate(() => { undoLastImport(); }); await p.click('#cdYes'); await p.waitForTimeout(300); s = await storeOf(p);
     eq(s.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.name]), before.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.name]), 'retour arrière : positions restaurées'); eq([s.transactions.length, s.archive.length, !!s.undo], [0, 0, false], 'opérations et archives retirées');
     // alignement explicite
     await dgOpen(p, DG_CSV); const al = p.locator('[data-align]'); eq(await al.count(), 2, 'case « Aligner » proposée (divergence de quantité, écart de PRU)'); await p.locator('[data-align="US0378331005"]').check();
@@ -752,7 +752,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await dgOpen(p, csv); ok(/Tout est déjà présent/.test(await p.locator('#dgSummary').innerText()), 'réimport : rien de nouveau'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
     eq((await storeOf(p)).holdings.length, 1, 'ancien ISIN non réintroduit');
     // contrôle
-    await p.evaluate(() => go('settings')); await p.waitForTimeout(200); await p.click('#sCheck'); await p.waitForSelector('.diag-item');
+    await p.evaluate(() => go('settings')); await p.waitForTimeout(200); await p.evaluate(() => openDiagnostic()); await p.waitForSelector('.diag-item');
     const dg = (await p.locator('.modal').innerText()).replace(/\n/g, ' | ');
     ok(/Cause probable/.test(dg) && /Action recommandée/.test(dg) && /ne figure pas dans vos positions réelles/.test(dg) && /Fusionner avec un autre ISIN/.test(dg) && /Transactions lues/.test(dg), 'diagnostic : cause, action, rapport : ' + dg.slice(0, 400));
     ok(await p.locator('.diag-item.lvl-error:has-text("Apple")').count() === 1, 'la position réelle est aussi signalée (ventes sans les achats de l\'ancien ISIN)'); await p.locator('.diag-item:has-text("ANCIEN NOM") [data-diag=alias]').click(); await p.waitForSelector('#ddOther'); await p.selectOption('#ddOther', 'h0'); await p.click('#ddOk'); await p.waitForSelector('.modal h2:has-text("Contrôle")'); await p.waitForTimeout(250); s2 = await storeOf(p);
@@ -848,7 +848,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const first = p.locator('#tblHost-stock .asset').first(); eq(await first.locator('.nm').count(), 0, 'pas de nom affiché'); ok(/Société/.test(await first.getAttribute('title')), 'nom en infobulle'); ok(await first.locator('.avatar').isVisible(), 'logo / initiales visibles');
     await p.selectOption('#acctSel', '__new__'); await p.waitForSelector('#naName'); await p.fill('#naName', 'PEA'); await p.click('#naGo'); await p.waitForTimeout(300);
     let st = await storeOf(p); eq(st.accounts.map((a) => a.name), ['Mon portefeuille', 'PEA'], 'portefeuille « PEA » créé'); eq(await p.evaluate(() => view.account), st.accounts[1].id, 'il devient le portefeuille affiché');
-    await p.locator('[data-do=new-account]').click(); await p.waitForSelector('#naName'); await p.fill('#naName', 'pea'); await p.click('#naGo'); await p.waitForTimeout(200); eq((await storeOf(p)).accounts.length, 2, 'doublon de nom refusé');
+    await p.selectOption('#acctSel', '__new__'); await p.waitForSelector('#naName'); await p.fill('#naName', 'pea'); await p.click('#naGo'); await p.waitForTimeout(200); eq((await storeOf(p)).accounts.length, 2, 'doublon de nom refusé');
     eq(p.errors, [], 'aucune erreur JS');
   });
 
@@ -1097,7 +1097,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.selectOption('#tblHost-unknown .cat-sel', 'etf_acc'); await p.waitForTimeout(300); let s2 = await storeOf(p); const h3 = s2.holdings.find((h) => h.id === 'h3');
     eq([h3.type, h3.typeLocked, h3.typeSource], ['etf_acc', true, 'user'], 'choix enregistré'); eq(await p.locator('.port-sec h2').allInnerTexts(), ['ETF', 'Actions'], 'plus rien à classer'); ok((await by('etf')).length === 3, 'déplacé dans ETF');
     // actualisation : ETF Yahoo (IWDA.AS) mais choisi « action » à la main → inchangé ; import CSV : aucune position existante modifiée
-    await p.click('[data-do=refresh]'); await p.waitForFunction(() => state.holdings.find((h) => h.id === 'h4').price > 0, null, { timeout: 8000 }).catch(() => {}); await p.waitForTimeout(600); s2 = await storeOf(p);
+    await p.click('[data-rf-btn]'); await p.waitForFunction(() => state.holdings.find((h) => h.id === 'h4').price > 0, null, { timeout: 8000 }).catch(() => {}); await p.waitForTimeout(600); s2 = await storeOf(p);
     eq([s2.holdings.find((h) => h.id === 'h4').type, s2.holdings.find((h) => h.id === 'h3').type], ['stock', 'etf_acc'], 'catégories choisies à la main conservées après actualisation');
     // fiche de l'actif : choix manuel verrouillé
     await p.evaluate(() => openHoldingModal('h0')); await p.waitForSelector('#hType'); await p.selectOption('#hType', 'etf_dist'); await p.click('#hSave'); await p.waitForTimeout(300); s2 = await storeOf(p);
@@ -1388,7 +1388,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
     const p = await device({ localOnly: true }); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');
-    await p.waitForSelector('#page'); await p.evaluate(() => go('settings')); const txt = await p.locator('#page').innerText(); ok(!txt.includes('Compte utilisateur') && !txt.includes('Firebase') && txt.includes('Code de verrouillage') && txt.includes('Restaurer une sauvegarde'), 'comptes masqués ; PIN, export et import disponibles'); ok(!(await p.locator('.sync-chip').count()), 'aucun indicateur de synchronisation');
+    await p.waitForSelector('#page'); await p.evaluate(() => go('settings')); const txt = await p.locator('#page').innerText(); ok(!txt.includes('Compte utilisateur') && !txt.includes('Firebase') && txt.includes('Exporter une sauvegarde') && txt.includes('Importer une sauvegarde'), 'comptes masqués ; PIN, export et import disponibles'); ok(!(await p.locator('.sync-chip').count()), 'aucun indicateur de synchronisation');
     eq(p.errors, [], 'aucune erreur JS');
   });
 

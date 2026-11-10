@@ -29,15 +29,13 @@ function renderSettings(host) {
     '<label class="chk"><input type="checkbox" id="sLogos" ' + (s.autoLogos !== false ? 'checked' : '') + '><span>Afficher les logos des sociétés (services publics Parqet et FMP Images : seuls le ticker ou l\'ISIN sont transmis, jamais vos quantités)</span></label>' +
     '<label class="chk"><input type="checkbox" id="sTicker" ' + (s.tickerAuto ? 'checked' : '') + '><span>Défilement automatique du bandeau des prochains versements</span></label>' +
     '<div class="btn-row" style="margin-top:10px"><button class="btn" type="button" id="sAcc">Gérer les portefeuilles</button><button class="btn" type="button" id="sCols">Réinitialiser les colonnes des tableaux</button></div>';
-  const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sCsv">' + icon('download') + 'Exporter en CSV (tableur)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Restaurer une sauvegarde</button>' +
-    '<button class="btn" type="button" data-do="import">Importer un relevé de portefeuille</button><button class="btn" type="button" data-do="import-tx">Importer des transactions</button><button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>' +
-    '<button class="btn" type="button" id="sCheck">Contrôle de l\'historique</button>' + (state.undo ? '<button class="btn" type="button" id="sUndo">Annuler la dernière modification (' + esc(fmtDate(state.undo.at.slice(0, 10))) + ')</button>' : '') + '</div>' +
+  const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Importer une sauvegarde</button></div>' +
     '<div class="hint" style="margin-top:8px">Le fichier exporté n\'est pas chiffré (il contient vos positions et versements) : gardez-le en lieu sûr.<br>Stockage durable sur cet appareil : ' + (Vault.isPersisted() ? 'activé ✓' : 'non garanti — installez l\'app sur l\'écran d\'accueil') + '.</div>';
   const security = '<p class="muted" style="margin:0 0 10px">' + (Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'application sur cet appareil (données locales chiffrées).' : '🔓 Aucun code de verrouillage sur cet appareil.') + '</p><button class="btn" type="button" id="sPin">Code de verrouillage…</button>';
   const notif = '<p class="muted" style="margin:0 0 10px" id="nStatus">' + esc(notifStatusText()) + '</p><div class="btn-row"><button class="btn" type="button" id="nEnable">Activer les rappels</button><button class="btn" type="button" id="nIcs">Ajouter à l\'agenda (.ics)</button></div>';
   host.innerHTML = pageHead('Paramètres', 'Compte, préférences d\'affichage et gestion des données') +
     (account ? sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) : '') + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
-    sec('Sécurité de cet appareil', 'Verrouille l\'ouverture de l\'app avec un code et chiffre vos données sur cet appareil.', security) + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Rappels de versement', '', notif) +
+    (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Rappels de versement', '', notif) +
     '<p class="hint" style="text-align:center;margin-top:18px">Suivi des dividendes · version 2 · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
   wireDo(host);
   const on = (id, fn) => { const e = $('#' + id, host); if (e) e.onclick = fn; };
@@ -62,9 +60,6 @@ function renderSettings(host) {
   on('sAcc', openAccountsModal);
   on('sCols', () => { state.settings.columns = {}; saveState(); toast('Colonnes réinitialisées.'); });
   on('sExport', exportData);
-  on('sCsv', openCsvExport);
-  on('sUndo', undoLastImport);
-  on('sCheck', openDiagnostic);
   on('sImport', async () => { const f = await pickFile('application/json,.json'); if (f) importBackup(f); });
   on('sPin', openSecurityModal);
   on('nEnable', async () => { await enableNotifications(); const st = $('#nStatus', host); if (st) st.textContent = notifStatusText(); });
