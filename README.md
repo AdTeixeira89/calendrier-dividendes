@@ -43,9 +43,9 @@ Limites à connaître : Yahoo ne fournit **ni la date de mise en paiement ni la 
 
 **Logos** : sans API ni clé, l'app essaie dans l'ordre le logo déjà enregistré, le service public Parqet (par ISIN puis par symbole), les images publiques FMP, puis les initiales. Rien n'est stocké (URL calculées à l'affichage). Désactivable dans Paramètres : seuls le ticker ou l'ISIN sont alors jamais transmis à ces services.
 
-## Comptes utilisateurs et synchronisation (Firebase) — désactivés pour le moment
+## Comptes utilisateurs et synchronisation (Firebase)
 
-> Le code est conservé mais **désactivé** (`accountsEnabled: false` dans `config.js`) : l'app fonctionne avec les données sur l'appareil, protégées par le **code PIN** (Paramètres → Sécurité), avec export / import d'un fichier de sauvegarde. Pour réactiver les comptes : passer `accountsEnabled` à `true` et renseigner `firebase` (voir ci-dessous).
+> Les comptes sont **activés** (`accountsEnabled: true` dans `config.js`, projet Firebase renseigné). Les données sont stockées dans la collection Firestore **`suivi_dividendes/{uid}`** (collection dédiée : un projet partagé avec une autre application n'est pas touché). Pour revenir au mode local seul : `accountsEnabled: false` (les données de l'appareil sont conservées ; le code PIN et l'export / import restent disponibles).
 
 Connexion / création de compte par e-mail + mot de passe, déconnexion, récupération par e-mail, suppression du compte. Les données de chaque utilisateur sont stockées dans **Firestore** (`users/{uid}`), lisibles et modifiables **uniquement par leur propriétaire** (`firestore.rules`), et synchronisées entre appareils : écriture transactionnelle avec contrôle de version, détection des conflits (fusion sans perte), reprise après coupure, copie locale pour fonctionner hors-ligne. Les données locales existantes sont migrées vers le compte à la première connexion (fusion sans doublon). Deux comptes ne sont jamais mélangés sur un même appareil.
 
@@ -54,7 +54,7 @@ Connexion / création de compte par e-mail + mot de passe, déconnexion, récup�
 1. <https://console.firebase.google.com> → **Ajouter un projet** (Google Analytics non nécessaire).
 2. **Build → Authentication → Commencer → Sign-in method → E-mail/Mot de passe → Activer.**
 3. **Build → Firestore Database → Créer une base de données** (mode production, région Europe).
-4. Onglet **Règles** : collez le contenu de [`firestore.rules`](firestore.rules) puis **Publier**.
+4. Onglet **Règles** : collez le contenu de [`firestore.rules`](firestore.rules) puis **Publier**. **Projet déjà utilisé par une autre application : n'ajoutez que le bloc `match /suivi_dividendes/{userId}` à vos règles existantes, ne les remplacez pas.**
 5. **Paramètres du projet → Vos applications → Web (`</>`)** → enregistrez l'application → copiez l'objet `firebaseConfig`.
 6. **Authentication → Paramètres → Domaines autorisés** : ajoutez `adteixeira89.github.io`.
 7. Collez `firebaseConfig` dans [`config.js`](config.js) (clé `firebase`). Ces identifiants sont publics par conception : la sécurité repose sur les règles de l'étape 4.

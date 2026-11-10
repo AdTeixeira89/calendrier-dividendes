@@ -1,7 +1,7 @@
 /* ==================================================================
    cloud.js — comptes utilisateurs et synchronisation (Firebase Auth + Firestore).
    - Connexion / création de compte par e-mail + mot de passe, récupération par e-mail.
-   - Les données de chaque utilisateur sont dans  users/{uid}  (règles Firestore : seul
+   - Les données de chaque utilisateur sont dans  suivi_dividendes/{uid}  (règles Firestore : seul
      le propriétaire peut lire / écrire — voir firestore.rules).
    - L'état complet est sérialisé en JSON, découpé en morceaux (limite Firestore),
      écrit dans une transaction avec contrôle de version (pas d'écrasement silencieux
@@ -18,6 +18,8 @@
   let fb = null, auth = null, db = null, ready = null, currentUser = null;
   const listeners = [];
 
+  /* Collection dédiée à cette application : un projet Firebase partagé avec une autre application n'est jamais écrasé. */
+  function collectionName() { return (root.APP_CONFIG && root.APP_CONFIG.firestoreCollection) || 'suivi_dividendes'; }
   function config() { return root.APP_CONFIG && root.APP_CONFIG.accountsEnabled === true && root.APP_CONFIG.firebase && root.APP_CONFIG.firebase.apiKey ? root.APP_CONFIG.firebase : null; }
   function configured() { return !!config(); }
 
@@ -83,7 +85,7 @@
 
   /* ---------- données ---------- */
   function refs(uid) {
-    const meta = db.collection('users').doc(uid);
+    const meta = db.collection(collectionName()).doc(uid);
     return { meta: meta, chunks: meta.collection('chunks') };
   }
 
