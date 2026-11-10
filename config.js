@@ -4,10 +4,9 @@
      la sécurité repose sur les règles Firestore du fichier firestore.rules).
      Laissez `null` tant que le projet n'est pas créé : l'app fonctionne alors en mode local. */
 window.APP_CONFIG = {
-  /* Comptes et synchronisation (Firebase Auth + Firestore, collection « suivi_dividendes ») : configuration PRÊTE mais encore DÉSACTIVÉE.
-     À passer à true une fois la console Firebase prête (e-mail / mot de passe activé, base Firestore, règles publiées, domaine autorisé) :
-     tant que c'est false, l'application reste en mode local (données de l'appareil conservées). */
-  accountsEnabled: false,
+  /* Comptes et synchronisation : ACTIVÉS (Firebase Auth + Firestore, projet dédié stock-pilot-323e4, collection « suivi_dividendes »).
+     Pour revenir au mode local seul : passer accountsEnabled à false (les données de l'appareil sont conservées). */
+  accountsEnabled: true,
   relayUrl: 'https://dividende-relais.adam-teixeira89.workers.dev',
   firebase: {
     apiKey: 'AIzaSyCR9LIFocA7tWbrdj7aPbgAIy9yqbq2-vk',
