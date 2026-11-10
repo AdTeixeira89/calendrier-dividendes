@@ -10,11 +10,11 @@ window.APP_CONFIG = {
   accountsEnabled: false,
   relayUrl: 'https://dividende-relais.adam-teixeira89.workers.dev',
   firebase: {
-    apiKey: 'AIzaSyAPi_3AMb0r5_ytEY7rPISJ1n3Jsw6-j5E',
-    authDomain: 'gestion-finances-6f15f.firebaseapp.com',
-    projectId: 'gestion-finances-6f15f',
-    storageBucket: 'gestion-finances-6f15f.firebasestorage.app',
-    messagingSenderId: '272504769508',
-    appId: '1:272504769508:web:51069bd30c8f77aaee95f1'
+    apiKey: 'AIzaSyCR9LIFocA7tWbrdj7aPbgAIy9yqbq2-vk',
+    authDomain: 'stock-pilot-323e4.firebaseapp.com',
+    projectId: 'stock-pilot-323e4',
+    storageBucket: 'stock-pilot-323e4.firebasestorage.app',
+    messagingSenderId: '151595483615',
+    appId: '1:151595483615:web:df56fb14b81edc9276846a'
   }
 };
