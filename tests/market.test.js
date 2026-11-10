@@ -58,7 +58,7 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.strictEqual(M.buildSlots(d([['2025-05-10', 3], ['2026-05-10', 3.2]]), '2026-10-14'), null, 'un seul versement par an : modèle simple');
   const h = { id: '1', ticker: 'NOVO-B.CO', type: 'stock', dividend: {} };
   M.applyToHolding(h, { symbol: 'NOVO-B.CO', resolved: false, currency: 'DKK', dividends: d([['2024-03-22', 6.4], ['2024-08-15', 3.5], ['2025-03-28', 7.9], ['2025-08-15', 3.75], ['2026-03-27', 7.95], ['2026-08-14', 3.75]]) }, '2026-10-14');
-  assert.deepStrictEqual(h.dividend.slots, [{ month: 3, amount: 7.95 }, { month: 8, amount: 3.75 }]);
+  assert.deepStrictEqual(h.dividend.slots, [{ month: 4, amount: 7.95 }, { month: 8, amount: 3.75 }]); // créneaux exprimés en mois de PAIEMENT (détachement fin mars → versement début avril)
   console.log('ok   créneaux de versement (acompte + solde) : détection sûre');
 })();
 (async () => {

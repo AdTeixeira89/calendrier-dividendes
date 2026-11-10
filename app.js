@@ -82,7 +82,7 @@ function hydrateState(parsed) {
 /* Enregistrement : local (localStorage + IndexedDB, chiffré si code) puis cloud (différé). */
 function saveState(o) {
   o = o || {};
-  if (!o.remote) state.meta.dirty = true;
+  if (!o.remote) { state.meta.dirty = true; state.meta.localAt = Date.now(); }
   Vault.write(JSON.stringify(state));
   if (!o.remote) scheduleSync();
   snapshotForWorker();
@@ -236,16 +236,45 @@ function refreshPayLags() { try { if (Dividends.learnPayLags(state, Market, toda
 let syncTimer = null, syncing = false, syncQueued = false;
 function setSync(st, msg) { view.sync = { state: st, msg: msg || '', at: Date.now() }; renderSyncChip(); Notify.set('sync', st === 'err' ? [{ id: 'sync:err', level: 'error', title: 'Synchronisation en erreur', body: esc(msg || 'La synchronisation a échoué.'), accept: { label: 'Réessayer', run: () => { try { pullIfChanged(); } catch (e) { /* ignoré */ } }, ack: false } }] : []); }
 
+/* Version envoyée au compte : sans données de marché (chaque appareil actualise les siennes), sans annulation locale. */
 function cloudPayload() {
-  const c = clone(state);
-  c.meta = { uid: c.meta.uid, lastMarketUpdate: c.meta.lastMarketUpdate, remoteBase: 0, dirty: false };
+  const c = Sync.slim(state);
+  c.meta = { uid: state.meta.uid };
   return c;
 }
+const withoutMeta = (p) => { const x = clone(p); delete x.meta; return x; };
 function scheduleSync() {
   if (!Cloud.user()) return;
   clearTimeout(syncTimer);
   setSync('syncing', 'Modifications en attente…');
   syncTimer = setTimeout(syncNow, 1800);
+}
+
+/* Fusion AUTOMATIQUE avec la version du compte (aucune question) :
+   - déjà synchronisé une fois (base connue) : fusion élément par élément, ajouts / suppressions / modifications de chaque appareil (Sync.merge3) ;
+   - premier échange avec des données des deux côtés : union sans doublon (mergeStates). */
+function mergeWithRemote(remote) {
+  const base = state.meta.syncBase || null, localSlim = Sync.slim(state), pl = (state.meta.localAt || 0) >= (remote.updatedAt || 0);
+  let m;
+  if (base) m = Sync.merge3(base, localSlim, remote.state, pl);
+  else if (hasData(state)) m = mergeStates(state, remote.state);
+  else m = clone(remote.state);
+  const baseIds = new Set([].concat(base ? (base.holdings || []).concat(base.archive || []) : []).map((h) => h.id));
+  m = Sync.dedupe(m, baseIds).merged; Sync.reattach(m, state);
+  m.meta = clone(state.meta); if (state.undo) m.undo = state.undo;
+  const full = hydrateState(m); full.meta = Object.assign({}, state.meta);
+  return { full, slim: withoutMeta(Object.assign(Sync.slim(full), { meta: {} })), localSlim };
+}
+/* Applique un résultat de fusion à l'état local, sans perdre ce qui a été modifié ici pendant l'échange avec le compte. */
+function adoptMerged(res, remoteAt, uidv, stamp) {
+  let next = res.full;
+  if ((state.meta.localAt || 0) !== stamp) {                  // modifié pendant l'échange : on rejoue ces modifications par-dessus la version fusionnée
+    const again = Sync.merge3(res.localSlim, Sync.slim(state), res.slim, true);
+    Sync.reattach(again, state); again.meta = clone(state.meta); if (state.undo) again.undo = state.undo; next = hydrateState(again); next.meta = Object.assign({}, state.meta);
+    next.meta.dirty = true;
+  } else next.meta.dirty = false;
+  state = next; state.meta.uid = uidv; state.meta.remoteBase = remoteAt; state.meta.syncBase = res.slim;
+  saveState({ remote: true }); if (state.meta.dirty) scheduleSync();
 }
 async function syncNow() {
   const u = Cloud.user(); if (!u) return false;
@@ -253,13 +282,30 @@ async function syncNow() {
   if (!navigator.onLine) { setSync('offline', 'Hors-ligne : synchronisation à la reconnexion.'); return false; }
   syncing = true; setSync('syncing', 'Synchronisation…');
   try {
-    const r = await Cloud.push(cloudPayload(), state.meta.remoteBase);
-    state.meta.remoteBase = r.updatedAt; state.meta.dirty = false; state.meta.uid = u.uid;
-    saveState({ remote: true });
-    setSync('ok', 'Synchronisé');
-    return true;
+    for (let tries = 0; tries < 4; tries++) {
+      const stamp = state.meta.localAt || 0, v = await Cloud.remoteVersion();
+      if (v === state.meta.remoteBase) {                      // rien de nouveau dans le compte : envoi direct des modifications de cet appareil
+        const payload = cloudPayload(), r = await Cloud.push(payload, v).catch((e) => { if (e.conflict) return null; throw e; });
+        if (!r) continue;
+        state.meta.uid = u.uid; state.meta.remoteBase = r.updatedAt; state.meta.syncBase = withoutMeta(payload); state.meta.dirty = (state.meta.localAt || 0) !== stamp;
+        saveState({ remote: true }); if (state.meta.dirty) scheduleSync(); else setSync('ok', 'Synchronisé');
+        return true;
+      }
+      const remote = await Cloud.fetchRemote();
+      if (!remote.exists || !remote.state) {                  // compte vide : on y envoie simplement cet appareil
+        const payload = cloudPayload(), r = await Cloud.push(payload, remote.updatedAt || 0).catch((e) => { if (e.conflict) return null; throw e; });
+        if (!r) continue;
+        state.meta.uid = u.uid; state.meta.remoteBase = r.updatedAt; state.meta.syncBase = withoutMeta(payload); state.meta.dirty = false; saveState({ remote: true }); setSync('ok', 'Synchronisé'); return true;
+      }
+      const res = mergeWithRemote(remote), payload = Object.assign(clone(res.slim), { meta: { uid: u.uid } });
+      const r = await Cloud.push(payload, remote.updatedAt).catch((e) => { if (e.conflict) return null; throw e; });
+      if (!r) continue;                                       // le compte a encore changé pendant la fusion : on recommence
+      adoptMerged(res, r.updatedAt, u.uid, stamp); renderPageSoft(); setSync('ok', 'Synchronisé');
+      return true;
+    }
+    setSync('err', 'Synchronisation retardée : le compte change sans cesse, nouvel essai bientôt.'); setTimeout(() => scheduleSync(), 8000);
+    return false;
   } catch (e) {
-    if (e.conflict) { setSync('err', 'Conflit : modifications faites sur un autre appareil.'); await resolveConflict('conflict'); return false; }
     setSync('err', Cloud.friendly(e));
     return false;
   } finally {
@@ -267,21 +313,21 @@ async function syncNow() {
     if (syncQueued) { syncQueued = false; if (state.meta.dirty) scheduleSync(); }
   }
 }
-function applyRemote(remote, uidv) {
-  state = hydrateState(remote.state);
-  state.meta.uid = uidv; state.meta.remoteBase = remote.updatedAt; state.meta.dirty = false;
-  saveState({ remote: true });
-  renderPageSoft();
-}
+/* Le compte a changé (autre appareil) : on reprend ses ajouts, suppressions et modifications automatiquement ; vos propres modifications non envoyées sont conservées. */
 async function pullIfChanged() {
   const u = Cloud.user(); if (!u || syncing || !navigator.onLine) return;
   try {
     const v = await Cloud.remoteVersion();
     if (v === state.meta.remoteBase) { if (state.meta.dirty) scheduleSync(); return; }
-    if (v > state.meta.remoteBase) {
-      if (!state.meta.dirty) { const r = await Cloud.fetchRemote(); applyRemote(r, u.uid); toast('Données mises à jour depuis votre compte.'); setSync('ok', 'Synchronisé'); }
-      else await resolveConflict('conflict');
-    }
+    if (state.meta.dirty) { await syncNow(); return; }
+    syncing = true;
+    try {
+      const stamp = state.meta.localAt || 0, remote = await Cloud.fetchRemote();
+      if (!remote.exists || !remote.state) return;
+      const before = Sync.st(Sync.slim(state)), res = mergeWithRemote(remote);
+      adoptMerged(res, remote.updatedAt, u.uid, stamp); renderPageSoft(); setSync('ok', 'Synchronisé');
+      if (Sync.st(res.slim) !== before) toast('Mis à jour avec les modifications de votre autre appareil.');
+    } finally { syncing = false; }
   } catch (e) { setSync('err', Cloud.friendly(e)); }
 }
 
@@ -337,79 +383,36 @@ function mergeStates(local, remote) {
   return out;
 }
 
-/* Conflit entre les données de cet appareil et celles du compte. */
-async function resolveConflict(reason) {
-  const u = Cloud.user(); if (!u) return;
-  let remote;
-  try { remote = await Cloud.fetchRemote(); } catch (e) { setSync('err', Cloud.friendly(e)); return; }
-  if (!remote.exists || !remote.state) {   // le compte n'a (plus) de données : on y renvoie simplement celles de cet appareil
-    try { const r = await Cloud.push(cloudPayload(), remote.updatedAt || 0); state.meta.remoteBase = r.updatedAt; state.meta.dirty = false; state.meta.uid = u.uid; saveState({ remote: true }); setSync('ok', 'Synchronisé'); } catch (e) { setSync('err', Cloud.friendly(e)); }
-    return;
-  }
-  return new Promise((resolve) => {
-    const nL = state.holdings.length, nR = remote.state ? (remote.state.holdings || []).length : 0;
-    const intro = reason === 'migrate'
-      ? 'Cet appareil contient déjà des données (<b>' + nL + '</b> actif(s)) et votre compte aussi (<b>' + nR + '</b> actif(s)).'
-      : 'Les données ont été modifiées à la fois sur cet appareil (<b>' + nL + '</b> actif(s)) et dans votre compte (<b>' + nR + '</b> actif(s)).';
-    const m = openModal('<h2>Quelles données conserver ?</h2><div class="sub">' + intro + ' Rien n\'est supprimé sans votre choix.</div>' +
-      '<div class="stack">' +
-      '<button class="btn primary" type="button" id="cfMerge">Fusionner les deux (recommandé)</button>' +
-      '<div class="hint" style="margin-top:-6px">Ajoute à votre compte les éléments qui n\'y sont pas encore, sans doublon.</div>' +
-      '<button class="btn" type="button" id="cfCloud">Utiliser les données du compte</button>' +
-      '<div class="hint" style="margin-top:-6px">Les données de cet appareil sont remplacées (exportez-les d\'abord si besoin).</div>' +
-      '<button class="btn" type="button" id="cfLocal">Envoyer les données de cet appareil vers le compte</button>' +
-      '<div class="hint" style="margin-top:-6px">Les données actuelles du compte sont remplacées.</div>' +
-      '<button class="link-btn" type="button" id="cfExport">Exporter une sauvegarde de cet appareil d\'abord</button></div>', { sticky: true });
-    const done = () => { closeModal(); resolve(); };
-    $('#cfExport', m).onclick = () => exportData();
-    $('#cfCloud', m).onclick = () => { applyRemote(remote, u.uid); setSync('ok', 'Synchronisé'); toast('Données du compte chargées.'); done(); };
-    $('#cfLocal', m).onclick = async () => {
-      try { const r = await Cloud.push(cloudPayload(), remote.updatedAt); state.meta.remoteBase = r.updatedAt; state.meta.dirty = false; state.meta.uid = u.uid; saveState({ remote: true }); setSync('ok', 'Synchronisé'); toast('Votre compte contient maintenant les données de cet appareil.'); }
-      catch (e) { toast(Cloud.friendly(e), { error: true }); }
-      done();
-    };
-    $('#cfMerge', m).onclick = async () => {
-      try {
-        const merged = hydrateState(mergeStates(state, remote.state || defaultState()));
-        const r = await Cloud.push(Object.assign(clone(merged), { meta: { uid: u.uid } }), remote.updatedAt);
-        state = merged; state.meta.uid = u.uid; state.meta.remoteBase = r.updatedAt; state.meta.dirty = false;
-        saveState({ remote: true }); setSync('ok', 'Synchronisé'); renderPage(); toast('Données fusionnées.');
-      } catch (e) { toast(Cloud.friendly(e), { error: true }); }
-      done();
-    };
-  });
-}
-
 /* Après connexion : récupère / envoie les données sans jamais en perdre. */
 async function afterLogin(user) {
   // Appareil déjà connu : on affiche tout de suite les données locales, la synchronisation se fait en arrière-plan.
   if (state.meta.uid === user.uid && hasData(state) && !$('#authRoot').classList.contains('on')) {
     startApp(); setSync('syncing', 'Synchronisation…');
-    try { await pullIfChanged(); if (state.meta.dirty) await syncNow(); else if (view.sync.state !== 'err') setSync('ok', 'Synchronisé'); }
-    catch (e) { setSync('err', Cloud.friendly(e)); }
+    try { await syncNow(); } catch (e) { setSync('err', Cloud.friendly(e)); }
     return;
   }
   showAuthBusy('Synchronisation de vos données…');
   try {
     if (state.meta.uid && state.meta.uid !== user.uid) { state = defaultState(); state.settings.relayUrl = CFG.relayUrl || ''; }   // données d'un autre compte : jamais mélangées
     const remote = await Cloud.fetchRemote();
-    if (!remote.exists || !remote.state) {
+    if (!remote.exists || !remote.state) {                    // compte vide : il reçoit les données de cet appareil
       state.meta.uid = user.uid; state.meta.remoteBase = 0;
-      const had = hasData(state);
-      const r = await Cloud.push(cloudPayload(), 0);
-      state.meta.remoteBase = r.updatedAt; state.meta.dirty = false; saveState({ remote: true });
+      const had = hasData(state), payload = cloudPayload();
+      const r = await Cloud.push(payload, remote.updatedAt || 0);
+      state.meta.remoteBase = r.updatedAt; state.meta.syncBase = withoutMeta(payload); state.meta.dirty = false; saveState({ remote: true });
       hideAuth(); startApp();
       if (had) toast('Vos données locales ont été enregistrées dans votre compte.');
       setSync('ok', 'Synchronisé');
       return;
     }
-    if (!hasData(state)) { applyRemote(remote, user.uid); hideAuth(); startApp(); setSync('ok', 'Synchronisé'); return; }
-    if (state.meta.uid === user.uid) {
-      if (remote.updatedAt === state.meta.remoteBase) { hideAuth(); startApp(); if (state.meta.dirty) scheduleSync(); else setSync('ok', 'Synchronisé'); return; }
-      if (!state.meta.dirty) { applyRemote(remote, user.uid); hideAuth(); startApp(); setSync('ok', 'Synchronisé'); return; }
-      hideAuth(); startApp(); await resolveConflict('conflict'); return;
-    }
-    hideAuth(); startApp(); await resolveConflict('migrate');
+    const hadLocal = hasData(state);
+    // appareil vide, ou premier branchement avec des données des deux côtés : fusion automatique, sans question (ajouts de chaque côté réunis, sans doublon)
+    const stamp = state.meta.localAt || 0, res = mergeWithRemote(remote), payload = Object.assign(clone(res.slim), { meta: { uid: user.uid } });
+    const r = hadLocal ? await Cloud.push(payload, remote.updatedAt) : { updatedAt: remote.updatedAt };
+    adoptMerged(res, r.updatedAt, user.uid, stamp);
+    hideAuth(); startApp(); setSync('ok', 'Synchronisé');
+    if (hadLocal) toast('Données de cet appareil et de votre compte réunies automatiquement.', { ms: 6000 });
+    if (!hadLocal || state.meta.dirty) autoRefreshIfStale();
   } catch (e) {
     hideAuth(); startApp();
     setSync('err', Cloud.friendly(e)); toast(Cloud.friendly(e), { error: true });
@@ -743,6 +746,7 @@ function startApp() {
     ensureFx(); ensureFxHistory(); initPullRefresh();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(() => { snapshotForWorker(); checkNotifications(); }).catch(() => {});
     refreshPayLags(); setTimeout(autoRefreshIfStale, 2500);
+    setInterval(() => { if (document.visibilityState === 'visible' && Cloud.user() && navigator.onLine) pullIfChanged(); }, 30000);      // modifications d'un autre appareil reprises en moins de 30 s
   }
   renderPage();
 }

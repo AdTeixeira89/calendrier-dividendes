@@ -1238,17 +1238,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await d2.evaluate(() => pullIfChanged()); await d2.waitForTimeout(500); eq(await tickers(d2), ['AAPL', 'KO', 'MSFT'], 'appareil 2 reçoit la modification de l\'appareil 1');
   });
 
-  await test('compte : modifications simultanées sur deux appareils → conflit détecté, fusion sans perte', async () => {
+  await test('compte : modifications simultanées sur deux appareils → fusion AUTOMATIQUE sans fenêtre de choix, ajouts et suppressions de chaque appareil repris', async () => {
     const d1 = await device({ firebase: true }); await d1.open(1500); await signInUI(d1, A.email, A.pwd);
     const d2 = await device({ firebase: true }); await d2.open(1500); await signInUI(d2, A.email, A.pwd);
-    await addHolding(d2, 'NESN'); await d2.waitForTimeout(2800);
-    await addHolding(d1, 'SAP');            // modification locale non encore synchronisée
-    const syncing = d1.evaluate(() => syncNow());
-    await d1.waitForSelector('#cfMerge', { timeout: 6000 }); ok((await d1.locator('.modal').innerText()).includes('Quelles données conserver'), 'conflit signalé, rien n\'est écrasé');
-    await d1.click('#cfMerge'); await d1.waitForTimeout(1500); void syncing;
-    const t1 = await tickers(d1); ok(t1.includes('SAP') && t1.includes('NESN') && t1.includes('AAPL'), 'fusion : ' + t1);
-    const cs = cloudState(uidOf(A.email)).holdings.map((h) => h.ticker); ok(cs.includes('SAP') && cs.includes('NESN'), 'cloud contient les deux modifications');
-    eq(new Set(t1).size, t1.length, 'aucun doublon');
+    await addHolding(d2, 'NESN'); await d2.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 });
+    await addHolding(d1, 'SAP');            // modification locale non encore synchronisée pendant que l'autre appareil a déjà écrit dans le compte
+    await d1.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 }); await d1.waitForTimeout(300);
+    eq(await d1.locator('.modal #cfMerge').count(), 0, 'aucune fenêtre « Fusionner »');
+    const t1 = await tickers(d1); ok(t1.includes('SAP') && t1.includes('NESN') && t1.includes('AAPL'), 'fusion : ' + t1); eq(new Set(t1).size, t1.length, 'aucun doublon');
+    const cs = cloudState(uidOf(A.email)).holdings.map((h) => h.ticker); ok(cs.includes('SAP') && cs.includes('NESN'), 'le compte contient les deux ajouts');
+    // suppression sur un appareil → répercutée sur l'autre
+    await d1.evaluate(() => { const h = state.holdings.find((x) => x.ticker === 'SAP'); state.holdings = state.holdings.filter((x) => x !== h); saveState(); }); await d1.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 });
+    await d2.evaluate(() => pullIfChanged()); await d2.waitForTimeout(600); const t2 = await tickers(d2); ok(!t2.includes('SAP') && t2.includes('NESN'), 'suppression reprise sur l\'autre appareil : ' + t2);
+    eq(d1.errors.concat(d2.errors), [], 'aucune erreur JS');
   });
 
   await test('compte : déconnexion (données locales effacées de l\'appareil), reconnexion = données restaurées', async () => {
@@ -1259,13 +1261,12 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await signInUI(p, A.email, A.pwd); eq(await tickers(p), before, 'reconnexion : toutes les données sont revenues');
   });
 
-  await test('compte : données locales existantes (sans compte) migrées vers le compte, fusion sans doublon', async () => {
+  await test('compte : données locales existantes (sans compte) + données du compte : réunies AUTOMATIQUEMENT (aucune question), sans doublon', async () => {
     const seed = SEED(0); seed.holdings = [H(1, { id: 'loc1', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple' }), H(2, { id: 'loc2', ticker: 'LOCALONLY', displayTicker: 'LOCALONLY' })];
     const p = await device({ firebase: true, seed }); await p.open(1500);
     await p.click('[data-m=in]').catch(() => {}); await signInUI(p, A.email, A.pwd).catch(() => {});
-    await p.waitForSelector('#cfMerge', { timeout: 6000 }); ok((await p.locator('.modal').innerText()).includes('contient déjà des données'), 'choix proposé (migration)');
-    await p.click('#cfMerge'); await p.waitForTimeout(1500); const t = await tickers(p);
-    ok(t.includes('LOCALONLY') && t.includes('SAP'), 'local + cloud réunis : ' + t); eq(t.filter((x) => x === 'AAPL').length, 1, 'AAPL non dupliqué');
+    await p.waitForFunction(() => state.holdings.some((h) => h.ticker === 'LOCALONLY') && !state.meta.dirty, null, { timeout: 12000 }); eq(await p.locator('#cfMerge').count(), 0, 'aucune fenêtre de choix');
+    const t = await tickers(p); ok(t.includes('LOCALONLY') && t.includes('NESN') && t.includes('KO'), 'local + cloud réunis : ' + t); eq(t.filter((x) => x === 'AAPL').length, 1, 'AAPL non dupliqué');
     ok(cloudState(uidOf(A.email)).holdings.some((h) => h.ticker === 'LOCALONLY'), 'données locales envoyées dans le compte');
   });
 
@@ -1284,13 +1285,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   await test('compte : mot de passe oublié (e-mail envoyé), erreur de synchronisation affichée clairement', async () => {
     const p = await device({ firebase: true }); await p.open(1500); await p.fill('#aEmail', A.email); await p.click('#aForgot'); await p.waitForTimeout(400);
     ok(fsOps.resets.includes(A.email), 'e-mail de récupération demandé'); await signInUI(p, A.email, A.pwd);
-    fsOps.fail = true; await addHolding(p, 'ERR1'); await p.waitForTimeout(2800); ok(await p.locator('.sync-chip.err').count(), 'indicateur d\'erreur de synchronisation');
+    fsOps.fail = true; await addHolding(p, 'ERR1'); await p.waitForSelector('.sync-chip.err', { timeout: 12000 }).catch(() => {}); ok(await p.locator('.sync-chip.err').count(), 'indicateur d\'erreur de synchronisation');
     ok(/injoignable|Erreur/.test(await p.evaluate(() => view.sync.msg)), 'message : ' + await p.evaluate(() => view.sync.msg));
-    fsOps.fail = false; await p.evaluate(() => syncNow()); await p.waitForTimeout(3500);  // laisse passer l'éventuelle actualisation de marché en arrière-plan ok(await p.locator('.sync-chip.ok').count(), 'resynchronisation automatique possible'); ok(cloudState(uidOf(A.email)).holdings.some((h) => h.ticker === 'ERR1'), 'donnée enfin envoyée, rien perdu');
+    fsOps.fail = false; await p.evaluate(() => { syncNow(); }); await p.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 }); ok(cloudState(uidOf(A.email)).holdings.some((h) => h.ticker === 'ERR1'), 'donnée enfin envoyée, rien perdu');
   });
 
   await test('compte : suppression du compte (mot de passe requis) efface les données cloud', async () => {
-    const p = await device({ firebase: true }); await p.open(1500); await signUpUI(p, 'erin@test.fr', 'motdepasse4'); await addHolding(p, 'ZZZ'); await p.waitForTimeout(2800);
+    const p = await device({ firebase: true }); await p.open(1500); await signUpUI(p, 'erin@test.fr', 'motdepasse4'); await addHolding(p, 'ZZZ'); await p.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 });
     const uid = uidOf('erin@test.fr'); ok(fsOps.get('suivi_dividendes/' + uid).exists, 'données présentes avant suppression');
     await p.evaluate(() => { go('settings'); }); await p.waitForTimeout(200); await p.click('#sDelAcc'); await p.fill('#dPwd', 'mauvais'); await p.click('#dGo'); await p.waitForTimeout(400);
     ok(await p.locator('#dErr:not(.hide)').count(), 'mauvais mot de passe refusé'); ok(fsOps.get('suivi_dividendes/' + uid).exists, 'rien supprimé');
