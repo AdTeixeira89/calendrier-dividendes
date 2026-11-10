@@ -102,6 +102,7 @@ async function device(o) {
   await page.route(/api\.mymemory\.translated\.net/, (r) => { const q = new URL(r.request().url()).searchParams.get('q'); RELAY.mmCalls = (RELAY.mmCalls || 0) + 1; r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(RELAY.mmFail ? { responseData: { translatedText: 'MYMEMORY WARNING: QUOTA' } } : { responseData: { translatedText: 'MM: ' + q } }) }); });
   await page.route(/cdn\.jsdelivr\.net/, (r) => { const f = r.request().url().includes('papaparse') ? 'papaparse.min.js' : 'xlsx.full.min.js'; const fp = path.join(process.env.LIBDIR || '', f); fs.existsSync(fp) ? r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(fp) }) : r.abort(); });
   await page.route(/^https?:\/\/(?!localhost)(?!.*workers\.dev)(?!.*frankfurter)(?!.*cdn\.jsdelivr)(?!.*mymemory)/, (r) => r.abort());
+  if (o.localOnly) await page.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.APP_CONFIG={accountsEnabled:false,relayUrl:'https://dividende-relais.adam-teixeira89.workers.dev',firebase:null};" }));
   if (o.firebase) {
     await page.route('**/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "window.APP_CONFIG={accountsEnabled:true,relayUrl:'https://dividende-relais.adam-teixeira89.workers.dev',firebase:{apiKey:'k',authDomain:'a',projectId:'p',appId:'x'}};" }));
     await page.addInitScript(MOCK);
@@ -123,7 +124,7 @@ const SEED = (n, extra) => Object.assign({ v: 2, meta: {}, holdings: Array.from(
 const bellOpen = async (p) => { await p.waitForTimeout(500); if (await p.locator('#bellPanel.hide').count()) await p.click('#bellBtn'); await p.waitForSelector('#bellPanel:not(.hide)'); return (await p.locator('#bellPanel').innerText()).replace(/\n/g, ' | '); };
 const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
 const storeOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('dividendCalendarApp_v1')));
-const cloudState = (uid) => { const m = fsOps.get('users/' + uid); if (!m.exists) return null; let s = ''; for (let i = 0; i < m.data.chunks; i++) s += fsOps.get('users/' + uid + '/chunks/' + i).data.data; return JSON.parse(s); };
+const cloudState = (uid) => { const m = fsOps.get('suivi_dividendes/' + uid); if (!m.exists) return null; let s = ''; for (let i = 0; i < m.data.chunks; i++) s += fsOps.get('suivi_dividendes/' + uid + '/chunks/' + i).data.data; return JSON.parse(s); };
 const csvFile = (name, text) => ({ name, mimeType: 'text/csv', buffer: Buffer.from(text, 'utf-8') });
 async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(clickSel)]); await fc.setFiles(file); }
 
@@ -1221,7 +1222,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await addHolding(p, 'AAPL'); await p.waitForTimeout(2800);
     const cs = cloudState(uidOf(A.email)); ok(cs && cs.holdings.some((h) => h.ticker === 'AAPL'), 'la base contient la position du compte');
     ok(!JSON.stringify(cs).includes('"dirty":true'), 'pas de drapeaux locaux dans le cloud');
-    ok(fsOps.get('users/' + uidOf(A.email)).exists, 'document propriétaire = users/{uid}');
+    ok(fsOps.get('suivi_dividendes/' + uidOf(A.email)).exists, 'document propriétaire = suivi_dividendes/{uid}');
     await p.reload(); await p.waitForTimeout(1500);
     ok(!(await p.locator('#authRoot.on').count()), 'session conservée après rechargement'); eq(await tickers(p), ['AAPL'], 'données présentes immédiatement');
     eq(p.errors, [], 'aucune erreur JS');
@@ -1290,11 +1291,11 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
 
   await test('compte : suppression du compte (mot de passe requis) efface les données cloud', async () => {
     const p = await device({ firebase: true }); await p.open(1500); await signUpUI(p, 'erin@test.fr', 'motdepasse4'); await addHolding(p, 'ZZZ'); await p.waitForTimeout(2800);
-    const uid = uidOf('erin@test.fr'); ok(fsOps.get('users/' + uid).exists, 'données présentes avant suppression');
+    const uid = uidOf('erin@test.fr'); ok(fsOps.get('suivi_dividendes/' + uid).exists, 'données présentes avant suppression');
     await p.evaluate(() => { go('settings'); }); await p.waitForTimeout(200); await p.click('#sDelAcc'); await p.fill('#dPwd', 'mauvais'); await p.click('#dGo'); await p.waitForTimeout(400);
-    ok(await p.locator('#dErr:not(.hide)').count(), 'mauvais mot de passe refusé'); ok(fsOps.get('users/' + uid).exists, 'rien supprimé');
+    ok(await p.locator('#dErr:not(.hide)').count(), 'mauvais mot de passe refusé'); ok(fsOps.get('suivi_dividendes/' + uid).exists, 'rien supprimé');
     await p.fill('#dPwd', 'motdepasse4'); await p.click('#dGo'); await p.waitForTimeout(800);
-    ok(!fsOps.get('users/' + uid).exists && !users.has('erin@test.fr'), 'document et compte supprimés'); ok(await p.locator('#authRoot.on').count(), 'retour à la connexion');
+    ok(!fsOps.get('suivi_dividendes/' + uid).exists && !users.has('erin@test.fr'), 'document et compte supprimés'); ok(await p.locator('#authRoot.on').count(), 'retour à la connexion');
   });
 
   await test('mise à jour des dividendes : versement orphelin rattaché, brut Trade Republic corrigé, estimations rangées ; rien avant validation ; annulable', async () => {
@@ -1384,7 +1385,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   });
 
   await test('comptes désactivés : application utilisable en local (PIN, export, import), aucune trace de compte ni de synchronisation', async () => {
-    const p = await device({}); await p.open(1200);
+    const p = await device({ localOnly: true }); await p.open(1200);
     ok(await p.locator('#authRoot.on').count() === 0 || true, ''); if (await p.locator('#aGuest').count()) await p.click('#aGuest');
     await p.waitForSelector('#page'); await p.evaluate(() => go('settings')); const txt = await p.locator('#page').innerText(); ok(!txt.includes('Compte utilisateur') && !txt.includes('Firebase') && txt.includes('Code de verrouillage') && txt.includes('Restaurer une sauvegarde'), 'comptes masqués ; PIN, export et import disponibles'); ok(!(await p.locator('.sync-chip').count()), 'aucun indicateur de synchronisation');
     eq(p.errors, [], 'aucune erreur JS');
