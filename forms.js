@@ -110,7 +110,8 @@ async function fetchIntoHoldingForm(m) {
     if (!d.none) { $('#hDiv', m).value = d.lastAmount; $('#hFreq', m).value = d.frequency === 'irregular' ? 'quarterly' : d.frequency; $('#hMonth', m).value = d.anchorMonth; $('#hKind', m).value = d.dateKind || 'pay'; }
     hDraft.dividend.history = d.history; hDraft.dividend.updatedAt = d.updatedAt; hDraft.dividend.payDayApi = d.payDayApi || null;
     $('#hType', m).dispatchEvent(new Event('change'));
-    msg.textContent = d.none ? 'Aucun dividende récent trouvé : actif marqué « sans dividende ».' : '✓ Données récupérées (détachement estimé d\'après l\'historique) : vérifiez et complétez.';
+    const used = 'Cote utilisée : ' + a.symbol + (a.exchange ? ' · ' + a.exchange : '') + (a.currency ? ' · ' + a.currency : '') + (a.name ? ' · ' + a.name : '') + (Market.isISIN(t) ? ' (même ISIN que votre courtier : c\'est le même titre, même si la place de cotation diffère de celle de votre courtier, par exemple SIX)' : '. Vérifiez que c\'est bien votre titre (ISIN, devise, place de cotation) : un même ticker peut désigner un autre produit ailleurs, par exemple une version américaine d\'un ETF européen.');
+    msg.textContent = (d.none ? 'Aucun dividende récent trouvé : actif marqué « sans dividende ». ' : '✓ Données récupérées (paiement estimé d\'après l\'historique). ') + used;
   } catch (e) { msg.textContent = '✗ ' + e.message; }
 }
 function saveHoldingForm(m, ex) {
