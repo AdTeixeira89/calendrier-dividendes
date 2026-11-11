@@ -11,7 +11,7 @@
    ================================================================== */
 (function (root) {
   'use strict';
-  const MARKET = ['hist', 'divHist', 'splits', 'price', 'priceAt', 'prevClose', 'prevCloseAt', 'marketAt', 'marketError', 'quickAt', 'fullAt'];
+  const MARKET = ['hist', 'divHist', 'splits', 'price', 'priceAt', 'prevClose', 'prevCloseAt', 'marketAt', 'marketError', 'quickAt', 'fullAt', 'listingSuspect'];
   const DIV_MARKET = ['history', 'slots'];
   const LOCAL_ONLY = { meta: 1, undo: 1 };
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);

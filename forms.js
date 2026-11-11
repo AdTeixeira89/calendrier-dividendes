@@ -40,6 +40,7 @@ function openHoldingModal(id) {
   const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' un actif</h2><div class="sub">Action ou ETF. Seuls le ticker (ou ISIN) et la quantité sont indispensables.</div>' +
     '<div style="position:relative">' + fld('Nom, ticker ou ISIN', '<input type="text" id="hTicker" value="' + esc(d.ticker) + '" placeholder="ex : Air Liquide, AAPL, AI.PA, FR0000120073" autocomplete="off">',
       'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div>' +
+    (ex ? fld('Cotation', '<select id="hListing">' + opt('', 'Cotée en bourse', d.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', d.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur) et aucun dividende n\'est prévu ; vos versements déjà reçus sont conservés.', 'hListing') : '') +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
     fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Ce que vous avez payé par titre — sert au rendement sur coût et à la plus-value', 'hCost') + '</div>' +
     '<div class="row2">' + fld('Devise du PRU', '<select id="hCostCur">' + (CURRENCIES.indexOf(d.costCurrency || d.currency) < 0 ? [d.costCurrency || d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === (d.costCurrency || d.currency))).join('') + '</select>', 'Souvent l\'euro, même pour une action cotée en dollars', 'hCostCur') + fld('Cours actuel', '<input type="number" id="hPrice" min="0" step="any" inputmode="decimal" value="' + esc(d.price > 0 ? d.price : '') + '" placeholder="automatique">', d.priceAt ? 'Mis à jour automatiquement (cours du ' + esc(fmtDate(d.priceAt.slice(0, 10))) + ')' : 'Mis à jour par « Actualiser » ; saisie manuelle possible', 'hPrice') + '</div>' +
@@ -144,9 +145,15 @@ function saveHoldingForm(m, ex) {
   if (none) dv.taxRate = numOrNull($('#hTax', m).value);
   // une saisie manuelle du dividende prime sur les créneaux automatiques (recalculés à la prochaine actualisation)
   if (dvBefore !== JSON.stringify([dv.lastAmount, dv.frequency, dv.anchorMonth])) dv.slots = null;
+  const lst = $('#hListing', m) ? $('#hListing', m).value : '';
+  if (lst === 'delisted') { if (d.listing !== 'delisted') d.delistedAt = todayISO(); d.listing = 'delisted'; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; delete d.listingSuspect; d.marketError = null; }
+  else if (d.listing === 'delisted') { delete d.listing; delete d.delistedAt; d.fullAt = 1; }          // de nouveau cotée : actualisation complète
+  const symChanged = ex && (String(ex.ticker || '').toUpperCase() !== t.toUpperCase());
+  if (symChanged) { d.marketError = null; delete d.listingSuspect; d.fullAt = 1; delete d.quickAt; }      // nouveau symbole : l'ancienne erreur ne vaut plus, actualisation complète
   const i = state.holdings.findIndex((h) => h.id === d.id);
   if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
   saveState(); closeModal(); toast('Actif enregistré.'); renderPage();
+  if ((symChanged || (ex && d.listing !== 'delisted' && ex.listing === 'delisted')) && state.settings.relayUrl) refreshMarket([d], { silent: true }).then(() => { updateMarketNotices(); });
 }
 
 /* ===============================================================
@@ -691,7 +698,7 @@ function openActionList(title, sub, rows, more) {
 const holdingByNameAny = (name) => state.holdings.concat(state.archive || []).find((h) => (h.name || h.displayTicker || h.ticker) === name);
 /* Actifs dont l'actualisation échoue : corriger le symbole, la place de cotation ou le nom. */
 function openFailingHoldings(list) {
-  const hs = (list || state.holdings.filter((h) => h.marketError));
+  const hs = (list || state.holdings.filter((h) => h.marketError && h.listing !== 'delisted'));
   if (!hs.length) { toast('Aucun actif en échec pour le moment.'); return; }
   openActionList('Actifs à corriger', 'Le symbole (ticker) est probablement inconnu de Yahoo Finance. Corrigez-le (ex. « AI.PA » pour Air Liquide à Paris) ; l\'erreur ne reviendra plus tant que l\'actif est correct.', hs.slice(0, 40).map((h) => ({ label: (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker) + ')', note: h.marketError || (h.isin ? h.isin : ''), btn: 'Corriger le symbole…', run: () => openHoldingModal(h.id) })), hs.length > 40 ? (hs.length - 40) + ' autre(s) non affichés.' : '');
 }
@@ -710,5 +717,22 @@ function openManualFx(only) {
     cs.forEach((c, i) => { const v = $('#mfx' + i, m).value.trim(); if (!v) delete next[c]; else if (Number(v) > 0) next[c] = Number(v); else bad = true; });
     if (bad) { toast('Taux invalide (nombre positif attendu).', { error: true }); return; }
     state.settings.fxManual = next; saveState(); closeModal(); renderPage(); toast('Taux enregistré(s).');
+  };
+}
+
+/* Société plus cotée en bourse (radiée, liquidée, rachetée) : décision de l'utilisateur, jamais automatique. */
+function openDelistModal(id) {
+  const h = holdingById(id); if (!h) return;
+  const nm = h.name || h.displayTicker || h.ticker;
+  const m = openModal('<h2>' + esc(nm) + ' : plus cotée en bourse</h2><div class="sub">La société a été radiée, liquidée ou rachetée. L\'actualisation s\'arrête pour ce titre (plus d\'erreur), aucun dividende n\'est prévu ; <b>vos versements et opérations déjà enregistrés sont conservés</b>. La position reste dans votre portefeuille au dernier cours connu' + (h.price > 0 ? ' (' + esc(fmtMoney(h.price, h.currency || 'EUR')) + ')' : '') + ' ; si elle est sans valeur ou vendue, utilisez « Clôturer la position… ».</div>' +
+    fld('Date de radiation ou de dernière cotation (facultatif)', '<input type="date" id="dlDate" max="' + todayISO() + '">', 'À titre d\'information.', 'dlDate') +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><div class="btn-row"><button class="btn" type="button" id="dlSell">Clôturer la position…</button><button class="btn primary" type="button" id="dlOk">Marquer comme plus cotée</button></div></div>');
+  $('#dlSell', m).onclick = () => { closeModal(); openSellModal(id); };
+  $('#dlOk', m).onclick = () => {
+    const before = clone(h), dt = $('#dlDate', m).value;
+    h.listing = 'delisted'; h.delistedAt = dt || todayISO(); delete h.listingSuspect; h.marketError = null;
+    const dv = h.dividend = h.dividend || {}; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null;
+    saveState(); closeModal(); updateMarketNotices(); renderPage();
+    toast(nm + ' marquée comme plus cotée.', { ms: 9000, action: { label: 'Annuler', fn: () => { const i = state.holdings.findIndex((x) => x.id === h.id); if (i >= 0) { state.holdings[i] = before; saveState(); updateMarketNotices(); renderPage(); } } } });
   };
 }

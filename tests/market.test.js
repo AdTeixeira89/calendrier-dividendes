@@ -117,3 +117,15 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.deepStrictEqual([r.ok, r.skipped, r.fail], [3, 1, 0]); assert.deepStrictEqual(a.hist.c, [8, 9, 10, 11], 'historique ancien conservé, mois récents mis à jour'); assert.strictEqual(a.price, 11); assert.ok(a.quickAt >= now);
   console.log('ok   actualisation légère : une requête de 5 ans par actif, historique fusionné, complète seulement si nécessaire');
 })();
+(async () => {
+  M.setDelay(0);
+  const mkClient = (chart) => M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => ({ status: 200, ok: true, json: async () => (u.includes('/search') ? { quotes: [] } : chart) }) });
+  await assert.rejects(() => mkClient({ chart: { result: null, error: { description: 'No data found, symbol may be delisted' } } }).fetchAsset('CARM.PA', 'Carmat'), (e) => e.delisted === true);
+  await assert.rejects(() => mkClient({}).fetchAsset('FR0012616852', 'Carmat'), (e) => e.notFound === true, 'ISIN absent de Yahoo');
+  const bad = { id: 'b', ticker: 'X', dividend: {} }, gone = { id: 'g', ticker: 'G', listing: 'delisted', dividend: {} };
+  let n = 0; const r = await M.refreshMany({ fetchAsset: async (t) => { n++; throw Object.assign(new Error('Yahoo : plus de données'), { delisted: true }); } }, [bad, gone], '2026-11-11', { quick: true });
+  assert.deepStrictEqual([n, r.fail, r.skipped], [1, 1, 1], 'société déclarée plus cotée : aucune requête'); assert.strictEqual(bad.listingSuspect.kind, 'delisted');
+  const st = { dividend: {} }; M.noteListing(st, { priceAt: '2026-01-05T10:00:00Z' }, '2026-11-11'); assert.strictEqual(st.listingSuspect.kind, 'stale', 'dernière cotation > 45 jours');
+  M.noteListing(st, { priceAt: '2026-11-10T10:00:00Z' }, '2026-11-11'); assert.ok(!st.listingSuspect, 'cotation récente : repère retiré');
+  console.log('ok   société plus cotée : détection (Yahoo « delisted », ISIN absent, cotation ancienne), jamais décidée automatiquement, aucune requête une fois déclarée');
+})();

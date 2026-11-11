@@ -1389,6 +1389,22 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { openManualFx(['XYZ']); }); await p.waitForSelector('#mfx0'); await p.fill('#mfx0', '2'); await p.click('#mfxOk'); await p.waitForTimeout(300);
     s = await storeOf(p); eq(s.settings.fxManual, { XYZ: 2 }, 'taux manuel enregistré'); eq(await p.evaluate(() => convert(10, 'XYZ')), 5, '10 XYZ = 5 EUR au taux saisi');
   });
+  await test('société plus cotée : détectée (Yahoo), signalée dans la cloche, option « plus cotée » (plus aucune requête) ; symbole corrigé : la notification disparaît', async () => {
+    RELAY.old = false;
+    const mk = (id, tk, nm) => ({ id, ticker: tk, displayTicker: tk, isin: 'FR0012616852', name: nm, type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 10, price: 3, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: {} });
+    const seed = SEED(0); seed.holdings = [mk('carm', 'ALCAR.PA', 'Carmat'), mk('bad', 'ZZBAD', 'Mauvais ISIN')];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(600);
+    await p.evaluate(() => { refreshMarket(null, { silent: true, quick: true }); }); await p.waitForFunction(() => state.holdings.every((h) => h.marketError), null, { timeout: 10000 });
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
+    let tx = await bellOpen(p); ok(/Carmat — probablement plus cotée/.test(tx) && /Marquer comme plus cotée/.test(tx), 'Carmat signalée comme probablement plus cotée : ' + tx.slice(0, 300)); await bellClose(p);
+    await p.evaluate(() => { const li = document.querySelector('#bellBtn'); li.click(); }); await p.click('[data-nt="mkt:delist:carm"] [data-nt-act=accept]'); await p.waitForSelector('#dlOk'); await p.click('#dlOk'); await p.waitForTimeout(400);
+    let s = await storeOf(p); const c = s.holdings.find((h) => h.id === 'carm'); ok(c.listing === 'delisted' && c.delistedAt, 'marquée plus cotée (décision de l\'utilisateur)'); eq(c.dividend.none, true, 'aucun dividende prévu');
+    const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { state.holdings.forEach((h) => { delete h.quickAt; delete h.fullAt; }); refreshMarket(null, { silent: true, quick: true }); }); await p.waitForTimeout(1500);
+    eq((RELAY.chartCalls || 0) - c0, 1, 'plus de requête pour la société plus cotée (seul l\'autre actif est interrogé)');
+    // correction du symbole depuis la fiche : l'erreur disparaît de la cloche
+    await p.evaluate(() => { openHoldingModal('bad'); }); await p.waitForSelector('#hTicker'); await p.fill('#hTicker', 'AAPL'); await p.click('#hSave'); await p.waitForFunction(() => !state.holdings.find((h) => h.id === 'bad').marketError && state.holdings.find((h) => h.id === 'bad').price > 0, null, { timeout: 10000 });
+    await p.waitForTimeout(500); tx = await bellOpen(p); eq(await p.locator('#bellPanel [data-nt="mkt:delist:bad"], #bellPanel [data-nt="market:fail"]').count(), 0, 'après correction : plus de notification d\'échec — ' + tx.slice(0, 300)); await bellClose(p);
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {

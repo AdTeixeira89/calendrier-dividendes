@@ -154,7 +154,7 @@
         const sym = pickSymbol(quotes, t);
         if (sym) return sym;
       }
-      throw new Error('ISIN introuvable : renseignez le symbole boursier (ex : AI.PA).');
+      throw Object.assign(new Error('ISIN introuvable chez Yahoo Finance : la société n\'est peut-être plus cotée (radiation, liquidation, rachat), ou renseignez le symbole boursier (ex : AI.PA).'), { notFound: true });
     }
 
     /* Données d'un actif. Renvoie toujours un objet explicite, jamais de valeurs inventées. */
@@ -165,6 +165,7 @@
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) {
         const desc = data.chart && data.chart.error && data.chart.error.description;
+        if (desc && /delisted|no data found|not found/i.test(desc)) throw Object.assign(new Error('Yahoo Finance : plus aucune donnée pour ce symbole (probablement retiré de la cote : radiation, liquidation, rachat).'), { delisted: true });
         throw new Error(desc ? 'Yahoo : ' + desc : 'Symbole inconnu.');
       }
       const meta = res.meta || {};
@@ -356,6 +357,13 @@
     const sig = (l) => JSON.stringify((l || []).filter((s) => s.date >= from).map((s) => s.date + ':' + s.ratio));
     return sig(h.splits) !== sig(a.splits);
   }
+  const STALE_DAYS = 45;
+  /* Dernière cotation très ancienne → la société est peut-être plus cotée : signalé (jamais décidé tout seul). */
+  function noteListing(h, a, nowISO) {
+    const t = a && a.priceAt ? Date.parse(a.priceAt) : NaN;
+    if (!isNaN(t) && Date.parse(nowISO) - t > STALE_DAYS * 86400000) h.listingSuspect = { kind: 'stale', since: a.priceAt.slice(0, 10), at: nowISO };
+    else delete h.listingSuspect;
+  }
   const needsFull = (h, now) => !h.hist || !h.hist.c || !h.hist.c.length || (h.fullAt && now - h.fullAt > FULL_EVERY_MS);
 
   /* Actualise plusieurs actifs, un par un, avec une pause ; s'arrête sur quota/relais refusé.
@@ -366,26 +374,28 @@
     for (let i = 0; i < holdings.length; i++) {
       if (hooks.cancelled && hooks.cancelled()) { res.stopped = true; break; }
       const h = holdings[i]; let pause = true;
+      if (h.listing === 'delisted') { res.skipped++; if (hooks.progress) hooks.progress(i + 1, holdings.length, h); continue; }      // société déclarée plus cotée : plus aucune requête
       try {
         if (hooks.quick && !needsFull(h, now)) {
           if (h.quickAt && now - h.quickAt < QUICK_MIN_MS) { res.skipped++; pause = false; }      // tout juste actualisé : rien à refaire
           else {
             const a = await client.fetchAsset(h.ticker, h.name, { needSector: false, range: '5y' });
-            if (splitsChanged(h, a)) { const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked }); applyToHolding(h, f, nowISO); h.fullAt = now; }
+            if (splitsChanged(h, a)) { const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked }); applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; }
             else {
               const from = a.hist && a.hist.from ? a.hist.from + '-01' : '';
               a.hist = mergeHist(h.hist, a.hist); a.splits = (h.splits || []).filter((s) => s.date < from).concat(a.splits || []);
-              applyToHolding(h, a, nowISO); if (!h.fullAt) h.fullAt = now;
+              const fresh = a.priceAt; applyToHolding(h, a, nowISO); noteListing(h, { priceAt: fresh }, nowISO); if (!h.fullAt) h.fullAt = now;
             }
             h.quickAt = now; h.marketError = null; res.ok++;
           }
         } else {
           const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
-          applyToHolding(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null;
+          applyToHolding(h, a, nowISO); noteListing(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null;
           res.ok++;
         }
       } catch (e) {
         res.fail++; res.errors.push({ ticker: h.displayTicker || h.ticker, message: e.message }); h.marketError = e.message;
+        if (e.delisted || e.notFound) h.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message };
         if (e.rate || e.fatal) { res.stopped = true; if (hooks.progress) hooks.progress(i + 1, holdings.length, h); break; }
       }
       if (hooks.progress) hooks.progress(i + 1, holdings.length, h);
@@ -395,6 +405,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

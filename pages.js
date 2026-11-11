@@ -30,6 +30,7 @@ function collectGlobalNotices() {
   try {
     const lm = state.meta.lastMarketUpdate, age = lm ? (Date.now() - lm) / 3600e3 : null;
     Notify.set('stale', state.settings.relayUrl && state.holdings.length && (age === null || age > 36) ? [{ id: 'market:stale', level: 'warn', title: 'Données de marché anciennes', body: (age === null ? 'Aucune actualisation enregistrée.' : 'Dernière actualisation il y a ' + Math.round(age / 24 * 10) / 10 + ' jour(s).') + ' Les dividendes détachés récemment n\'apparaissent qu\'après une actualisation.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } }] : []);
+    updateMarketNotices();
     Notify.set('divmig', migrationNotices(Dividends.planMigration(state)));
     Notify.set('divkpi2', dividendNotices(Dividends.summary(state, { to: Engine.toISO(new Date()), ids: visibleIds(), convert })));
     diagBannerHtml();
