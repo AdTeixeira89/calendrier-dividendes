@@ -1,6 +1,6 @@
 {
-  "name": "Suivi des dividendes",
-  "short_name": "Dividendes",
+  "name": "StockPilot",
+  "short_name": "StockPilot",
   "description": "Suivi des dividendes et des revenus de votre portefeuille.",
   "start_url": "./",
   "scope": "./",

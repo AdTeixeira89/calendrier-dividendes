@@ -441,14 +441,14 @@ async function doLogout() {
    --------------------------------------------------------------- */
 function showAuthBusy(msg) {
   const r = $('#authRoot'); r.classList.add('on');
-  r.innerHTML = '<div class="card card-pad auth-card"><div class="brand"><img src="logo.svg" alt="">Dividendes</div><p class="tag">' + esc(msg) + '</p><div class="progress"><i style="width:60%"></i></div></div>';
+  r.innerHTML = '<div class="card card-pad auth-card"><div class="brand"><img src="logo.svg" alt="">StockPilot</div><p class="tag">' + esc(msg) + '</p><div class="progress"><i style="width:60%"></i></div></div>';
 }
 function hideAuth() { const r = $('#authRoot'); r.classList.remove('on'); r.innerHTML = ''; }
 function showAuth(mode) {
   mode = mode || 'in';
   const r = $('#authRoot'); r.classList.add('on');
   const configured = Cloud.configured();
-  r.innerHTML = '<div class="card card-pad auth-card"><div class="brand"><img src="logo.svg" alt="">Dividendes</div>' +
+  r.innerHTML = '<div class="card card-pad auth-card"><div class="brand"><img src="logo.svg" alt="">StockPilot</div>' +
     '<p class="tag">Suivez vos dividendes et retrouvez vos données sur tous vos appareils.</p>' +
     (configured ? '<div class="auth-tabs"><div class="seg"><button type="button" data-m="in" class="' + (mode === 'in' ? 'on' : '') + '">Connexion</button><button type="button" data-m="up" class="' + (mode === 'up' ? 'on' : '') + '">Créer un compte</button></div></div>' +
       '<form id="authForm" novalidate>' +
@@ -523,9 +523,9 @@ function pageFromHash() {
 function buildShell() {
   const nav = Object.keys(PAGES).map((k) => '<button class="nav-link" type="button" data-go="' + k + '">' + icon(PAGES[k].icon) + '<span>' + PAGES[k].label.replace('Calendrier des dividendes', 'Calendrier') + '</span></button>').join('');
   const tabs = Object.keys(PAGES).map((k) => '<button type="button" data-go="' + k + '">' + icon(PAGES[k].icon) + '<span>' + (PAGES[k].short || PAGES[k].label) + '</span></button>').join('');
-  $('#app').innerHTML = '<aside class="sidebar"><div class="brand"><img src="logo.svg" alt="">Dividendes</div>' + nav + '<div class="spacer"></div>' +
+  $('#app').innerHTML = '<aside class="sidebar"><div class="brand"><img src="logo.svg" alt="">StockPilot</div>' + nav + '<div class="spacer"></div>' +
     '<div class="side-foot"><div id="syncChipSide"></div><div class="muted" style="font-size:12px;padding:0 4px" id="whoSide"></div></div></aside>' +
-    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">Dividendes</span></div><span class="grow"></span><button class="rf-btn bell-btn" type="button" id="bellBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="Notifications">' + icon('bell') + '<span class="bell-badge hide"></span></button><button class="rf-btn" type="button" data-rf-btn aria-label="Actualiser">' + icon('refresh') + '</button>' +
+    '<div class="main-col"><header class="topbar"><div class="brand-m"><img src="logo.svg" alt=""><span class="t">StockPilot</span></div><span class="grow"></span><button class="rf-btn bell-btn" type="button" id="bellBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="Notifications">' + icon('bell') + '<span class="bell-badge hide"></span></button><button class="rf-btn" type="button" data-rf-btn aria-label="Actualiser">' + icon('refresh') + '</button>' +
     '<label class="sr" for="acctSel">Portefeuille</label><select id="acctSel" style="min-height:36px"></select><span id="syncChipTop"></span></header>' +
     '<main id="page" tabindex="-1"></main></div><nav class="tabbar" aria-label="Navigation">' + tabs + '</nav>';
   $$('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
@@ -617,7 +617,7 @@ async function exportData() {
   const name = 'suivi-dividendes-' + todayISO() + '.json';
   const out = clone(state); delete out.settings.apiKey; delete out.undo;
   const file = new File([JSON.stringify(out, null, 2)], name, { type: 'application/json' });
-  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sauvegarde Suivi des dividendes' }); return; } }
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sauvegarde StockPilot' }); return; } }
   catch (e) { if (e && e.name === 'AbortError') return; }
   const url = URL.createObjectURL(file);
   const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();

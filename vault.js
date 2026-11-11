@@ -124,7 +124,7 @@
       el.innerHTML =
         '<form class="lock-card" autocomplete="off">' +
         '<img src="logo.svg" alt="" class="lock-logo">' +
-        '<h2>Dividendes</h2>' +
+        '<h2>StockPilot</h2>' +
         '<p class="lock-sub">Entrez votre code pour ouvrir l\'application.</p>' +
         '<input id="lockPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" placeholder="Code" aria-label="Code">' +
         '<div class="lock-err" id="lockErr" role="alert"></div>' +
