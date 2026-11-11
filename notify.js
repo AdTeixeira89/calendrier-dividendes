@@ -30,13 +30,14 @@ const Notify = (function () {
 
   function handle(id, how) {
     const n = everything().find((x) => x.id === id); if (!n) return;
+    if (how === 'ignored' && n.onIgnore) { try { n.onIgnore(); } catch (e) { console.error(e); } }     // ignorance durable côté données (ex. anomalie de l'historique)
     done()[id] = { sig: n.sig, at: new Date().toISOString(), how }; if (n.src === 'event') events.splice(events.indexOf(n), 1);
     try { saveState(); } catch (e) { /* sans stockage : masqué pour la session seulement */ } render();
   }
   function restore(id) { delete done()[id]; try { saveState(); } catch (e) { /* ignoré */ } render(); }
   function run(id, kind) {
     const n = everything().find((x) => x.id === id); if (!n) return;
-    const a = kind === 'accept' ? (n.accept || { label: 'Compris', ack: true }) : n.edit; if (!a) return;
+    const mi = /^more(\d+)$/.exec(kind), a = mi ? (n.more || [])[Number(mi[1])] : kind === 'accept' ? (n.accept || { label: 'Compris', ack: true }) : n.edit; if (!a) return;
     if (a.run) { closePanel(); try { a.run(); } catch (e) { console.error(e); } }
     if (kind === 'accept' && a.ack !== false) handle(id, 'accepted');
   }
@@ -46,7 +47,7 @@ const Notify = (function () {
     const acc = n.accept || { label: 'Compris', ack: true };
     return '<li class="nt nt-' + n.level + '" data-nt="' + esc(n.id) + '"><div class="nt-h"><span class="nt-ic" aria-hidden="true">' + ICON[n.level] + '</span><b>' + esc(n.title) + '</b></div>' + (n.body ? '<div class="nt-b">' + n.body + '</div>' : '') +
       '<div class="nt-a">' + (isHandled ? '<button type="button" class="btn sm" data-nt-act="restore">Rétablir</button>'
-        : '<button type="button" class="btn sm primary" data-nt-act="accept">' + esc(acc.label) + '</button>' + (n.edit ? '<button type="button" class="btn sm" data-nt-act="edit">' + esc(n.edit.label || 'Modifier') + '</button>' : '') + '<button type="button" class="btn sm ghost" data-nt-act="ignore">Ignorer</button>') + '</div></li>';
+        : '<button type="button" class="btn sm primary" data-nt-act="accept">' + esc(acc.label) + '</button>' + (n.edit ? '<button type="button" class="btn sm" data-nt-act="edit">' + esc(n.edit.label || 'Modifier') + '</button>' : '') + (n.more || []).map((a, i) => '<button type="button" class="btn sm" data-nt-act="more' + i + '">' + esc(a.label) + '</button>').join('') + '<button type="button" class="btn sm ghost" data-nt-act="ignore"' + (n.onIgnore ? ' title="Masquer cette anomalie sans rien modifier ; elle ne reviendra que si la situation change."' : '') + '>Ignorer</button>') + '</div></li>';
   }
   function panelHtml() {
     const p = pending(), d = handled();
@@ -74,7 +75,7 @@ const Notify = (function () {
       e.stopPropagation(); const t = e.target;
       if (t.closest('[data-nt-close]')) return closePanel();
       if (t.closest('[data-nt-toggle]')) { showDone = !showDone; return render(); }
-      if (t.closest('[data-nt-all]')) { pending().forEach((n) => { done()[n.id] = { sig: n.sig, at: new Date().toISOString(), how: 'ignored' }; if (n.src === 'event') events.splice(events.indexOf(n), 1); }); try { saveState(); } catch (er) { /* ignoré */ } return render(); }
+      if (t.closest('[data-nt-all]')) { pending().forEach((n) => { if (n.onIgnore) { try { n.onIgnore(); } catch (er) { /* ignoré */ } } done()[n.id] = { sig: n.sig, at: new Date().toISOString(), how: 'ignored' }; if (n.src === 'event') events.splice(events.indexOf(n), 1); }); try { saveState(); } catch (er) { /* ignoré */ } return render(); }
       const b = t.closest('[data-nt-act]'), li = t.closest('[data-nt]'); if (!b || !li) return;
       const id = li.dataset.nt, act = b.dataset.ntAct;
       if (act === 'ignore') handle(id, 'ignored'); else if (act === 'restore') restore(id); else run(id, act);

@@ -678,3 +678,37 @@ function commitTransactions(p, o) {
   toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
   if (created.length && state.settings.relayUrl) refreshMarket(created);
 }
+
+
+/* ==================================================================
+   Aides « résolution manuelle » des notifications.
+   ================================================================== */
+/* Liste de lignes avec un bouton chacune : rows = [{ label, note, btn, run }]. */
+function openActionList(title, sub, rows, more) {
+  const m = openModal('<h2>' + esc(title) + '</h2><div class="sub">' + sub + '</div><div class="act-list">' + rows.map((r, i) => '<div class="diag-item lvl-warn"><div class="diag-h"><b>' + esc(r.label) + '</b></div>' + (r.note ? '<div class="diag-line muted">' + esc(r.note) + '</div>' : '') + '<div class="btn-row" style="margin-top:6px"><button class="btn sm primary" type="button" data-al="' + i + '">' + esc(r.btn || 'Corriger…') + '</button></div></div>').join('') + (more ? '<div class="hint">' + esc(more) + '</div>' : '') + '</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Fermer</button></div>');
+  $$('[data-al]', m).forEach((b) => b.onclick = () => { const r = rows[Number(b.dataset.al)]; closeModal(); r.run(); });
+}
+const holdingByNameAny = (name) => state.holdings.concat(state.archive || []).find((h) => (h.name || h.displayTicker || h.ticker) === name);
+/* Actifs dont l'actualisation échoue : corriger le symbole, la place de cotation ou le nom. */
+function openFailingHoldings(list) {
+  const hs = (list || state.holdings.filter((h) => h.marketError));
+  if (!hs.length) { toast('Aucun actif en échec pour le moment.'); return; }
+  openActionList('Actifs à corriger', 'Le symbole (ticker) est probablement inconnu de Yahoo Finance. Corrigez-le (ex. « AI.PA » pour Air Liquide à Paris) ; l\'erreur ne reviendra plus tant que l\'actif est correct.', hs.slice(0, 40).map((h) => ({ label: (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker) + ')', note: h.marketError || (h.isin ? h.isin : ''), btn: 'Corriger le symbole…', run: () => openHoldingModal(h.id) })), hs.length > 40 ? (hs.length - 40) + ' autre(s) non affichés.' : '');
+}
+/* Devises sans taux de change : taux saisi à la main (1 EUR = … devise), utilisé seulement quand le taux officiel manque. */
+function missingFxCurrencies() {
+  const cs = new Set(); state.holdings.concat(state.archive || []).forEach((h) => { cs.add(h.currency || 'EUR'); cs.add(Engine.costCur(h)); }); (state.payments || []).forEach((p) => cs.add(p.currency || 'EUR')); (state.transactions || []).forEach((t) => cs.add(t.acctCur || 'EUR'));
+  return Array.from(cs).filter((c) => c && c !== 'EUR' && (convert(1, c) === null || (!(fx.rates || {})[c] && (state.settings.fxManual || {})[c]))).sort();
+}
+function openManualFx(only) {
+  const cs = (only && only.length ? only : missingFxCurrencies()); if (!cs.length) { toast('Tous les taux de change sont disponibles.'); return; }
+  const man = state.settings.fxManual || {};
+  const m = openModal('<h2>Saisir un taux de change</h2><div class="sub">Pour chaque devise, indiquez combien vaut <b>1 euro</b> (ex. 1 EUR = 1,08 USD). Ce taux n\'est utilisé <b>que tant que le taux officiel (BCE) est indisponible</b> ; vous pouvez le retirer à tout moment (champ vide).</div>' + cs.map((c, i) => fld('1 EUR = … ' + esc(c), '<input type="number" id="mfx' + i + '" min="0" step="any" inputmode="decimal" value="' + esc(man[c] || '') + '">', '', 'mfx' + i)).join('') +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="mfxOk">Enregistrer</button></div>');
+  $('#mfxOk', m).onclick = () => {
+    const next = Object.assign({}, state.settings.fxManual || {}); let bad = false;
+    cs.forEach((c, i) => { const v = $('#mfx' + i, m).value.trim(); if (!v) delete next[c]; else if (Number(v) > 0) next[c] = Number(v); else bad = true; });
+    if (bad) { toast('Taux invalide (nombre positif attendu).', { error: true }); return; }
+    state.settings.fxManual = next; saveState(); closeModal(); renderPage(); toast('Taux enregistré(s).');
+  };
+}

@@ -7,6 +7,10 @@
 
 const DIAG_LVL = { error: ['Anomalie', 'warn'], warn: ['À vérifier', 'warn'], info: ['Information', 'info'] };
 
+const DIAG_BTN = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null], fix_tx: ['Saisir la date / le montant…', null], del_tx: ['Supprimer ces opérations…', null] };
+const diagActLabel = (a, it) => (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + fmtDate(s.date) + ')').join(', ') : (DIAG_BTN[a] || [a])[0]);
+/* Ignore durablement une anomalie (elle ne revient que si la situation change) ; rétablissable dans le contrôle de l'historique. */
+function diagIgnore(it) { state.ignored = state.ignored || {}; state.ignored[it.sig] = { at: new Date().toISOString(), code: it.code, name: it.name || '' }; saveState(); }
 function diagTxLabel(id) {
   const t = state.transactions.find((x) => x.id === id); if (!t) return '';
   return fmtDate(t.date, { day: 'numeric', month: 'short', year: 'numeric' }) + ' · ' + (t.corp ? (t.type === 'buy' ? 'livraison gratuite' : 'retrait de titres') : t.type === 'buy' ? 'achat' : 'vente') + ' ' + fmtNum(t.qty);
@@ -26,10 +30,10 @@ function openDiagnostic() {
     const st = r.ok === false ? '<span class="badge warn">Écart</span>' : r.ok === true ? '<span class="badge received">Cohérent</span>' : '<span class="muted">—</span>';
     return '<tr><td><b>' + esc(r.name) + '</b><div class="dg-note">' + esc(r.isin || '') + '</div></td><td>' + (r.kind === 'holding' ? 'Détenue' : 'Clôturée / à vérifier') + '</td><td class="r">' + (r.kind === 'holding' ? fmtNum(r.app) : '—') + '</td><td class="r">' + (r.calc === null ? '—' : (r.calc < 0 ? '<span class="neg">' + fmtNum(r.calc) + '</span>' : fmtNum(r.calc))) + '</td><td class="r">' + (r.ref === null ? '—' : fmtNum(r.ref)) + '</td><td>' + st + '</td></tr>';
   }).join('');
-  const btn = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null] };
+  const btn = DIAG_BTN;
   const items = d.items.map((it, n) => {
     const lv = DIAG_LVL[it.level], tx = it.txIds.slice(0, 5).map(diagTxLabel).filter(Boolean);
-    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'archive' || a === 'set_ref_qty' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + esc(fmtDate(s.date)) + ')').join(', ') : btn[a][0]) + '</button>').join('');
+    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'archive' || a === 'set_ref_qty' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + diagActLabel(a, it).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</button>').join('');
     return '<div class="diag-item lvl-' + it.level + '"><div class="diag-h"><span class="badge ' + lv[1] + '">' + lv[0] + '</span> <b>' + esc(it.name || '—') + '</b>' + (it.isin ? ' <small class="muted">' + esc(it.isin) + '</small>' : '') + '</div>' +
       '<div class="diag-line"><b>Cause probable :</b> ' + esc(it.cause) + '</div><div class="diag-line"><b>Action recommandée :</b> ' + esc(it.action || '—') + '</div>' +
       (tx.length ? '<div class="diag-line muted"><b>Transactions concernées :</b> ' + tx.map(esc).join(' ; ') + (it.txIds.length > 5 ? ' … (+' + (it.txIds.length - 5) + ')' : '') + '</div>' : '') + '<div class="btn-row" style="margin-top:8px">' + acts + '<button class="btn sm ghost" type="button" data-ign="' + n + '" title="Masquer cette anomalie sans rien modifier. Elle réapparaîtra si la situation change.">Ignorer</button></div></div>';
@@ -45,7 +49,7 @@ function openDiagnostic() {
   const undoBtn = $('#dgChkUndo', m); if (undoBtn) undoBtn.onclick = async () => { await undoLastImport(); openDiagnostic(); };
   $('#dgChkRef', m).onclick = () => diagLoadReference();
   $$('[data-diag]', m).forEach((b) => b.onclick = () => diagAct(b.dataset.diag, d.items[Number(b.dataset.n)]));
-  $$('[data-ign]', m).forEach((b) => b.onclick = () => { const it = d.items[Number(b.dataset.ign)]; state.ignored = state.ignored || {}; state.ignored[it.sig] = { at: new Date().toISOString(), code: it.code, name: it.name || '' }; saveState(); renderPageSoft(); openDiagnostic();
+  $$('[data-ign]', m).forEach((b) => b.onclick = () => { const it = d.items[Number(b.dataset.ign)]; diagIgnore(it); renderPageSoft(); openDiagnostic();
     toast('Anomalie ignorée : ' + (it.name || '—') + '.', { ms: 8000, action: { label: 'Annuler', fn: () => { delete state.ignored[it.sig]; saveState(); renderPageSoft(); openDiagnostic(); } } }); });
   $$('[data-unign]', m).forEach((b) => b.onclick = () => { const it = d.ignored[Number(b.dataset.unign)]; if (state.ignored) delete state.ignored[it.sig]; saveState(); renderPageSoft(); openDiagnostic(); });
 }
@@ -119,5 +123,34 @@ async function diagAct(kind, it) {
   if (kind === 'promote') { diagCommit('Position ajoutée au portefeuille actuel : ' + it.name, () => Ledger.promote(state, it.instId, diagDeps()), () => { const h = state.holdings.find((x) => x.id === it.instId); if (h && state.settings.relayUrl) refreshMarket([h], { silent: true }); }); return; }
   if (kind === 'set_ref_qty') { diagCommit('Quantité corrigée : ' + it.name + ' → ' + it.refQty, () => { const h = state.holdings.find((x) => x.id === it.instId); if (!h || !(it.refQty > 0)) return { ok: false, error: 'Position réelle introuvable.' }; h.quantity = it.refQty; h.manual = true; return { ok: true }; }); return; }
   if (kind === 'edit') { closeModal(); openHoldingModal(it.instId); return; }
+  if (kind === 'fix_tx') {
+    const txs = (it.txIds || []).map((id) => state.transactions.find((x) => x.id === id)).filter(Boolean).filter((t) => !t.date || t.amountAcct == null || (t.source === 'degiro' && !t.isin));
+    if (!txs.length) { toast('Ces opérations sont déjà complètes.'); openDiagnostic(); return; }
+    const rows = txs.slice(0, 30).map((t, i) => '<div class="diag-item lvl-warn"><div class="diag-h"><b>' + esc(t.name || t.ticker || (instrumentById(t.holdingId) || {}).name || t.isin || '—') + '</b> <small class="muted">' + esc((t.type === 'sell' ? 'vente' : 'achat') + ' ' + fmtNum(t.qty) + (t.date ? ' · ' + fmtDate(t.date) : '') + (t.orderId ? ' · réf. ' + t.orderId : '')) + '</small></div><div class="row2">' +
+      (!t.date ? fld('Date réelle de l\'opération', '<input type="date" id="fxD' + i + '" max="' + todayISO() + '">', 'Telle qu\'elle figure sur votre relevé.', 'fxD' + i) : '') +
+      (t.amountAcct == null ? fld('Montant total (' + esc(t.acctCur || t.currency || 'EUR') + ')', '<input type="number" id="fxA' + i + '" min="0" step="any" inputmode="decimal">', 'Quantité × prix ± frais, en valeur positive.', 'fxA' + i) : '') +
+      (t.source === 'degiro' && !t.isin ? fld('ISIN', '<input type="text" id="fxI' + i + '" maxlength="12" autocapitalize="characters">', '12 caractères, ex. FR0000120073.', 'fxI' + i) : '') + '</div></div>').join('');
+    diagDialog('Compléter ' + txs.length + ' opération(s)', '<div class="sub">Renseignez uniquement ce que vous connaissez : un champ laissé vide reste signalé, rien n\'est deviné. Annulable.</div>' + rows + (txs.length > 30 ? '<div class="hint">' + (txs.length - 30) + ' autre(s) opération(s) : relancez l\'action après celles-ci.</div>' : ''), (m) => {
+      const edits = []; let bad = '';
+      txs.slice(0, 30).forEach((t, i) => {
+        const d = $('#fxD' + i, m), a = $('#fxA' + i, m), s = $('#fxI' + i, m), e = {};
+        if (d && d.value) { if (/^\d{4}-\d{2}-\d{2}$/.test(d.value) && d.value <= todayISO()) e.date = d.value; else bad = 'Date invalide.'; }
+        if (a && a.value !== '') { if (Number(a.value) > 0) e.amountAcct = Math.round(Number(a.value) * 100) / 100; else bad = 'Montant invalide (valeur positive attendue).'; }
+        if (s && s.value.trim()) { const v = s.value.trim().toUpperCase(); if (Ledger.isISIN(v)) e.isin = v; else bad = 'ISIN invalide : ' + v + '.'; }
+        if (Object.keys(e).length) edits.push([t.id, e]);
+      });
+      if (bad) { toast(bad, { error: true }); return; }
+      if (!edits.length) { toast('Rien à enregistrer.', { error: true }); return; }
+      diagCommit('Opérations complétées à la main (' + edits.length + ')', () => { edits.forEach(([id, e]) => { const t = state.transactions.find((x) => x.id === id); if (t) Object.assign(t, e, { manualFix: true }); }); return { ok: true }; });
+    });
+    return;
+  }
+  if (kind === 'del_tx') {
+    const ids = (it.txIds || []).filter((id) => state.transactions.some((x) => x.id === id));
+    const c = await confirmDialog({ title: 'Supprimer ' + ids.length + ' opération(s) incomplète(s) ?', body: 'Ces opérations n\'ont pas toutes leurs informations (date, montant ou ISIN). Elles sont retirées de l\'historique et du calcul du prix de revient. <b>À faire seulement si elles sont erronées.</b> Annulable depuis le contrôle de l\'historique.', confirmLabel: 'Supprimer', danger: true });
+    if (!c.ok) { openDiagnostic(); return; }
+    diagCommit(ids.length + ' opération(s) incomplète(s) supprimée(s)', () => { const set = new Set(ids); state.transactions = state.transactions.filter((x) => !set.has(x.id)); return { ok: true }; });
+    return;
+  }
   if (kind === 'recompute') { diagCommit('Position recalculée : ' + it.name, () => { const r = Ledger.reevaluate(state, it.instId, diagDeps()); return { ok: true, r }; }); return; }
 }

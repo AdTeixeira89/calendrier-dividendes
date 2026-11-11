@@ -19,8 +19,8 @@ function wireMode(host) {
 const money = (v, d) => fmtMoney(v, baseCur(), d === undefined ? {} : { d });
 /* Notifications des dividendes (cloche) : net partiel, versements non convertis. */
 function dividendNotices(all) {
-  return [].concat(all.netUnknown ? [{ id: 'div:netPartial', level: 'info', title: 'Net partiel', body: all.netUnknown + ' versement(s) sans retenue ni net connus (brut ' + money(all.netUnknownGross) + ') : le net ne les inclut pas (jamais remplacé par le brut). Complétez la retenue dans le versement pour l\'inclure.', edit: { label: 'Ouvrir l\'historique', run: () => { view.divTab = 'history'; go('dividends'); } } }] : [],
-    all.unconverted ? [{ id: 'div:unconverted', level: 'warn', title: 'Versements non convertis', body: all.unconverted + ' versement(s) en devise sans taux de change : non comptés dans les totaux.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false } }] : []);
+  return [].concat(all.netUnknown ? [{ id: 'div:netPartial', level: 'info', title: 'Net partiel', body: all.netUnknown + ' versement(s) sans retenue ni net connus (brut ' + money(all.netUnknownGross) + ') : le net ne les inclut pas (jamais remplacé par le brut). Complétez la retenue dans le versement pour l\'inclure.', edit: { label: 'Saisir les retenues…', run: () => openNetPartialList() }, more: [{ label: 'Ouvrir l\'historique', run: () => { view.divTab = 'history'; go('dividends'); } }] }] : [],
+    all.unconverted ? [{ id: 'div:unconverted', level: 'warn', title: 'Versements non convertis', body: all.unconverted + ' versement(s) en devise sans taux de change : non comptés dans les totaux. Actualiser ne suffit pas toujours : vous pouvez saisir le taux vous-même.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Saisir le taux…', run: () => openManualFx() } }] : []);
 }
 function migrationNotices(mig) {
   return mig && !mig.empty ? [{ id: 'div:migration', level: 'warn', title: 'Mise à jour des dividendes disponible', body: (mig.estimates.length ? mig.estimates.length + ' estimation(s) sont encore mélangées aux versements (elles ne sont déjà plus comptées dans le « perçu »)' : '') + (mig.items.length ? (mig.estimates.length ? ' et ' : '') + mig.items.length + ' correction(s) de rattachement / de brut sont proposées' : '') + '. Rien n\'est supprimé ; annulable.', accept: { label: 'Voir et appliquer', run: () => openDividendMigration(), ack: false } }] : [];
@@ -38,7 +38,7 @@ function collectGlobalNotices() {
 /* Taux de change manquant : signalé dans la cloche (une notification par source), plus de bandeau dans la page. */
 function missingNote(arr, src) {
   const id = 'fx:' + (src || 'x');
-  Notify.set(id, arr && arr.length ? [{ id, level: 'warn', title: 'Taux de change indisponible', body: 'Pour ' + arr.map(esc).join(', ') + ' : ces montants ne sont pas inclus dans les totaux convertis.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Paramètres', run: () => go('settings') } }] : []);
+  Notify.set(id, arr && arr.length ? [{ id, level: 'warn', title: 'Taux de change indisponible', body: 'Pour ' + arr.map(esc).join(', ') + ' : ces montants ne sont pas inclus dans les totaux convertis.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Saisir le taux…', run: () => openManualFx(arr.slice()) } }] : []);
   return '';
 }
 function emptyPortfolio() {
@@ -231,10 +231,29 @@ function portfolioSummaryHtml(perf) {
 }
 
 /* Bandeau d'alerte : anomalies de l'historique (positions fantômes, quantités négatives, écarts avec les positions réelles…). */
+/* Versements dont le net est inconnu : un bouton par versement pour saisir la retenue. */
+function openNetPartialList() {
+  const ps = Dividends.realPayments(state).filter((x) => Dividends.amounts(x).net === null).sort((x, y) => (y.payDate || '').localeCompare(x.payDate || ''));
+  if (!ps.length) { toast('Aucun versement sans net.'); return; }
+  openActionList('Versements sans retenue ni net', 'Saisissez la retenue à la source (ou le net reçu) d\'après votre relevé : le net sera calculé. Rien n\'est deviné.', ps.slice(0, 40).map((x) => { const h = holdingById(x.holdingId) || {}; return { label: (h.name || x.name || x.ticker || '—') + ' · ' + (x.payDate ? fmtDate(x.payDate) : 'date inconnue'), note: 'Brut ' + fmtMoney(Number(x.gross) || 0, x.currency || h.currency || 'EUR'), btn: 'Saisir la retenue…', run: () => openPaymentModal(x.id) }; }), ps.length > 40 ? (ps.length - 40) + ' autre(s) : relancez l\'action après celles-ci.' : '');
+}
+/* Une notification par anomalie (erreurs et points à vérifier), chacune avec ses solutions manuelles et un « Ignorer » durable. */
 function diagBannerHtml() {
   if (!state.transactions.length) { Notify.clear('check'); return ''; }
-  const d = Ledger.diagnose(state, { today: todayISO() }), n = d.counts.error;
-  Notify.set('check', n ? [{ id: 'check:hist', level: 'error', title: n + ' anomalie(s) dans l\'historique des transactions', body: 'Position absente de vos positions réelles, quantité négative ou écart de quantité.', accept: { label: 'Contrôler', run: () => openDiagnostic(), ack: false }, edit: { label: 'Saisir les achats…', run: () => openDiagnostic() } }] : []);
+  const d = Ledger.diagnose(state, { today: todayISO() }), items = d.items.filter((it) => it.level !== 'info'), LIM = 8;
+  const list = items.slice(0, LIM).map((it) => {
+    const acts = (it.act || []).slice();
+    if (it.instId && acts.indexOf('edit') < 0 && !/^(fix_tx|del_tx)$/.test(acts[0] || '')) acts.push('edit');
+    const first = acts[0];
+    return { id: 'diag:' + it.sig, level: it.level === 'error' ? 'error' : 'warn', title: (it.name || 'Historique') + ' — ' + (it.code === 'tx_incomplete' ? 'opérations incomplètes' : it.level === 'error' ? 'anomalie' : 'à vérifier'),
+      body: esc(it.cause) + (it.action ? '<br><b>Que faire :</b> ' + esc(it.action) : ''),
+      accept: first ? { label: diagActLabel(first, it), run: () => diagAct(first, it), ack: false } : { label: 'Contrôler', run: () => openDiagnostic(), ack: false },
+      more: acts.slice(1).map((a) => ({ label: diagActLabel(a, it), run: () => diagAct(a, it) })),
+      edit: { label: 'Ouvrir le contrôle', run: () => openDiagnostic() },
+      onIgnore: () => diagIgnore(it) };
+  });
+  if (items.length > LIM) list.push({ id: 'diag:more', level: 'warn', title: (items.length - LIM) + ' autre(s) anomalie(s) dans l\'historique', body: 'Elles sont toutes détaillées, avec leurs actions, dans le contrôle de l\'historique.', accept: { label: 'Contrôler', run: () => openDiagnostic(), ack: false } });
+  Notify.set('check', list);
   return '';
 }
 /* Performance des SEULES positions cochées dans les tableaux (sans les autres actifs) : gain de marché + dividendes, apports séparés ; % seulement si l'historique est complet. */

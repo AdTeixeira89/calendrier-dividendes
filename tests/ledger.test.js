@@ -441,4 +441,12 @@ t('IMPORT INCRÉMENTAL : un nouvel achat met à jour une position issue de l\'im
   assert.strictEqual(h.quantity, 99, 'correction manuelle protégée'); assert.ok(p3.pl.instruments[0].divergence, 'divergence signalée, rien d\'écrasé');
 });
 
+t('51. Opération sans date : exclue du calcul MAIS signalée (jamais en silence), avec solutions manuelles ; complétée à la main, l\'anomalie disparaît', () => {
+  const st = { holdings: [{ id: 'h', ticker: 'AIR', isin: 'FR0000120073', name: 'Air Liquide', quantity: 6, account: 'a', currency: 'EUR' }], archive: [], accounts: [{ id: 'a' }], settings: {}, payments: [], corp: [],
+    transactions: [{ id: 't1', holdingId: 'h', date: '2025-01-10', type: 'buy', qty: 6, price: 100, fees: 0, currency: 'EUR', amountAcct: 600, acctCur: 'EUR', source: 'degiro', isin: 'FR0000120073' }, { id: 't2', holdingId: 'h', date: '', type: 'buy', qty: 4, price: 100, fees: 0, currency: 'EUR', amountAcct: 400, acctCur: 'EUR', source: 'degiro', isin: 'FR0000120073' }] };
+  const it = L.diagnose(st, { today: '2026-01-01' }).items.find((x) => x.code === 'tx_incomplete');
+  assert.ok(it, 'signalée'); assert.deepStrictEqual(it.txIds, ['t2']); assert.deepStrictEqual(it.act, ['fix_tx', 'del_tx']);
+  st.transactions[1].date = '2025-03-05'; assert.ok(!L.diagnose(st, { today: '2026-01-01' }).items.some((x) => x.code === 'tx_incomplete'), 'résolue');
+});
+
 console.log('\n' + n + ' tests réussis');

@@ -1366,6 +1366,28 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('cloche : chaque anomalie propose des solutions manuelles (saisir la date, supprimer, ignorer durablement) ; taux de change saisi à la main', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'sap', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 100, price: 150, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: {} },
+      { id: 'xyz', ticker: 'XYZ', displayTicker: 'XYZ', isin: 'ZZ0000000001', name: 'Exotique', type: 'stock', instrumentType: 'EQUITY', currency: 'XYZ', quantity: 3, avgCost: 10, price: 12, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }];
+    seed.transactions = [{ id: 'ok1', holdingId: 'sap', date: '2025-01-10', type: 'buy', qty: 6, price: 100, fees: 0, currency: 'EUR', amountAcct: 600, acctCur: 'EUR', source: 'degiro', isin: 'DE0007164600' },
+      { id: 'bad1', holdingId: 'sap', date: '', type: 'buy', qty: 4, price: 100, fees: 0, currency: 'EUR', amountAcct: 400, acctCur: 'EUR', source: 'degiro', isin: 'DE0007164600' }];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(900);
+    let t = await bellOpen(p); ok(/opérations incomplètes/.test(t), 'anomalie « opérations incomplètes » dans la cloche : ' + t.slice(0, 300));
+    ok(/Saisir la date/.test(t) && /Supprimer ces opérations/.test(t) && /Ignorer/.test(t), 'solutions manuelles proposées : saisir, supprimer, ignorer');
+    const id = await p.locator('#bellPanel [data-nt^="diag:"]', { hasText: 'opérations incomplètes' }).first().getAttribute('data-nt');
+    await p.click('[data-nt="' + id + '"] [data-nt-act=accept]'); await p.waitForSelector('#fxD0'); await p.fill('#fxD0', '2025-03-05'); await p.click('#ddOk'); await p.waitForTimeout(500);
+    let s = await storeOf(p); eq(s.transactions.find((x) => x.id === 'bad1').date, '2025-03-05', 'date saisie à la main enregistrée'); ok(s.transactions.find((x) => x.id === 'bad1').manualFix === true, 'marquée comme corrigée à la main');
+    await p.keyboard.press('Escape'); await p.waitForTimeout(300); await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); ok(!/opérations incomplètes/.test(await bellOpen(p)), 'anomalie résolue : notification disparue'); await bellClose(p);
+    // ignorer durablement : une opération incomplète de nouveau, ignorée, ne revient pas après rechargement
+    await p.evaluate(() => { state.transactions.push({ id: 'bad2', holdingId: 'sap', date: '', type: 'buy', qty: 1, price: 100, fees: 0, currency: 'EUR', amountAcct: 100, acctCur: 'EUR', source: 'degiro', isin: 'DE0007164600' }); saveState(); collectGlobalNotices(); }); await p.waitForTimeout(500);
+    t = await bellOpen(p); ok(/opérations incomplètes/.test(t), 'nouvelle anomalie signalée'); const id2 = await p.locator('#bellPanel [data-nt^="diag:"]', { hasText: 'opérations incomplètes' }).first().getAttribute('data-nt');
+    await p.click('[data-nt="' + id2 + '"] [data-nt-act=ignore]'); await p.waitForTimeout(300); s = await storeOf(p); ok(Object.keys(s.ignored || {}).length === 1, 'ignorance enregistrée dans les données (durable)'); await bellClose(p);
+    await p.reload(); await p.waitForSelector('#page'); await p.waitForTimeout(1200); ok(!/opérations incomplètes/.test(await bellOpen(p)), 'après rechargement : l\'anomalie ignorée ne revient pas'); await bellClose(p);
+    // taux de change saisi à la main : la devise sans taux officiel redevient convertible
+    await p.evaluate(() => { openManualFx(['XYZ']); }); await p.waitForSelector('#mfx0'); await p.fill('#mfx0', '2'); await p.click('#mfxOk'); await p.waitForTimeout(300);
+    s = await storeOf(p); eq(s.settings.fxManual, { XYZ: 2 }, 'taux manuel enregistré'); eq(await p.evaluate(() => convert(10, 'XYZ')), 5, '10 XYZ = 5 EUR au taux saisi');
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {

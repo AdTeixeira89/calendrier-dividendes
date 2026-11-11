@@ -141,7 +141,7 @@ function rateAt(cur, ym) {
     let best = null; Object.keys(m).sort().forEach((k) => { if (k <= ym) best = m[k]; });
     if (best) return best; const ks = Object.keys(m).sort(); if (ks.length) return m[ks[0]];
   }
-  return (fx.rates || {})[cur] || null;
+  return fxNow(cur);
 }
 /* Montant dans sa devise → devise de base, au taux de fin de mois ym. */
 function convertAt(amount, cur, ym) {
@@ -149,14 +149,14 @@ function convertAt(amount, cur, ym) {
   return a && b ? amount / a * b : null;
 }
 const baseCur = () => state.settings.baseCurrency || 'EUR';
+/* Taux du jour (1 EUR = x devise) : officiel (BCE) d'abord ; à défaut, taux saisi à la main ; sinon null (jamais de faux chiffre). */
+function fxNow(cur) { if (!cur || cur === 'EUR') return 1; return (fx.rates || {})[cur] || ((state.settings || {}).fxManual || {})[cur] || null; }
 /* Convertit vers la devise de base ; null si le taux est indisponible (jamais de faux chiffre). */
 function convert(amount, cur) {
   const b = baseCur();
   if (!cur || cur === b) return amount;
-  const r = fx.rates || {};
-  const eur = cur === 'EUR' ? amount : (r[cur] ? amount / r[cur] : null);
-  if (eur === null) return null;
-  return b === 'EUR' ? eur : (r[b] ? eur * r[b] : null);
+  const rc = fxNow(cur), rb = fxNow(b);
+  return rc && rb ? amount / rc * rb : null;
 }
 
 /* ---------------------------------------------------------------
@@ -198,7 +198,7 @@ async function refreshMarket(list, o) {
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;
-  Notify.set('market', res.fail ? [{ id: 'market:fail', level: res.ok ? 'warn' : 'error', title: 'Actualisation incomplète', body: res.fail + ' actif(s) non actualisé(s)' + (res.errors && res.errors[0] ? ' : ' + esc(res.errors[0].message) : '') + '. Les dernières données connues sont conservées.', accept: { label: 'Réessayer', run: () => runFullRefresh('button'), ack: false } }] : []);
+  Notify.set('market', res.fail ? [{ id: 'market:fail', level: res.ok ? 'warn' : 'error', title: 'Actualisation incomplète', body: res.fail + ' actif(s) non actualisé(s)' + (res.errors && res.errors[0] ? ' : ' + esc(res.errors[0].message) : '') + '. Les dernières données connues sont conservées.', accept: { label: 'Réessayer', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Corriger les actifs…', run: () => openFailingHoldings() } }] : []);
   if (res.ok || (ares && ares.ok)) { Dividends.learnPayLags(state, Market, nowISO); state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
   if (!o.silent) renderPage(); else if (res.ok) renderPageSoft();
