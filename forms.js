@@ -197,6 +197,7 @@ function openSellModal(id, mode) {
     '<div class="seg" id="slMode" role="group" aria-label="Type de vente" style="margin-bottom:10px"><button type="button" data-m="all" class="' + (mode === 'part' ? '' : 'on') + '">Clôturer toute la position</button><button type="button" data-m="part" class="' + (mode === 'part' ? 'on' : '') + '">J\'en ai vendu une partie</button></div>' +
     '<div class="row2">' + fld('Quantité vendue', '<input type="text" inputmode="decimal" id="slQty" value="' + (mode === 'part' ? '' : String(qty0)) + '"' + (mode === 'part' ? '' : ' readonly') + '>', 'sur ' + fmtNum(qty0) + ' détenu(s)', 'slQty') +
     fld('Prix de vente par titre (' + cur + ')', '<input type="text" inputmode="decimal" id="slPrice" placeholder="ex : 123,45" autocomplete="off">', 'prix auquel la vente a été exécutée', 'slPrice') + '</div>' +
+    '<label class="chk" style="margin:4px 0"><input type="checkbox" id="slWorthless"><span>Titres sans valeur (société liquidée, produit nul) : le coût d\'acquisition est enregistré comme moins-value</span></label>' +
     '<div class="row2">' + fld('Date de la vente', '<input type="date" id="slDate" value="' + todayISO() + '" max="' + todayISO() + '">', '', 'slDate') + fld('Frais de vente (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="slFees" placeholder="0">', 'courtage, taxes sur la vente', 'slFees') + '</div>' +
     (need.fx ? fld('Produit net reçu en ' + costCur + ' (après frais)', '<input type="text" inputmode="decimal" id="slProceeds" placeholder="montant crédité">', 'le prix de vente est en ' + cur + ' et le prix de revient en ' + costCur + ' : sans ce montant, le résultat réalisé n\'est pas calculable', 'slProceeds') : '') +
     (!hasTx ? '<div class="notice info" style="margin:6px 0"><span>Cette position n\'a pas d\'historique d\'achats : le <b>prix de revient saisi</b> sert de coût de départ.' + (need.pru ? ' Indiquez-le ci-dessous.' : '') + ' Sans date d\'achat, le suivi de la position démarre à sa date d\'ajout dans l\'application (' + esc(fmtDate(String(h.addedAt || todayISO()).slice(0, 10))) + ').</span></div>' +
@@ -205,16 +206,16 @@ function openSellModal(id, mode) {
     '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="slGo">Enregistrer la vente</button></div></div>', {});
   let md = mode === 'part' ? 'part' : 'all';
   const val = (i) => { const e = $('#' + i, m); return e ? numOrNull(e.value) : null; };
-  const read = () => ({ qty: md === 'all' ? qty0 : val('slQty'), price: val('slPrice'), fees: val('slFees') || 0, date: $('#slDate', m).value, buyDate: $('#slBuy', m) ? $('#slBuy', m).value || null : null, pru: val('slPru'), proceedsCost: val('slProceeds') });
+  const read = () => ({ qty: md === 'all' ? qty0 : val('slQty'), price: ($('#slWorthless', m) && $('#slWorthless', m).checked) ? 0 : val('slPrice'), worthless: !!($('#slWorthless', m) && $('#slWorthless', m).checked), fees: val('slFees') || 0, date: $('#slDate', m).value, buyDate: $('#slBuy', m) ? $('#slBuy', m).value || null : null, pru: val('slPru'), proceedsCost: val('slProceeds') });
   const prev = () => {
     const x = read(), box = $('#slPrev', m), go = $('#slGo', m); go.textContent = md === 'all' ? 'Clôturer la position' : 'Enregistrer la vente';
-    if (!(x.qty > 0) || !(x.price > 0)) { box.innerHTML = '<span class="muted">Indiquez la quantité et le prix de vente pour voir le résultat.</span>'; return; }
+    if (!(x.qty > 0) || !(x.price > 0 || x.worthless)) { box.innerHTML = '<span class="muted">Indiquez la quantité et le prix de vente pour voir le résultat.</span>'; return; }
     const net = x.qty * x.price - (x.fees || 0), pru = Number(h.avgCost) > 0 ? Number(h.avgCost) : x.pru, left = Math.max(0, qty0 - x.qty);
     box.innerHTML = '<ul><li>Produit de la vente : <b>' + fmtMoney(net, cur) + '</b>' + (x.fees ? ' (frais ' + fmtMoney(x.fees, cur) + ' déduits)' : '') + '</li>' + (pru > 0 && !need.fx ? '<li>Résultat réalisé : <b class="' + (net - x.qty * pru >= 0 ? 'pos' : 'neg') + '">' + (net - x.qty * pru >= 0 ? '+' : '') + fmtMoney(net - x.qty * pru, costCur) + '</b> (' + fmtPct((net - x.qty * pru) / (x.qty * pru), 1, true) + ' sur le coût)</li>' : '') +
       '<li>' + (left > 1e-8 ? 'Reste en portefeuille : <b>' + fmtNum(left) + '</b> titre(s), prix de revient inchangé' : 'La position quitte le portefeuille actuel (conservée dans « Clôturées » avec son résultat)') + '</li></ul>';
   };
   $$('#slMode [data-m]', m).forEach((b) => b.onclick = () => { md = b.dataset.m; $$('#slMode [data-m]', m).forEach((c) => c.classList.toggle('on', c === b)); const q = $('#slQty', m); q.readOnly = md === 'all'; if (md === 'all') q.value = String(qty0); else { q.value = ''; q.focus(); } prev(); });
-  m.addEventListener('input', prev); prev(); setTimeout(() => $('#slPrice', m).focus(), 50);
+  m.addEventListener('input', prev); $('#slWorthless', m).onchange = () => { $('#slPrice', m).disabled = $('#slWorthless', m).checked; prev(); }; prev(); setTimeout(() => $('#slPrice', m).focus(), 50);
   $('#slGo', m).onclick = () => {
     const x = read(), e = $('#slErr', m); e.classList.add('hide');
     const prevUndo = state.undo; snapshotForUndo('vente de ' + (h.name || h.ticker));
@@ -245,17 +246,18 @@ async function confirmDeleteHoldings(ids) {
   const c = await confirmDialog({
     title: 'Supprimer ' + hs.length + ' position' + (hs.length > 1 ? 's' : '') + ' ?',
     body: '<b>' + hs.slice(0, 6).map((h) => esc(h.name || h.displayTicker || h.ticker)).join(', ') + (hs.length > 6 ? '…' : '') + '</b><br><br>' +
-      'Seules les <b>positions</b> du portefeuille sont supprimées. ' + (nPay + nTx ? 'Les <b>' + nPay + '</b> versement(s) et <b>' + nTx + '</b> opération(s) associés restent dans l\'Historique, sauf si vous cochez ci-dessous.' : 'Aucun versement ni opération n\'est associé.') + '<br>Votre compte utilisateur n\'est pas concerné.',
-    checkbox: nPay + nTx ? { label: 'Supprimer aussi leur historique (versements et opérations)', checked: false } : null,
+      (nPay + nTx ? 'Les positions quittent le portefeuille actuel mais sont <b>conservées dans « Clôturées »</b> avec leurs <b>' + nPay + '</b> versement(s) et <b>' + nTx + '</b> opération(s) (dates d\'achat et de vente, dividendes, plus ou moins-value). Cochez ci-dessous uniquement pour tout effacer définitivement.' : 'Aucun versement ni opération n\'est associé.') + '<br>Votre compte utilisateur n\'est pas concerné.',
+    checkbox: nPay + nTx ? { label: 'Effacer aussi définitivement leur historique (versements et opérations)', checked: false } : null,
     confirmLabel: 'Supprimer ' + hs.length + ' position' + (hs.length > 1 ? 's' : ''), danger: true
   });
   if (!c.ok) return;
-  const snap = { holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions) };
-  state.holdings = state.holdings.filter((h) => !idset.has(h.id));
+  const snap = { holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []) };
+  if (c.checked || !(nPay + nTx)) state.holdings = state.holdings.filter((h) => !idset.has(h.id));
+  else hs.forEach((h) => { const hasHist = state.payments.some((p) => p.holdingId === h.id) || state.transactions.some((t) => t.holdingId === h.id); if (hasHist) Ledger.archiveKept(state, h.id, { uid, today: todayISO() }); else state.holdings = state.holdings.filter((x) => x.id !== h.id); });
   if (c.checked) { state.payments = state.payments.filter((p) => !idset.has(p.holdingId)); state.transactions = state.transactions.filter((t) => !idset.has(t.holdingId)); }
   Object.keys(view.tables || {}).forEach((k) => { if (k.indexOf('portfolio') === 0) hs.forEach((h) => view.tables[k].sel.delete(h.id)); });
   saveState(); renderPage();
-  toast(hs.length + ' position' + (hs.length > 1 ? 's supprimées' : ' supprimée') + '.', { action: { label: 'Annuler', fn: () => { state.holdings = snap.holdings; state.payments = snap.payments; state.transactions = snap.transactions; saveState(); renderPage(); toast('Suppression annulée.'); } } });
+  toast(hs.length + ' position' + (hs.length > 1 ? 's supprimées' : ' supprimée') + '.', { action: { label: 'Annuler', fn: () => { state.holdings = snap.holdings; state.payments = snap.payments; state.transactions = snap.transactions; state.archive = snap.archive; saveState(); renderPage(); toast('Suppression annulée.'); } } });
 }
 async function confirmDeletePayments(ids) {
   const c = await confirmDialog({ title: 'Supprimer ' + ids.length + ' versement' + (ids.length > 1 ? 's' : '') + ' ?', body: 'Ces versements disparaîtront de l\'historique et des totaux « reçus ». Vos positions ne sont pas modifiées.', confirmLabel: 'Supprimer', danger: true });
@@ -756,12 +758,31 @@ function openDelistModal(id) {
   const m = openModal('<h2>' + esc(nm) + ' : plus cotée en bourse</h2><div class="sub">La société a été radiée, liquidée ou rachetée. L\'actualisation s\'arrête pour ce titre (plus d\'erreur), aucun dividende n\'est prévu ; <b>vos versements et opérations déjà enregistrés sont conservés</b>. La position reste dans votre portefeuille au dernier cours connu' + (h.price > 0 ? ' (' + esc(fmtMoney(h.price, h.currency || 'EUR')) + ')' : '') + ' ; si elle est sans valeur ou vendue, utilisez « Clôturer la position… ».</div>' +
     fld('Date de radiation ou de dernière cotation (facultatif)', '<input type="date" id="dlDate" max="' + todayISO() + '">', 'À titre d\'information.', 'dlDate') +
     '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><div class="btn-row"><button class="btn" type="button" id="dlSell">Clôturer la position…</button><button class="btn primary" type="button" id="dlOk">Marquer comme plus cotée</button></div></div>');
-  if (!isHolding) $('#dlSell', m).remove(); else $('#dlSell', m).onclick = () => { closeModal(); openSellModal(id); };
+  if (!isHolding) $('#dlSell', m).textContent = 'Enregistrer la liquidation…';
+  $('#dlSell', m).onclick = () => { closeModal(); if (isHolding) openSellModal(id); else openLiquidationModal(id); };
   $('#dlOk', m).onclick = () => {
     const before = clone(h), dt = $('#dlDate', m).value;
     h.listing = 'delisted'; h.delistedAt = dt || todayISO(); delete h.listingSuspect; h.marketError = null;
     if (isHolding) { const dv = h.dividend = h.dividend || {}; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; }
     saveState(); closeModal(); afterInstrumentFix();
     toast(nm + ' marquée comme plus cotée.', { ms: 9000, action: { label: 'Annuler', fn: () => { const L = isHolding ? state.holdings : state.archive, i = L.findIndex((x) => x.id === h.id); if (i >= 0) { L[i] = before; saveState(); afterInstrumentFix(); } } } });
+  };
+}
+
+/* Liquidation d'une position clôturée (ex. société radiée) : enregistre la vente des titres restants et la plus ou moins-value. */
+function openLiquidationModal(id) {
+  const a = (state.archive || []).find((x) => x.id === id); if (!a) return;
+  const led = Ledger.run(Ledger.entriesFor(state, a).entries), cur = Ledger.entriesFor(state, a).cur;
+  if (!(led.qty > 1e-8)) { toast('Rien à liquider : l\'historique ne montre plus aucun titre en portefeuille.'); return; }
+  const m = openModal('<h2>Enregistrer la liquidation</h2><div class="sub"><b>' + esc(a.name || a.ticker) + '</b> : l\'historique montre encore <b>' + fmtNum(led.qty) + '</b> titre(s)' + (led.cost ? ' pour un coût de <b>' + fmtMoney(led.cost, cur) + '</b>' : '') + '. Indiquez ce qui a été reçu à la liquidation : <b>0 si la société est sans valeur</b> (la moins-value est alors égale au coût). Vos achats, dividendes et dates restent enregistrés.</div>' +
+    fld('Date de la liquidation ou de la radiation', '<input type="date" id="lqDate" value="' + esc(a.delistedAt || todayISO()) + '" max="' + todayISO() + '">', '', 'lqDate') +
+    fld('Produit total reçu (' + esc(cur) + ')', '<input type="text" inputmode="decimal" id="lqAmt" value="0">', 'Net des frais. 0 = titres sans valeur.', 'lqAmt') +
+    '<div id="lqErr" class="notice err hide"></div><div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="lqOk">Enregistrer la liquidation</button></div>');
+  $('#lqOk', m).onclick = () => {
+    const prevUndo = state.undo; snapshotForUndo('liquidation de ' + (a.name || a.ticker));
+    const r = Ledger.liquidateArchived(state, id, { date: $('#lqDate', m).value, proceeds: numOrNull($('#lqAmt', m).value) }, { uid, today: todayISO() });
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; const e = $('#lqErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); closeModal(); renderPage();
+    toast('Liquidation enregistrée' + (r.realized == null ? '' : ' · résultat réalisé ' + (r.realized >= 0 ? '+' : '') + fmtMoney(r.realized, r.cur)) + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
   };
 }

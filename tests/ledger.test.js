@@ -449,4 +449,21 @@ t('51. Opération sans date : exclue du calcul MAIS signalée (jamais en silence
   st.transactions[1].date = '2025-03-05'; assert.ok(!L.diagnose(st, { today: '2026-01-01' }).items.some((x) => x.code === 'tx_incomplete'), 'résolue');
 });
 
+t('52. Position conservée pour toujours : vente à 0 (société liquidée) = moins-value égale au coût ; suppression = archivage avec historique ; liquidation d\'une position clôturée non vendue', () => {
+  let k = 0; const deps = { uid: () => 'id' + (++k), today: '2026-11-11' };
+  const mk = () => ({ holdings: [{ id: 'h', ticker: 'CARM', isin: 'FR0010907956', name: 'Carmat', quantity: 100, avgCost: 10, currency: 'EUR', account: 'a', addedAt: '2020-03-01' }], archive: [], accounts: [{ id: 'a' }], settings: {}, payments: [{ id: 'p', holdingId: 'h', payDate: '2021-05-01', gross: 5, source: 'manual' }], corp: [],
+    transactions: [{ id: 't1', holdingId: 'h', date: '2020-03-01', type: 'buy', qty: 100, price: 10, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }] });
+  // 1. vente à 0 : refusée sans la case « sans valeur », acceptée avec
+  let st = mk(); assert.strictEqual(L.recordSale(st, 'h', { qty: 100, price: 0, date: '2024-06-01' }, deps).ok, false);
+  const r = L.recordSale(st, 'h', { qty: 100, price: 0, worthless: true, date: '2024-06-01' }, deps); assert.ok(r.ok && r.closed); assert.strictEqual(r.realized, -1000, 'moins-value = coût'); assert.strictEqual(st.archive.length, 1);
+  // 2. suppression d'une position avec historique : conservée dans l'archive avec ses opérations et ses versements
+  st = mk(); assert.ok(L.archiveKept(st, 'h', deps).ok); assert.deepStrictEqual([st.holdings.length, st.archive.length, st.transactions.length, st.payments.length], [0, 1, 1, 1]);
+  // 3. position sans opérations mais avec PRU : l'opération d'ouverture garde la trace (date d'ajout, quantité, PRU)
+  st = mk(); st.transactions = []; L.archiveKept(st, 'h', deps); assert.strictEqual(st.transactions.length, 1); assert.deepStrictEqual([st.transactions[0].date, st.transactions[0].qty, st.transactions[0].price], ['2020-03-01', 100, 10]);
+  // 4. position clôturée jamais vendue (société radiée) : liquidation à 0 → moins-value = coût ; date antérieure refusée
+  st = mk(); L.archiveKept(st, 'h', deps); assert.strictEqual(L.liquidateArchived(st, 'h', { date: '2019-01-01', proceeds: 0 }, deps).ok, false, 'date avant l\'achat refusée');
+  const q = L.liquidateArchived(st, 'h', { date: '2024-06-01', proceeds: 0 }, deps); assert.ok(q.ok); assert.strictEqual(q.realized, -1000); assert.strictEqual(L.liquidateArchived(st, 'h', { date: '2024-07-01', proceeds: 0 }, deps).ok, false, 'déjà liquidée : rien à refaire');
+  st = mk(); L.archiveKept(st, 'h', deps); assert.strictEqual(L.liquidateArchived(st, 'h', { date: '2024-06-01', proceeds: 250 }, deps).realized, -750, 'produit de liquidation partiel');
+});
+
 console.log('\n' + n + ' tests réussis');

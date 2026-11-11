@@ -154,9 +154,9 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('[data-selclear]'); ok(await p.locator('.selbar.hide').count(), 'sélection annulée'); 
     await p.locator('thead [data-selall]').check(); ok((await p.locator('.selbar').innerText()).includes('30 sélectionnés'), 'tout sélectionner = 30');
     await p.click('[data-seldel]'); ok((await p.locator('.modal').innerText()).includes('Supprimer 30 positions'), 'confirmation affichée');
-    ok((await p.locator('.modal').innerText()).includes('restent dans l\'Historique'), 'distinction position / historique');
+    ok((await p.locator('.modal').innerText()).includes('conservées dans « Clôturées »') || (await p.locator('.modal').innerText()).includes('Aucun versement ni opération'), 'distinction position / historique : conservé dans les clôturées');
     await p.click('#cdYes'); await p.waitForTimeout(250);
-    let s = await storeOf(p); eq(s.holdings.length, 0, 'positions supprimées'); eq(s.payments.length, 1, 'historique conservé');
+    let s = await storeOf(p); eq(s.holdings.length, 0, 'positions retirées du portefeuille actuel'); eq(s.payments.length, 1, 'historique conservé'); ok((s.archive || []).length >= 1, 'la position avec historique est archivée (jamais perdue)');
     ok(await p.locator('.toast:has-text("supprimées")').count(), 'retour visuel');
     await p.click('.toast button'); await p.waitForTimeout(250); s = await storeOf(p); eq(s.holdings.length, 30, 'suppression annulée');
     // suppression de 2 + historique
@@ -1413,12 +1413,33 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.archive.every((a) => a.marketError), null, { timeout: 12000 });
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
     let tx = await bellOpen(p); ok(/CARMAT SA — probablement plus cotée/.test(tx) && /LHYFE SA — probablement plus cotée/.test(tx), 'positions clôturées signalées : ' + tx.slice(0, 300));
-    await p.click('[data-nt^="mkt:delist:"]:has-text("CARMAT") [data-nt-act=accept]'); await p.waitForSelector('#dlOk'); eq(await p.locator('#dlSell').count(), 0, 'pas de « Clôturer » pour une position déjà clôturée'); await p.click('#dlOk'); await p.waitForTimeout(400);
+    await p.click('[data-nt^="mkt:delist:"]:has-text("CARMAT") [data-nt-act=accept]'); await p.waitForSelector('#dlOk'); ok(/Enregistrer la liquidation/.test(await p.locator('#dlSell').innerText()), 'liquidation proposée pour une position clôturée'); await p.click('#dlOk'); await p.waitForTimeout(400);
     let s = await storeOf(p); eq(s.archive.find((a) => a.id === 'ca').listing, 'delisted', 'Carmat marquée plus cotée');
     // correction du symbole d'une position clôturée depuis la fenêtre « Actifs à corriger »
     await p.evaluate(() => { openFailingHoldings(); }); await p.waitForSelector('[data-al2]'); ok(/Plus cotée en bourse/.test(await p.locator('.modal').innerText()), 'bouton « Plus cotée en bourse… » proposé'); await p.click('[data-al]');
     await p.waitForSelector('#afTicker'); await p.fill('#afTicker', 'AAPL'); await p.click('#afOk'); await p.waitForFunction(() => { const a = state.archive.find((x) => x.id === 'lh'); return a && !a.marketError && a.hist; }, null, { timeout: 12000 }); await p.waitForTimeout(500);
     tx = await bellOpen(p); eq(await p.locator('#bellPanel [data-nt^="mkt:delist:"], #bellPanel [data-nt="market:fail"]').count(), 0, 'après correction : plus aucune notification d\'échec — ' + tx.slice(0, 200)); await bellClose(p);
+  });
+  await test('positions conservées pour toujours : clôturée non vendue (Carmat) → « Non liquidée » puis liquidation à 0 = moins-value, dividendes perçus affichés ; suppression d\'une position = archivage avec tout son historique', async () => {
+    RELAY.old = false;
+    const seed = SEED(0);
+    seed.holdings = [{ id: 'sap', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 100, price: 150, account: 'main', logo: null, source: 'degiro', addedAt: '2024-01-01', dividend: {} }];
+    seed.archive = [{ id: 'ca', account: 'main', ticker: 'ALCAR.PA', displayTicker: 'ALCAR.PA', isin: 'FR0010907956', name: 'CARMAT SA', currency: 'EUR', quantity: 0, type: 'stock', userArchived: true }];
+    seed.transactions = [{ id: 'tb', holdingId: 'ca', date: '2020-03-01', type: 'buy', qty: 100, price: 10, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' },
+      { id: 'ts', holdingId: 'sap', date: '2024-01-10', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }];
+    seed.payments = [{ id: 'pc', holdingId: 'ca', payDate: '2021-05-01', gross: 5, net: 5, currency: 'EUR', source: 'manual', verified: true }, { id: 'ps', holdingId: 'sap', payDate: '2025-05-01', gross: 12, net: 12, currency: 'EUR', source: 'manual', verified: true }];
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { view.port.tab = 'closed'; go('portfolio'); }); await p.waitForSelector('[data-liq]');
+    let tx = await p.locator('#page').innerText(); ok(/CARMAT SA/.test(tx) && /Non liquidée/.test(tx) && /Dividendes perçus/.test(tx), 'position clôturée non vendue signalée, colonne dividendes : ' + tx.slice(0, 300));
+    await p.click('[data-liq="ca"]'); await p.waitForSelector('#lqOk'); await p.fill('#lqDate', '2024-06-01'); await p.click('#lqOk'); await p.waitForTimeout(500);
+    let s = await storeOf(p); const sell = s.transactions.find((x) => x.holdingId === 'ca' && x.type === 'sell'); ok(sell && sell.amountAcct === 0 && sell.date === '2024-06-01' && sell.liquidation, 'liquidation à 0 enregistrée');
+    eq(s.transactions.length, 3, 'achat conservé'); eq(s.payments.filter((x) => x.holdingId === 'ca').length, 1, 'dividende perçu conservé');
+    tx = await p.locator('#page').innerText(); ok(/-\s?1\s?000/.test(tx.replace(/\u202f|\u00a0/g, ' ')) && !/Non liquidée/.test(tx), 'moins-value de 1 000 € affichée : ' + tx.replace(/\s+/g, ' ').slice(0, 260));
+    // suppression d'une position détenue avec historique : archivée, pas perdue
+    await p.evaluate(() => { confirmDeleteHoldings(['sap']); }); await p.waitForSelector('#cdYes', { timeout: 5000 }).catch(() => {});
+    if (await p.locator('.choice-list [data-c=delete]').count()) await p.click('.choice-list [data-c=delete]');
+    await p.waitForSelector('#cdYes'); ok(/conservées dans « Clôturées »/.test(await p.locator('.modal').innerText()), 'message : historique conservé'); await p.click('#cdYes'); await p.waitForTimeout(400);
+    s = await storeOf(p); eq(s.holdings.length, 0, 'retirée du portefeuille actuel'); ok(s.archive.some((a) => a.id === 'sap'), 'conservée dans les clôturées'); ok(s.transactions.some((x) => x.holdingId === 'sap') && s.payments.some((x) => x.holdingId === 'sap'), 'opérations et versements conservés');
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

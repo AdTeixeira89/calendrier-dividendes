@@ -607,6 +607,36 @@
     state.archive.push({ id: h.id, ticker: h.ticker, displayTicker: h.displayTicker, isin: h.isin, name: h.name, currency: h.currency, account: h.account, source: h.source || 'degiro', closedAt: led.last, firstAt: led.first, hist: h.hist || null, splits: h.splits, logo: h.logo || null, marketAt: h.hist ? deps.today : undefined, check: code ? { code, msg } : undefined, userArchived: true });
     return { ok: true };
   }
+  /* Position retirée du portefeuille actuel SANS rien perdre : elle passe dans « Clôturées » avec ses opérations et ses versements.
+     Sans historique d'achats, une opération d'ouverture reprend la quantité et le PRU saisis (jamais inventés : seulement s'ils sont connus). */
+  function archiveKept(state, id, deps) {
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return { ok: false };
+    const hasTx = (state.transactions || []).some((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell'));
+    if (!hasTx && Number(h.quantity) > 0 && Number(h.avgCost) > 0) {
+      const cur = h.costCurrency || h.currency || 'EUR', added = h.addedAt ? String(h.addedAt).slice(0, 10) : deps.today;
+      state.transactions.push({ id: deps.uid(), holdingId: h.id, date: added, time: '', type: 'buy', qty: Number(h.quantity), price: Number(h.avgCost), fees: 0, currency: cur, amountAcct: r2(Number(h.quantity) * Number(h.avgCost)), acctCur: cur, source: 'manual', opening: true, approx: true, ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' });
+    }
+    const led = run(entriesFor(state, h).entries);
+    state.holdings = state.holdings.filter((x) => x.id !== h.id); state.archive = state.archive || [];
+    state.archive.push({ id: h.id, ticker: h.ticker, displayTicker: h.displayTicker, isin: h.isin, name: h.name, currency: h.currency, account: h.account, source: h.source || 'manual', closedAt: led.last || deps.today, firstAt: led.first, hist: h.hist || null, splits: h.splits, logo: h.logo || null, marketAt: h.hist ? deps.today : undefined, userArchived: true, removedAt: deps.today, listing: h.listing, delistedAt: h.delistedAt });
+    return { ok: true };
+  }
+  /* Liquidation d'une position clôturée dont la vente n'a pas été enregistrée (société radiée, liquidée) : enregistre la vente des titres restants
+     au produit total indiqué (0 = sans valeur → moins-value égale au coût). Décision de l'utilisateur, jamais automatique. */
+  function liquidateArchived(state, id, o, deps) {
+    const err = (error) => ({ ok: false, error });
+    const a = (state.archive || []).find((x) => x.id === id); if (!a) return err('Position introuvable.');
+    const { entries, cur } = entriesFor(state, a), led = run(entries);
+    if (!(led.qty > EPS)) return err('Aucun titre restant à liquider selon l\'historique des opérations.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(o.date || '')) || o.date > deps.today) return err('Date invalide (vide ou dans le futur).');
+    if (led.last && o.date < led.last) return err('La date ne peut pas précéder la dernière opération (' + led.last + ').');
+    const proceeds = Number(o.proceeds); if (!(proceeds >= 0)) return err('Produit invalide (0 si la société est sans valeur).');
+    const qty = r8(led.qty);
+    state.transactions.push({ id: deps.uid(), holdingId: a.id, date: o.date, time: '', type: 'sell', qty, price: r8(proceeds / qty), fees: 0, currency: cur, amountAcct: r2(proceeds), acctCur: cur, source: 'manual', liquidation: true, ticker: a.displayTicker || a.ticker, name: a.name || '', isin: a.isin || '' });
+    a.closedAt = o.date; a.userArchived = true;
+    const row = run(entriesFor(state, a).entries).rows.filter((r) => r.type === 'sell').pop();
+    return { ok: true, realized: row ? row.realized : null, cur, qty };
+  }
   /* Vente (partielle) ou clôture d'une position, enregistrée par l'utilisateur : prix de vente, quantité, frais, date.
      Crée une opération de vente (le résultat réalisé, la quantité restante, l'historique de valeur et les flux du portefeuille en découlent) ; le PRU des titres restants
      ne change pas. Position saisie sans historique d'achats : une opération « d'ouverture » reprend la quantité détenue au PRU saisi (date d'achat facultative ; à défaut la
@@ -616,7 +646,7 @@
     const h = (state.holdings || []).find((x) => x.id === id); if (!h) return err('Position introuvable.');
     const qBefore = Number(h.quantity) || 0, q = Number(sale.qty), price = Number(sale.price), fees = Number(sale.fees) || 0, tol = 1e-6 * Math.max(1, qBefore);
     if (!(q > 0)) return err('Quantité vendue invalide.'); if (q - qBefore > tol) return err('La quantité vendue (' + q + ') dépasse la quantité détenue (' + qBefore + ').');
-    if (!(price > 0)) return err('Indiquez le prix de vente par titre.'); if (fees < 0) return err('Frais invalides.');
+    if (!(price > 0 || (sale.worthless && price === 0))) return err('Indiquez le prix de vente par titre (ou cochez « titres sans valeur »).'); if (fees < 0) return err('Frais invalides.');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(sale.date || '')) || sale.date > deps.today) return err('Date de vente invalide (vide ou dans le futur).');
     const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, warnings = [];
     const txs = (state.transactions || []).filter((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell'));
@@ -892,6 +922,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, promote, parsePositions, diagnose };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

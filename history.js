@@ -416,16 +416,18 @@ function renderOperations(host) {
 function renderClosed(host) {
   const arch = (state.archive || []).filter((a) => { const ids = visibleIds(); return !ids || ids.has(a.id); });
   const rows = arch.map((a) => { const led = ledgerOf(a); return { a, led }; }).filter((x) => x.led).sort((x, y) => (y.led.last || '').localeCompare(x.led.last || ''));
-  const body = rows.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Actif</th><th>Période</th><th class="r">Investi</th><th class="r">Produit des ventes</th><th class="r">Résultat réalisé</th><th></th></tr></thead><tbody>' + rows.map((x) => {
+  const body = rows.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Actif</th><th>Période</th><th class="r">Investi</th><th class="r">Produit des ventes</th><th class="r">Dividendes perçus</th><th class="r">Résultat réalisé</th><th></th></tr></thead><tbody>' + rows.map((x) => {
     const buys = x.led.rows.filter((r) => r.type === 'buy' && r.amt != null).reduce((s, r) => s + r.amt, 0), sells = x.led.rows.filter((r) => r.type === 'sell' && r.amt != null).reduce((s, r) => s + r.amt, 0);
-    const pct = x.led.realizedKnown && buys > 0 ? x.led.realized / buys : null;
+    const pct = x.led.realizedKnown && buys > 0 ? x.led.realized / buys : null, dv = Dividends.summary(state, { from: '0000-01-01', to: '9999-12-31', ids: new Set([x.a.id]), convert });
     return '<tr><td><span class="asset">' + avatar(x.a.displayTicker || x.a.ticker, x.a.logo, 'sm', x.a.isin) + '<span><span class="nm">' + esc(x.a.name || x.a.displayTicker) + '</span><span class="tkr">' + esc(x.a.isin || '') + (x.a.hist ? '' : ' · cours passés non récupérés') + '</span></span></span></td>' +
       '<td>' + esc(fmtDate(x.led.first)) + ' → ' + esc(fmtDate(x.led.last)) + '</td><td class="r">' + fmtMoney(buys, x.led.cur) + '</td><td class="r">' + fmtMoney(sells, x.led.cur) + '</td>' +
-      '<td class="r">' + (x.led.realizedKnown ? '<b class="' + (x.led.realized >= 0 ? 'pos' : 'neg') + '">' + (x.led.realized >= 0 ? '+' : '') + fmtMoney(x.led.realized, x.led.cur) + '</b>' + (pct != null ? ' <small class="muted">' + fmtPct(pct, 1, true) + '</small>' : '') : '—') + '</td>' +
-      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button></td></tr>';
+      '<td class="r">' + (dv.count ? money(dv.gross) + (dv.netUnknown ? '*' : '') : '—') + '</td>' +
+      '<td class="r">' + (x.led.qty > 1e-8 ? '<span class="badge warn" title="L\'historique montre encore ' + esc(fmtNum(x.led.qty)) + ' titre(s) : la vente ou la liquidation n\'est pas enregistrée.">Non liquidée</span>' : x.led.realizedKnown ? '<b class="' + (x.led.realized >= 0 ? 'pos' : 'neg') + '">' + (x.led.realized >= 0 ? '+' : '') + fmtMoney(x.led.realized, x.led.cur) + '</b>' + (pct != null ? ' <small class="muted">' + fmtPct(pct, 1, true) + '</small>' : '') : '—') + '</td>' +
+      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + '</td></tr>';
   }).join('') + '</tbody></table></div>' : '<div class="card empty"><h3>Aucune position clôturée</h3><p>Les actifs entièrement vendus apparaissent ici (ils ne figurent plus dans les positions actuelles).</p></div>';
   host.innerHTML = pageHead('Mon portefeuille', rows.length + ' position(s) entièrement vendue(s)', '<button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>') +
     '<div class="toolbar">' + portTabsHtml() + '<span class="grow"></span></div>' + body + '<p class="hint" style="margin-top:8px">Ces positions restent dans l\'historique (calcul des résultats réalisés et reconstitution de l\'évolution passée du portefeuille). « Actualiser » récupère leurs cours passés.</p>';
   wirePortTabs(host); wireDo(host);
+  $$('[data-liq]', host).forEach((b) => b.onclick = () => openLiquidationModal(b.dataset.liq));
   $$('[data-opsof]', host).forEach((b) => b.onclick = () => { view.port.tab = 'ops'; view.ops.asset = b.dataset.opsof; renderPortfolio(host); });
 }
