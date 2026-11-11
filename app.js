@@ -215,7 +215,12 @@ async function refreshMarket(list, o) {
 function updateMarketNotices(res) {
   const out = [], live = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');
   const nm = (h) => h.name || h.displayTicker || h.ticker;
-  live.filter((h) => h.listingSuspect).forEach((h) => {
+  const susp = live.filter((h) => h.listingSuspect);
+  if (susp.length > 5) {
+    out.push({ id: 'mkt:bulk', level: 'warn', title: susp.length + ' positions probablement plus cotées en bourse', body: 'Yahoo Finance ne trouve plus ces titres (radiation, liquidation, rachat…). Vous pouvez : <b>exporter la liste en PDF</b> pour la faire vérifier (dates de radiation), puis <b>importer le fichier de résultats</b> ; ou tout marquer « plus cotées » d\'un coup. Rien n\'est supprimé : achats, ventes et dividendes restent enregistrés.',
+      accept: { label: 'Ouvrir la liste…', run: () => openFailingHoldings(), ack: false }, more: [{ label: 'Exporter la liste (PDF)', run: () => exportDelistPdf() }, { label: 'Importer les dates de radiation…', run: () => importDelistFile() }, { label: 'Tout marquer plus cotées…', run: () => markAllDelisted() }] });
+  }
+  (susp.length > 5 ? [] : susp).forEach((h) => {
     const s = h.listingSuspect, days = s.since ? Math.round((Date.now() - Date.parse(s.since)) / 86400000) : null;
     const why = s.kind === 'stale' ? 'Dernière cotation le ' + esc(fmtDate(s.since)) + (days ? ' (il y a ' + days + ' jours)' : '') + ' : cotation arrêtée ou suspendue.' : esc(s.msg || 'Yahoo Finance ne connaît plus ce titre.');
     out.push({ id: 'mkt:delist:' + h.id, level: 'warn', title: nm(h) + ' — probablement plus cotée en bourse', body: why + ' Si la société a été radiée, liquidée ou rachetée, marquez-la « plus cotée » : l\'actualisation s\'arrête pour ce titre et l\'erreur ne revient plus. Si le symbole est simplement faux, corrigez-le.',

@@ -146,7 +146,7 @@ function saveHoldingForm(m, ex) {
   // une saisie manuelle du dividende prime sur les créneaux automatiques (recalculés à la prochaine actualisation)
   if (dvBefore !== JSON.stringify([dv.lastAmount, dv.frequency, dv.anchorMonth])) dv.slots = null;
   const lst = $('#hListing', m) ? $('#hListing', m).value : '';
-  if (lst === 'delisted') { if (d.listing !== 'delisted') d.delistedAt = todayISO(); d.listing = 'delisted'; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; delete d.listingSuspect; d.marketError = null; }
+  if (lst === 'delisted') { if (d.listing !== 'delisted') d.delistedAt = null; d.listing = 'delisted'; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; delete d.listingSuspect; d.marketError = null; }
   else if (d.listing === 'delisted') { delete d.listing; delete d.delistedAt; d.fullAt = 1; }          // de nouveau cotée : actualisation complète
   const symChanged = ex && (String(ex.ticker || '').toUpperCase() !== t.toUpperCase());
   if (symChanged) { d.marketError = null; delete d.listingSuspect; d.fullAt = 1; delete d.quickAt; }      // nouveau symbole : l'ancienne erreur ne vaut plus, actualisation complète
@@ -719,7 +719,7 @@ function openInstrumentFix(id) {
     const t = $('#afTicker', m).value.trim(), lst = $('#afListing', m).value, before = JSON.stringify([a.ticker, a.listing]);
     if (lst !== 'delisted' && !t) { toast('Renseignez un symbole ou un ISIN.', { error: true }); return; }
     if (t) { a.ticker = t; if (Market.isISIN(t)) a.isin = t.toUpperCase(); }
-    if (lst === 'delisted') { if (a.listing !== 'delisted') a.delistedAt = todayISO(); a.listing = 'delisted'; a.marketError = null; delete a.listingSuspect; } else { delete a.listing; delete a.delistedAt; }
+    if (lst === 'delisted') { if (a.listing !== 'delisted') a.delistedAt = null; a.listing = 'delisted'; a.marketError = null; delete a.listingSuspect; } else { delete a.listing; delete a.delistedAt; }
     const changed = before !== JSON.stringify([a.ticker, a.listing]);
     if (changed && lst !== 'delisted') { a.marketError = null; delete a.listingSuspect; delete a.hist; }
     saveState(); closeModal();
@@ -762,7 +762,7 @@ function openDelistModal(id) {
   $('#dlSell', m).onclick = () => { closeModal(); if (isHolding) openSellModal(id); else openLiquidationModal(id); };
   $('#dlOk', m).onclick = () => {
     const before = clone(h), dt = $('#dlDate', m).value;
-    h.listing = 'delisted'; h.delistedAt = dt || todayISO(); delete h.listingSuspect; h.marketError = null;
+    h.listing = 'delisted'; h.delistedAt = dt || null; delete h.listingSuspect; h.marketError = null;
     if (isHolding) { const dv = h.dividend = h.dividend || {}; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; }
     saveState(); closeModal(); afterInstrumentFix();
     toast(nm + ' marquée comme plus cotée.', { ms: 9000, action: { label: 'Annuler', fn: () => { const L = isHolding ? state.holdings : state.archive, i = L.findIndex((x) => x.id === h.id); if (i >= 0) { L[i] = before; saveState(); afterInstrumentFix(); } } } });
@@ -785,4 +785,99 @@ function openLiquidationModal(id) {
     saveState(); closeModal(); renderPage();
     toast('Liquidation enregistrée' + (r.realized == null ? '' : ' · résultat réalisé ' + (r.realized >= 0 ? '+' : '') + fmtMoney(r.realized, r.cur)) + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
   };
+}
+
+
+/* ==================================================================
+   REVUE EN LOT DES SOCIÉTÉS PROBABLEMENT PLUS COTÉES
+   Liste → PDF (à faire vérifier, par exemple par un assistant IA) → import du fichier de résultats (dates de radiation) avec aperçu ;
+   rien n'est appliqué sans confirmation, rien n'est supprimé.
+   ================================================================== */
+const pendingListing = () => state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted' && (h.listingSuspect || h.marketError));
+const instIsin = (h) => String(h.isin || (Market.isISIN(h.ticker) ? h.ticker : '') || '').toUpperCase();
+function pendingRows() {
+  return pendingListing().map((h) => {
+    const held = state.holdings.some((x) => x.id === h.id), ent = Ledger.entriesFor(state, h), led = Ledger.run(ent.entries), s = h.listingSuspect;
+    const why = s ? (s.kind === 'stale' ? 'Dernière cotation le ' + (s.since || '?') + ' : cotation arrêtée ou suspendue.' : (s.msg || 'Yahoo Finance ne connaît plus ce titre.')) : (h.marketError || '');
+    return { id: h.id, name: h.name || h.displayTicker || h.ticker || '—', isin: instIsin(h), ticker: h.displayTicker || h.ticker || '', held, first: led.first || '', last: led.last || '', qty: led.qty, why };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+/* Remet un fichier à l'utilisateur : feuille de partage du téléphone, sinon téléchargement. */
+async function deliverFile(file, title) {
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title }); return; } }
+  catch (e) { if (e && e.name === 'AbortError') return; }
+  const url = URL.createObjectURL(file), a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function delistReviewLines(rows) {
+  const W = 92, L = [];
+  const add = (t, b, ind) => Pdf.wrap(t, W, ind || 0).forEach((x) => L.push(b ? { t: x, b: true } : x));
+  add('StockPilot — Positions à vérifier : sociétés probablement plus cotées en bourse', true);
+  add('Document généré le ' + fmtDate(todayISO()) + ' — ' + rows.length + ' position(s)');
+  L.push('');
+  add('MISSION', true);
+  add('Pour CHAQUE position de la liste ci-dessous, cherche sur le web (Euronext, Boursorama, Yahoo Finance, communiqués de la société, journaux financiers) si la société est bien radiée de la cote (liquidation, rachat, fusion, offre publique, faillite) et donne la DATE DE RADIATION exacte. Vérifie aussi que ce n\'est pas simplement un mauvais ISIN ou symbole : si la société est toujours cotée, indique-le et donne le bon symbole boursier (ex. AI.PA). Si tu n\'es pas sûr, dis-le : ne devine jamais une date.');
+  L.push('');
+  add('FORMAT DE RÉPONSE (obligatoire) : uniquement un fichier JSON, sans texte autour :', true);
+  ['{ "radiations": [', '  { "isin": "FR0010907956", "name": "CARMAT SA", "status": "radiee",', '    "delistedAt": "2025-07-15", "source": "https://...", "note": "liquidation judiciaire" },', '  { "isin": "XX0000000000", "name": "EXEMPLE", "status": "toujours_cotee",', '    "symbol": "EX.PA", "source": "https://...", "note": "mauvais symbole" } ] }'].forEach((x) => L.push(x));
+  add('status : "radiee" (avec delistedAt AAAA-MM-JJ), "toujours_cotee" (avec symbol si connu) ou "incertain".');
+  L.push('');
+  add('LISTE DES POSITIONS', true);
+  rows.forEach((r, i) => {
+    L.push(''); add((i + 1) + '. ' + r.name, true);
+    add('ISIN : ' + (r.isin || 'inconnu') + ' | Symbole : ' + (r.ticker || '-') + ' | ' + (r.held ? 'position détenue' : 'position clôturée'), false, 3);
+    add('Premier achat : ' + (r.first || 'inconnu') + ' | Dernière opération : ' + (r.last || 'inconnue') + (r.qty > 1e-8 ? ' | titres restants selon l\'historique : ' + r.qty : ''), false, 3);
+    add('Constat de l\'application : ' + r.why, false, 3);
+  });
+  return L;
+}
+async function exportDelistPdf() {
+  const rows = pendingRows(); if (!rows.length) { toast('Aucune position à vérifier.'); return; }
+  const bytes = Pdf.toBytes(Pdf.build(delistReviewLines(rows))), file = new File([bytes], 'positions-a-verifier-' + todayISO() + '.pdf', { type: 'application/pdf' });
+  await deliverFile(file, 'Positions à vérifier (StockPilot)'); toast('PDF de ' + rows.length + ' position(s) prêt.');
+}
+/* Applique « plus cotée » à une position (détenue ou clôturée) ; la date de radiation reste vide si elle est inconnue. */
+function markDelisted(inst, date, source) {
+  const held = state.holdings.some((x) => x.id === inst.id);
+  inst.listing = 'delisted'; inst.delistedAt = date || null; if (source) inst.delistedSource = String(source).slice(0, 300); inst.marketError = null; delete inst.listingSuspect;
+  if (held) { const dv = inst.dividend = inst.dividend || {}; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; }
+}
+const validISODate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && !isNaN(Date.parse(d)) && d <= todayISO();
+async function importDelistFile() {
+  const file = await pickFile('application/json,.json,text/plain,.txt'); if (!file) return;
+  let data; try { data = JSON.parse((await file.text()).replace(/^\uFEFF/, '').replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '')); } catch (e) { toast('Fichier illisible : ce n\'est pas un JSON valide.', { error: true }); return; }
+  const items = Array.isArray(data) ? data : (data && Array.isArray(data.radiations) ? data.radiations : null);
+  if (!items) { toast('Format non reconnu : attendu { "radiations": [ … ] }.', { error: true }); return; }
+  const insts = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');
+  const find = (it) => { const isin = String(it.isin || '').toUpperCase(); return insts.find((h) => isin && instIsin(h) === isin) || insts.find((h) => it.name && Ledger.norm(h.name || '') === Ledger.norm(it.name)); };
+  const rows = [], seen = new Set(); let unmatched = 0;
+  items.forEach((it) => { const h = it && find(it); if (!h) { unmatched++; return; } if (seen.has(h.id)) return; seen.add(h.id); const st = String(it.status || (it.delistedAt ? 'radiee' : 'incertain')).toLowerCase(); rows.push({ h, st, date: validISODate(it.delistedAt) ? it.delistedAt : '', src: it.source || '', note: it.note || '', sym: it.symbol || '' }); });
+  if (!rows.length) { toast('Aucune position du fichier ne correspond à vos actifs' + (unmatched ? ' (' + unmatched + ' ligne(s) ignorée(s))' : '') + '.', { error: true }); return; }
+  const label = { radiee: 'Radiée', toujours_cotee: 'Toujours cotée', incertain: 'Incertain' };
+  const m = openModal('<h2>Dates de radiation du fichier</h2><div class="sub">Vérifiez avant d\'appliquer. Seules les lignes cochées sont marquées « plus cotées » (la date est modifiable). Les positions « toujours cotées » ou « incertaines » ne sont pas cochées : corrigez leur symbole depuis la cloche.</div>' +
+    '<div class="act-list">' + rows.map((r, i) => { const on = r.st === 'radiee'; return '<div class="diag-item ' + (on ? 'lvl-info' : 'lvl-warn') + '"><label class="chk"><input type="checkbox" data-dl-on="' + i + '"' + (on ? ' checked' : '') + '><span><b>' + esc(r.h.name || r.h.ticker) + '</b> · ' + esc(instIsin(r.h)) + ' · <b>' + esc(label[r.st] || r.st) + '</b></span></label>' +
+      '<div class="row2" style="margin-top:6px">' + fld('Date de radiation', '<input type="date" data-dl-date="' + i + '" value="' + esc(r.date) + '" max="' + todayISO() + '">', '', '') + '<div class="field"><span class="hint">' + esc(r.note || '') + (r.sym ? ' · symbole proposé : ' + esc(r.sym) : '') + (r.src ? ' · <a href="' + esc(/^https?:\/\//.test(r.src) ? r.src : '#') + '" target="_blank" rel="noopener">source</a>' : '') + '</span></div></div></div>'; }).join('') + '</div>' +
+    '<label class="chk" style="margin-top:8px"><input type="checkbox" id="dlLiq"><span>Pour les positions <b>clôturées non vendues</b> cochées : enregistrer aussi la liquidation à <b>0</b> (moins-value = coût) à la date de radiation. À ne cocher que si la société est sans valeur.</span></label>' +
+    (unmatched ? '<div class="hint">' + unmatched + ' ligne(s) du fichier ne correspondent à aucun de vos actifs.</div>' : '') +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="dlApply">Appliquer</button></div>', { wide: true });
+  $('#dlApply', m).onclick = () => {
+    const prevUndo = state.undo; snapshotForUndo('dates de radiation importées'); let n = 0, liq = 0, noDate = 0;
+    rows.forEach((r, i) => {
+      if (!$('[data-dl-on="' + i + '"]', m).checked) return;
+      const date = $('[data-dl-date="' + i + '"]', m).value, ok = validISODate(date) ? date : '';
+      markDelisted(r.h, ok, r.src); n++; if (!ok) noDate++;
+      if ($('#dlLiq', m).checked && ok && !state.holdings.some((x) => x.id === r.h.id)) { const q = Ledger.liquidateArchived(state, r.h.id, { date: ok, proceeds: 0 }, { uid, today: todayISO() }); if (q.ok) liq++; }
+    });
+    if (!n) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast('Aucune ligne cochée.'); return; }
+    saveState(); closeModal(); afterInstrumentFix();
+    toast(n + ' position(s) marquée(s) « plus cotées »' + (noDate ? ' (' + noDate + ' sans date)' : '') + (liq ? ' · ' + liq + ' liquidation(s) enregistrée(s)' : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
+}
+/* Tout marquer « plus cotées » d'un coup (décision explicite de l'utilisateur, annulable). */
+async function markAllDelisted() {
+  const list = pendingListing(); if (!list.length) return;
+  const c = await confirmDialog({ title: 'Marquer ' + list.length + ' position(s) « plus cotées » ?', body: '<b>' + list.slice(0, 8).map((h) => esc(h.name || h.ticker)).join(', ') + (list.length > 8 ? '…' : '') + '</b><br><br>Elles ne seront plus actualisées (plus d\'erreur) et aucun dividende ne sera prévu ; vos achats, ventes, dividendes perçus et dates restent enregistrés. La date de radiation reste vide (vous pouvez l\'importer ensuite). Annulable.', confirmLabel: 'Tout marquer' });
+  if (!c.ok) return;
+  const prevUndo = state.undo; snapshotForUndo('positions marquées plus cotées'); list.forEach((h) => markDelisted(h, null, null)); saveState(); afterInstrumentFix();
+  toast(list.length + ' position(s) marquée(s) « plus cotées ».', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
 }

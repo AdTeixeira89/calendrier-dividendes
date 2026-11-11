@@ -991,7 +991,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.holdings = [Object.assign({}, base, { id: 'v1', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 10, avgCost: 100, price: 130 }), Object.assign({}, base, { id: 'v2', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', quantity: 5, avgCost: 50, price: 60 })];
     const p = await device({ guest: true, seed }); p.setDefaultTimeout(8000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
     await p.evaluate(() => openHoldingModal('v1')); await p.waitForSelector('#hSell'); await p.click('#hSell'); await p.waitForSelector('#slPrice');
-    await p.click('#slMode [data-m=part]'); await p.fill('#slQty', '4'); await p.fill('#slPrice', '120'); await p.fill('#slFees', '2'); await p.waitForTimeout(150);
+    await p.click('#slMode [data-m=part]'); await p.waitForTimeout(150); { const fo = async (sel, v) => { for (let i = 0; i < 5; i++) { await p.fill(sel, v); await p.waitForTimeout(60); if ((await p.inputValue(sel)) === v) return; } }; await fo('#slQty', '4'); await fo('#slPrice', '120'); await fo('#slFees', '2'); } await p.waitForTimeout(150);
     const prev = (await p.locator('#slPrev').innerText()).replace(/\n/g, ' | '); await shot(p, 'sell'); ok(/478/.test(prev) && /\+?78/.test(prev) && /6/.test(prev) && /inchangé/.test(prev), 'aperçu : produit 478 €, résultat +78 €, reste 6 : ' + prev);
     await p.fill('#slQty', '11'); await p.click('#slGo'); ok(/dépasse la quantité détenue/.test(await p.locator('#slErr').innerText()), 'quantité excessive refusée'); await p.fill('#slQty', '4'); await p.click('#slGo'); await p.waitForTimeout(400);
     let st = await storeOf(p); const h1 = st.holdings.find((x) => x.id === 'v1'); eq([h1.quantity, h1.avgCost], [6, 100], 'quantité 6, PRU inchangé'); eq(st.transactions.map((t) => [t.type, t.qty, t.price, t.opening || false]).sort(), [['buy', 10, 100, true], ['sell', 4, 120, false]].sort(), 'ouverture au PRU saisi + vente');
@@ -1398,7 +1398,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
     let tx = await bellOpen(p); ok(/Carmat — probablement plus cotée/.test(tx) && /Marquer comme plus cotée/.test(tx), 'Carmat signalée comme probablement plus cotée : ' + tx.slice(0, 300)); await bellClose(p);
     await p.evaluate(() => { const li = document.querySelector('#bellBtn'); li.click(); }); await p.click('[data-nt="mkt:delist:carm"] [data-nt-act=accept]'); await p.waitForSelector('#dlOk'); await p.click('#dlOk'); await p.waitForTimeout(400);
-    let s = await storeOf(p); const c = s.holdings.find((h) => h.id === 'carm'); ok(c.listing === 'delisted' && c.delistedAt, 'marquée plus cotée (décision de l\'utilisateur)'); eq(c.dividend.none, true, 'aucun dividende prévu');
+    let s = await storeOf(p); const c = s.holdings.find((h) => h.id === 'carm'); ok(c.listing === 'delisted' && c.delistedAt === null, 'marquée plus cotée (décision de l\'utilisateur), date de radiation jamais inventée'); eq(c.dividend.none, true, 'aucun dividende prévu');
     const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { state.holdings.forEach((h) => { delete h.quickAt; delete h.fullAt; }); refreshMarket(null, { silent: true, quick: true }); }); await p.waitForTimeout(1500);
     eq((RELAY.chartCalls || 0) - c0, 1, 'plus de requête pour la société plus cotée (seul l\'autre actif est interrogé)');
     // correction du symbole depuis la fiche : l'erreur disparaît de la cloche
@@ -1440,6 +1440,28 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     if (await p.locator('.choice-list [data-c=delete]').count()) await p.click('.choice-list [data-c=delete]');
     await p.waitForSelector('#cdYes'); ok(/conservées dans « Clôturées »/.test(await p.locator('.modal').innerText()), 'message : historique conservé'); await p.click('#cdYes'); await p.waitForTimeout(400);
     s = await storeOf(p); eq(s.holdings.length, 0, 'retirée du portefeuille actuel'); ok(s.archive.some((a) => a.id === 'sap'), 'conservée dans les clôturées'); ok(s.transactions.some((x) => x.holdingId === 'sap') && s.payments.some((x) => x.holdingId === 'sap'), 'opérations et versements conservés');
+  });
+  await test('revue en lot des sociétés plus cotées (27 cas) : notification unique, export PDF, import des dates de radiation avec aperçu, liquidation facultative', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 1, avgCost: 100, price: 190, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }];
+    seed.archive = []; seed.transactions = [];
+    for (let i = 1; i <= 7; i++) { const id = 'z' + i, isin = 'FR00000000' + String(i).padStart(2, '0'); seed.archive.push({ id, account: 'main', ticker: 'ZZ' + i + '.PA', displayTicker: 'ZZ' + i + '.PA', isin, name: 'SOCIETE ' + i, currency: 'EUR', quantity: 0, type: 'stock', userArchived: true });
+      seed.transactions.push({ id: 'b' + i, holdingId: id, date: '2020-0' + i + '-10', type: 'buy', qty: 10, price: 5, fees: 0, currency: 'EUR', amountAcct: 50, acctCur: 'EUR', source: 'degiro' }); }
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.archive.every((a) => a.marketError), null, { timeout: 20000 });
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(500);
+    let tx = await bellOpen(p); ok(/7 positions probablement plus cotées/.test(tx), 'une seule notification pour 7 positions : ' + tx.slice(0, 200)); eq(await p.locator('#bellPanel [data-nt^="mkt:delist:"]').count(), 0, 'pas 7 notifications séparées'); await bellClose(p);
+    // PDF
+    await p.evaluate(() => { document.querySelector('#bellBtn').click(); }); const dlP = p.waitForEvent('download'); await p.click('[data-nt="mkt:bulk"] [data-nt-act=more0]'); const dl = await dlP; const buf = require('fs').readFileSync(await dl.path());
+    ok(buf.slice(0, 5).toString() === '%PDF-' && buf.toString('latin1').includes('SOCIETE 7') && buf.toString('latin1').includes('FR0000000007'), 'PDF généré avec les positions (nom, ISIN)'); ok(/positions-a-verifier-\d{4}-\d{2}-\d{2}\.pdf/.test(dl.suggestedFilename()), 'nom de fichier : ' + dl.suggestedFilename());
+    // import des résultats
+    const json = JSON.stringify({ radiations: [{ isin: 'FR0000000001', name: 'SOCIETE 1', status: 'radiee', delistedAt: '2023-05-02', source: 'https://example.org/a', note: 'liquidation' }, { isin: 'FR0000000002', status: 'toujours_cotee', symbol: 'AAPL', note: 'mauvais symbole' }, { isin: 'XX9999999999', name: 'Inconnue', status: 'radiee', delistedAt: '2023-01-01' }] });
+    await p.evaluate(() => { document.querySelector('#bellBtn').click(); }); const fcP = p.waitForEvent('filechooser'); await p.click('[data-nt="mkt:bulk"] [data-nt-act=more1]'); const fc = await fcP; await fc.setFiles({ name: 'radiations.json', mimeType: 'application/json', buffer: Buffer.from(json) });
+    await p.waitForSelector('#dlApply'); const prev = await p.locator('.modal').innerText(); ok(/SOCIETE 1/.test(prev) && /Toujours cotée/.test(prev) && /1 ligne\(s\) du fichier ne correspondent/.test(prev), 'aperçu : radiée, toujours cotée, ligne inconnue ignorée'); eq(await p.locator('[data-dl-on]:checked').count(), 1, 'seule la ligne « radiée » est cochée');
+    await p.check('#dlLiq'); await p.click('#dlApply'); await p.waitForTimeout(500);
+    const s = await storeOf(p); const a1 = s.archive.find((a) => a.id === 'z1'), a2 = s.archive.find((a) => a.id === 'z2');
+    ok(a1.listing === 'delisted' && a1.delistedAt === '2023-05-02' && a1.delistedSource === 'https://example.org/a', 'SOCIETE 1 : plus cotée, date de radiation et source enregistrées'); ok(a2.listing !== 'delisted', 'SOCIETE 2 (toujours cotée) non modifiée');
+    const sell = s.transactions.find((x) => x.holdingId === 'z1' && x.type === 'sell'); ok(sell && sell.amountAcct === 0 && sell.date === '2023-05-02', 'liquidation à 0 enregistrée à la date de radiation (moins-value = coût)'); eq(s.transactions.filter((x) => x.holdingId === 'z1' && x.type === 'buy').length, 1, 'achat conservé');
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
