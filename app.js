@@ -188,13 +188,13 @@ async function refreshMarket(list, o) {
   }
   const nowISO = todayISO();
   const res = await Market.refreshMany(market, list, nowISO, {
-    cancelled: () => refreshCancel,
+    cancelled: () => refreshCancel, quick: !!o.quick,
     progress: (i, n, h) => { if (modal) { const m = $('#rfMsg'), b = $('#rfBar'); if (m) m.textContent = i + ' / ' + n + ' — ' + (h.displayTicker || h.ticker); if (b) b.style.width = (100 * i / n) + '%'; } }
   });
   // positions entièrement vendues : leurs cours passés servent à reconstituer la courbe de valeur
   let ares = null;
   if (!refreshCancel && !res.stopped && (list === state.holdings || list.length === visibleHoldings().length)) {
-    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && (!x.hist || x.marketAt !== nowISO));
+    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && (o.quick ? !x.hist : (!x.hist || x.marketAt !== nowISO)));      // légère : positions clôturées seulement si leur historique manque
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;
@@ -225,7 +225,7 @@ function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Dat
 let lastAutoTry = 0;
 function autoRefreshIfStale() {
   if (!state.settings.autoRefresh || !state.settings.relayUrl || !state.holdings.length || refreshing || !navigator.onLine || !staleMarket() || Date.now() - lastAutoTry < 10 * 60 * 1000) return;
-  lastAutoTry = Date.now(); refreshMarket(null, { silent: true });
+  lastAutoTry = Date.now(); refreshMarket(null, { silent: true, quick: true });
 }
 /* Délais « détachement → paiement » appris des versements réels (sert au calendrier) : à rappeler après un import, une saisie ou une actualisation. */
 function refreshPayLags() { try { if (Dividends.learnPayLags(state, Market, todayISO())) saveState(); } catch (e) { console.error(e); } }

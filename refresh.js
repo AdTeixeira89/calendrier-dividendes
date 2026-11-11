@@ -4,7 +4,7 @@
    2. cours / dividendes / historique Yahoo des actifs affichés, 3. taux de change, 4. actualités, 5. synchronisation du compte.
    APP_BUILD doit rester égal au numéro de version du cache du service worker (sw.js : dividendes-shell-vNN) : un test le vérifie.
    ================================================================== */
-const APP_BUILD = 45;
+const APP_BUILD = 46;
 let pullBusy = false, updateAvail = false;
 
 /* Version publiée (sw.js lu sans cache). null = injoignable / hors-ligne. */
@@ -36,7 +36,8 @@ function markUpdate(v) {
   updateAvail = !!v; Notify.set('app', v ? [{ id: 'app:update', level: 'info', title: 'Mise à jour disponible', body: 'Une nouvelle version de l\'application est publiée.', accept: { label: 'Mettre à jour', run: () => runFullRefresh('button'), ack: false } }] : []); $$('[data-rf-btn]').forEach((b) => { b.classList.toggle('has-update', updateAvail); b.title = updateAvail ? 'Mise à jour disponible : toucher pour mettre à jour et actualiser' : 'Actualiser (cours, taux, actualités) et rechercher une mise à jour'; });
 }
 
-/* Actualisation complète. source : 'pull' | 'button'. */
+/* Actualisation LÉGÈRE : mise à jour de l'application si elle existe, puis cours, variation du jour et nouveaux dividendes (pas de revue complète des portefeuilles ;
+   l'actualisation complète est dans Paramètres → « Actualiser tous les actifs »). source : 'pull' | 'button'. */
 async function runFullRefresh(source) {
   if (pullBusy) return; pullBusy = true; rfButtons(true);
   const label = (t) => { if (source === 'pull') ptrShow(t, { run: true, y: 14 }); };
@@ -48,7 +49,7 @@ async function runFullRefresh(source) {
     const parts = []; let err = null;
     if (state.settings.relayUrl && state.holdings.length) {
       label('Actualisation des cours…');
-      try { const res = await refreshMarket(visibleHoldings(), { silent: true }); if (res) { parts.push(res.ok + ' actif(s) actualisé(s)'); if (res.fail && !res.ok) err = (res.errors && res.errors[0] && res.errors[0].message) || 'échec de l\'actualisation'; } }
+      try { const res = await refreshMarket(visibleHoldings(), { silent: true, quick: true }); if (res) { parts.push('cours et dividendes à jour (' + res.ok + ' actif(s)' + (res.skipped ? ', ' + res.skipped + ' déjà à jour' : '') + ')'); if (res.fail && !res.ok) err = (res.errors && res.errors[0] && res.errors[0].message) || 'échec de l\'actualisation'; } }
       catch (e) { err = e.message; }
     } else if (!state.settings.relayUrl) parts.push('relais de données non configuré (Paramètres)');
     label('Taux de change et actualités…');

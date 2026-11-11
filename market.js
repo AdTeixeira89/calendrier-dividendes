@@ -161,7 +161,7 @@
     async function fetchAsset(input, nameHint, opts) {
       opts = opts || {};
       const symbol = await resolveSymbol(input, nameHint);
-      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=10y&interval=1d');
+      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=' + (opts.range === '5y' ? '5y' : '10y') + '&interval=1d');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) {
         const desc = data.chart && data.chart.error && data.chart.error.description;
@@ -332,28 +332,69 @@
     return yy + '-' + String(mm).padStart(2, '0') + '-' + d;
   }
 
-  /* Actualise plusieurs actifs, un par un, avec une pause ; s'arrête sur quota/relais refusé. */
+  /* ---------- actualisation LÉGÈRE (bouton, tirer pour actualiser, actualisation automatique) ----------
+     Met à jour seulement les cours, la variation du jour et les nouveaux dividendes des actifs détenus : une requête de 5 ans par actif,
+     fusionnée avec l'historique déjà enregistré (jamais remplacé). Pas de recherche de secteur, pas de positions clôturées.
+     Une actualisation COMPLÈTE (10 ans, secteur…) reste faite pour un actif neuf, sans historique, après un fractionnement, ou tous les 14 jours. */
+  const QUICK_MIN_MS = 5 * 60 * 1000, FULL_EVERY_MS = 14 * 86400000;
+  const padM = (n) => String(n).padStart(2, '0');
+  function mergeHist(old, nw) {
+    if (!nw) return old || null;
+    if (!old || !old.c || !old.from) return nw;
+    const by = {};
+    const put = (s) => { if (!s || !s.c || !s.from) return; let y = Number(s.from.slice(0, 4)), mo = Number(s.from.slice(5, 7)); s.c.forEach((v) => { if (v !== null && v !== undefined) by[y + '-' + padM(mo)] = v; mo++; if (mo > 12) { mo = 1; y++; } }); };
+    put(old); put(nw);                                              // les mois récents (nouveaux) remplacent les anciens
+    const keys = Object.keys(by).sort(); if (!keys.length) return old;
+    const out = [], y1 = Number(keys[keys.length - 1].slice(0, 4)), m1 = Number(keys[keys.length - 1].slice(5));
+    for (let y = Number(keys[0].slice(0, 4)), mo = Number(keys[0].slice(5)); ; mo++) { if (mo > 12) { mo = 1; y++; } const k = y + '-' + padM(mo); out.push(by[k] === undefined ? null : by[k]); if (y === y1 && mo === m1) break; }
+    const res = { from: keys[0], c: out }, d = nw.d || old.d; if (d) res.d = d;
+    return res;
+  }
+  /* Fractionnement apparu depuis la dernière fois : les anciens cours sont alors tous ajustés, la fusion serait fausse → actualisation complète de cet actif. */
+  function splitsChanged(h, a) {
+    const from = a.hist && a.hist.from ? a.hist.from + '-01' : '';
+    const sig = (l) => JSON.stringify((l || []).filter((s) => s.date >= from).map((s) => s.date + ':' + s.ratio));
+    return sig(h.splits) !== sig(a.splits);
+  }
+  const needsFull = (h, now) => !h.hist || !h.hist.c || !h.hist.c.length || (h.fullAt && now - h.fullAt > FULL_EVERY_MS);
+
+  /* Actualise plusieurs actifs, un par un, avec une pause ; s'arrête sur quota/relais refusé.
+     hooks.quick : actualisation légère (voir ci-dessus). */
   async function refreshMany(client, holdings, nowISO, hooks) {
     hooks = hooks || {};
-    const res = { ok: 0, fail: 0, errors: [], stopped: false };
+    const res = { ok: 0, fail: 0, skipped: 0, errors: [], stopped: false }, now = Date.now();
     for (let i = 0; i < holdings.length; i++) {
       if (hooks.cancelled && hooks.cancelled()) { res.stopped = true; break; }
-      const h = holdings[i];
+      const h = holdings[i]; let pause = true;
       try {
-        const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
-        applyToHolding(h, a, nowISO);
-        res.ok++;
+        if (hooks.quick && !needsFull(h, now)) {
+          if (h.quickAt && now - h.quickAt < QUICK_MIN_MS) { res.skipped++; pause = false; }      // tout juste actualisé : rien à refaire
+          else {
+            const a = await client.fetchAsset(h.ticker, h.name, { needSector: false, range: '5y' });
+            if (splitsChanged(h, a)) { const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked }); applyToHolding(h, f, nowISO); h.fullAt = now; }
+            else {
+              const from = a.hist && a.hist.from ? a.hist.from + '-01' : '';
+              a.hist = mergeHist(h.hist, a.hist); a.splits = (h.splits || []).filter((s) => s.date < from).concat(a.splits || []);
+              applyToHolding(h, a, nowISO); if (!h.fullAt) h.fullAt = now;
+            }
+            h.quickAt = now; h.marketError = null; res.ok++;
+          }
+        } else {
+          const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
+          applyToHolding(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null;
+          res.ok++;
+        }
       } catch (e) {
-        res.fail++; res.errors.push({ ticker: h.displayTicker || h.ticker, message: e.message });
+        res.fail++; res.errors.push({ ticker: h.displayTicker || h.ticker, message: e.message }); h.marketError = e.message;
         if (e.rate || e.fatal) { res.stopped = true; if (hooks.progress) hooks.progress(i + 1, holdings.length, h); break; }
       }
       if (hooks.progress) hooks.progress(i + 1, holdings.length, h);
-      if (opts_delay > 0) await new Promise((r) => setTimeout(r, opts_delay));
+      if (pause && opts_delay > 0) await new Promise((r) => setTimeout(r, opts_delay));
     }
     return res;
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

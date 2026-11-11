@@ -19,12 +19,12 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
    const c=M.makeClient({getRelay:()=>'https://r.dev',fetch:mkFetch({'/search':{body:{quotes:[{symbol:'AI.PA',quoteType:'EQUITY'}]}},'/chart':{body:chart('GBp',[['2025-05-01',50],['2026-05-01',60]])}})});
    const a=await c.fetchAsset('FR0000120073','AIR LIQUIDE'); assert.strictEqual(a.symbol,'AI.PA'); assert.strictEqual(a.currency,'GBP'); assert.strictEqual(a.dividends[1].amount,0.6); assert.strictEqual(a.resolved,true);
  });
- await t('applyToHolding: payer gets pattern from ex-date, manual fields untouched', ()=>{
+ await t('applyToHolding: payer gets pattern (pay-date model) from ex-date + lag, manual fields untouched', ()=>{
    const h={id:'1',ticker:'FR0000120073',displayTicker:'FR0000120073',name:'AIR LIQUIDE',type:'stock',quantity:7,avgCost:100,dividend:{payDay:12,taxRate:30}};
    const a={symbol:'AI.PA',resolved:true,name:'L\'Air Liquide',currency:'EUR',instrumentType:'EQUITY',dividends:[{exDate:'2024-05-14',amount:3},{exDate:'2025-05-12',amount:3.2},{exDate:'2026-05-11',amount:3.4}]};
    M.applyToHolding(h,a,'2026-10-12');
    assert.strictEqual(h.ticker,'AI.PA'); assert.strictEqual(h.isin,'FR0000120073'); assert.strictEqual(h.name,'AIR LIQUIDE');
-   assert.strictEqual(h.dividend.lastAmount,3.4); assert.strictEqual(h.dividend.anchorMonth,5); assert.strictEqual(h.dividend.frequency,'annual'); assert.strictEqual(h.dividend.dateKind,'ex');
+   assert.strictEqual(h.dividend.lastAmount,3.4); assert.strictEqual(h.dividend.anchorMonth,5); assert.strictEqual(h.dividend.frequency,'annual'); assert.strictEqual(h.dividend.dateKind,'pay');
    assert.strictEqual(h.quantity,7); assert.strictEqual(h.avgCost,100); assert.strictEqual(h.dividend.payDay,12); assert.strictEqual(h.dividend.taxRate,30);
  });
  await t('no recent dividend -> "none", never invented; ETF becomes accumulating', ()=>{
@@ -99,3 +99,21 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   console.log('ok   historique complet des dividendes : pence convertis, triés, montants nuls écartés');
 })();
 
+(async () => {
+  M.setDelay(0);
+  // fusion de l'historique : les mois récents remplacent, les anciens sont conservés, le quotidien vient du nouveau
+  const mg = M.mergeHist({ from: '2020-01', c: [1, 2, null, 4, 5], d: { t: [20200501], c: [5] } }, { from: '2020-04', c: [40, 50, 60], d: { t: [20200601], c: [6] } });
+  assert.deepStrictEqual(mg, { from: '2020-01', c: [1, 2, null, 40, 50, 60], d: { t: [20200601], c: [6] } });
+  assert.deepStrictEqual(M.mergeHist({ from: '2020-01', c: [1, 2], d: { t: [1], c: [1] } }, { from: '2020-02', c: [9] }).d, { t: [1], c: [1] }, 'ancien relais : quotidien conservé');
+  assert.strictEqual(M.splitsChanged({ splits: [{ date: '2019-01-01', ratio: 2 }] }, { hist: { from: '2021-01' }, splits: [] }), false, 'split antérieur à la fenêtre ignoré');
+  assert.strictEqual(M.splitsChanged({ splits: [] }, { hist: { from: '2021-01' }, splits: [{ date: '2025-05-05', ratio: 4 }] }), true, 'nouveau split détecté');
+  // actualisation légère : une requête de 5 ans par actif, historique fusionné, pas de recherche de secteur ; actif neuf / ancien = complète
+  const calls = [];
+  const client = { fetchAsset: async (t, n, o) => { calls.push([t, o.range || '10y', !!o.needSector]); return { symbol: t, resolved: false, name: t, currency: 'EUR', price: 11, priceAt: '2026-11-11T10:00:00Z', hist: { from: '2026-09', c: [10, 11] }, splits: [], sector: null, dividends: [{ exDate: '2026-10-01', amount: 1 }], prevClose: 10.5, prevCloseAt: '2026-11-10' }; } };
+  const now = Date.now(), H = (o) => Object.assign({ id: 'x', ticker: 'T', name: 'T', dividend: {}, hist: { from: '2026-07', c: [8, 9, 10, 11] }, fullAt: now - 86400000, splits: [] }, o);
+  const a = H({ ticker: 'A' }), b = H({ ticker: 'B', hist: null }), c = H({ ticker: 'C', fullAt: now - 20 * 86400000 }), d = H({ ticker: 'D', quickAt: now - 60000 });
+  const r = await M.refreshMany(client, [a, b, c, d], '2026-11-11', { quick: true });
+  assert.deepStrictEqual(calls, [['A', '5y', false], ['B', '10y', true], ['C', '10y', true]], 'A légère ; B (sans historique) et C (complète il y a 20 j) complètes ; D déjà à jour : aucune requête');
+  assert.deepStrictEqual([r.ok, r.skipped, r.fail], [3, 1, 0]); assert.deepStrictEqual(a.hist.c, [8, 9, 10, 11], 'historique ancien conservé, mois récents mis à jour'); assert.strictEqual(a.price, 11); assert.ok(a.quickAt >= now);
+  console.log('ok   actualisation légère : une requête de 5 ans par actif, historique fusionné, complète seulement si nécessaire');
+})();
