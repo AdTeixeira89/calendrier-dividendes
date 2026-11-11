@@ -218,7 +218,7 @@ function updateMarketNotices(res) {
   const susp = live.filter((h) => h.listingSuspect);
   if (susp.length > 5) {
     out.push({ id: 'mkt:bulk', level: 'warn', title: susp.length + ' positions probablement plus cotées en bourse', body: 'Yahoo Finance ne trouve plus ces titres (radiation, liquidation, rachat…). Vous pouvez : <b>exporter la liste en PDF</b> pour la faire vérifier (dates de radiation), puis <b>importer le fichier de résultats</b> ; ou tout marquer « plus cotées » d\'un coup. Rien n\'est supprimé : achats, ventes et dividendes restent enregistrés.',
-      accept: { label: 'Ouvrir la liste…', run: () => openFailingHoldings(), ack: false }, more: [{ label: 'Exporter la liste (PDF)', run: () => exportDelistPdf() }, { label: 'Importer les dates de radiation…', run: () => importDelistFile() }, { label: 'Tout marquer plus cotées…', run: () => markAllDelisted() }] });
+      accept: { label: 'Ouvrir la liste…', run: () => openFailingHoldings(), ack: false }, more: [{ label: 'Exporter la liste (PDF)', run: () => exportDelistPdf() }, { label: 'Importer les dates de radiation…', run: () => importDelistFile() }, { label: 'Copier la liste (texte)', run: () => copyDelistText() }, { label: 'Tout marquer plus cotées…', run: () => markAllDelisted() }] });
   }
   (susp.length > 5 ? [] : susp).forEach((h) => {
     const s = h.listingSuspect, days = s.since ? Math.round((Date.now() - Date.parse(s.since)) / 86400000) : null;

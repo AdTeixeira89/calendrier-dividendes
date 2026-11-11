@@ -803,8 +803,8 @@ function pendingRows() {
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 /* Remet un fichier à l'utilisateur : feuille de partage du téléphone, sinon téléchargement. */
-async function deliverFile(file, title) {
-  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title }); return; } }
+async function deliverFile(file, title, text) {
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share(text ? { files: [file], title, text } : { files: [file], title }); return; } }
   catch (e) { if (e && e.name === 'AbortError') return; }
   const url = URL.createObjectURL(file), a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -834,7 +834,16 @@ function delistReviewLines(rows) {
 async function exportDelistPdf() {
   const rows = pendingRows(); if (!rows.length) { toast('Aucune position à vérifier.'); return; }
   const bytes = Pdf.toBytes(Pdf.build(delistReviewLines(rows))), file = new File([bytes], 'positions-a-verifier-' + todayISO() + '.pdf', { type: 'application/pdf' });
-  await deliverFile(file, 'Positions à vérifier (StockPilot)'); toast('PDF de ' + rows.length + ' position(s) prêt.');
+  await deliverFile(file, 'Positions à vérifier (StockPilot)', delistPlainText(rows)); toast('PDF de ' + rows.length + ' position(s) prêt.');
+}
+const delistPlainText = (rows) => delistReviewLines(rows).map((x) => (typeof x === 'string' ? x : x.t)).join('\n');
+/* Copie la même liste en texte (à coller dans une conversation) : utile quand le partage du PDF n'est pas accepté par l'autre application. */
+async function copyDelistText() {
+  const rows = pendingRows(); if (!rows.length) { toast('Aucune position à vérifier.'); return; }
+  const txt = delistPlainText(rows);
+  try { await navigator.clipboard.writeText(txt); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (er) { /* ignoré */ } ta.remove(); }
+  toast('Liste copiée (' + rows.length + ' position(s)) : collez-la dans la conversation.', { ms: 6000 });
 }
 /* Applique « plus cotée » à une position (détenue ou clôturée) ; la date de radiation reste vide si elle est inconnue. */
 function markDelisted(inst, date, source) {
