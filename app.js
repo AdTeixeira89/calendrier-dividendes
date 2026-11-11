@@ -101,14 +101,26 @@ function snapshotForWorker() {
    DEVISES (taux BCE via Frankfurter, sans clé, en cache 1 jour)
    --------------------------------------------------------------- */
 let fx = { rates: null, date: null };
+let fxPrev = { rates: null, date: null };          // taux de la séance précédente (effet de change de la variation journalière)
+const fxPrevRate = (cur) => { if (!cur || cur === 'EUR') return 1; return (fxPrev.rates || {})[cur] || null; };
+async function ensureFxPrev() {
+  try {
+    if (!fx.date) return;
+    const raw = localStorage.getItem('fxPrev_v1'); if (raw) { const c = JSON.parse(raw); if (c.for === fx.date && c.rates) { fxPrev = { rates: c.rates, date: c.date }; return; } }
+    const d = new Date(fx.date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1);
+    const r = await fetch('https://api.frankfurter.dev/v1/' + d.toISOString().slice(0, 10) + '?base=EUR'); if (!r.ok) return;
+    const j = await r.json(); if (!j || !j.rates || !(j.date < fx.date)) return;
+    fxPrev = { rates: Object.assign({ EUR: 1 }, j.rates), date: j.date }; localStorage.setItem('fxPrev_v1', JSON.stringify({ for: fx.date, date: j.date, rates: fxPrev.rates })); renderPageSoft();
+  } catch (e) { /* sans taux de la veille : variation calculée au taux actuel */ }
+}
 async function ensureFx() {
   try {
     const raw = localStorage.getItem('fxRatesCache_v2');
-    if (raw) { const c = JSON.parse(raw); if (c.day === todayISO()) { fx = { rates: c.rates, date: c.date }; return; } if (c.rates) fx = { rates: c.rates, date: c.date }; }
+    if (raw) { const c = JSON.parse(raw); if (c.day === todayISO()) { fx = { rates: c.rates, date: c.date }; ensureFxPrev(); return; } if (c.rates) fx = { rates: c.rates, date: c.date }; }
     const r = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR');
     if (!r.ok) return;
     const d = await r.json();
-    if (d && d.rates) { fx = { rates: Object.assign({ EUR: 1 }, d.rates), date: d.date }; localStorage.setItem('fxRatesCache_v2', JSON.stringify({ day: todayISO(), date: d.date, rates: fx.rates })); renderPageSoft(); }
+    if (d && d.rates) { fx = { rates: Object.assign({ EUR: 1 }, d.rates), date: d.date }; localStorage.setItem('fxRatesCache_v2', JSON.stringify({ day: todayISO(), date: d.date, rates: fx.rates })); renderPageSoft(); ensureFxPrev(); }
   } catch (e) { /* les totaux restent affichés dans leur devise d'origine si possible */ }
 }
 /* Taux de change HISTORIQUES (fin de chaque mois), pour valoriser le passé au bon taux. Une seule requête

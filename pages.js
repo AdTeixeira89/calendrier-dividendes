@@ -57,6 +57,7 @@ function wireDo(host) {
     else if (a === 'check-history') openDiagnostic();
     else if (a === 'export-csv') openCsvExport();
     else if (a === 'refresh') refreshMarket(visibleHoldings());
+    else if (a === 'daily-detail') openDailyDetail();
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
     else if (a === 'div-history') runDividendHistory();
@@ -529,4 +530,22 @@ function renderStats(host) {
   wireMode(host); wireDo(host);
   $$('[data-co]', host).forEach((tr) => tr.onclick = () => openCompanyDividends(tr.dataset.co));
   $$('[data-yr]', host).forEach((b) => b.onclick = () => { view.stats.year += Number(b.dataset.yr); renderStats(host); });
+}
+
+
+/* ---------- plus-value journalière : taux et détail ---------- */
+function dailyFxOpts() { return { rate: fxNow, ratePrev: fxPrevRate, base: baseCur() }; }
+/* Détail position par position (comparable ligne à ligne avec le relevé du courtier) ; copiable en texte pour l'envoyer. */
+function openDailyDetail() {
+  const d = Engine.dailyChange(state, convert, visibleIds(), todayISO(), dailyFxOpts()), rows = d.rows.slice().sort((x, y) => Math.abs(y.delta || 0) - Math.abs(x.delta || 0)), cur = baseCur();
+  const fmt = (v, c) => fmtMoney(v, c, { d: 2 }), sg = (v) => (v >= 0 ? '+' : '') + fmtMoney(v, cur, { d: 2 });
+  const tr = rows.map((r) => '<tr><td><b>' + esc(r.name) + '</b>' + (r.why ? '<div class="dg-note warn-t">' + esc(r.why) + '</div>' : '') + (r.priceAt ? '<div class="dg-note">cours du ' + esc(fmtDate(r.priceAt.slice(0, 10), { day: 'numeric', month: 'short' })) + '</div>' : '') + '</td><td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + fmt(r.price, r.cur) + '</td><td class="r">' + (r.prevClose ? fmt(r.prevClose, r.cur) + '<div class="dg-note">' + esc(fmtDate(r.prevCloseAt, { day: 'numeric', month: 'short' })) + '</div>' : '—') + '</td><td class="r">' + (r.delta === null ? '—' : '<b class="' + (r.delta >= 0 ? 'pos' : 'neg') + '">' + sg(r.delta) + '</b>' + (r.pct != null ? '<div class="dg-note">' + fmtPct(r.pct, 2, true) + '</div>' : '') + (r.bought ? '<div class="dg-note">dont achat du jour ' + sg(r.bought) + '</div>' : '') + (r.fx ? '<div class="dg-note">change inclus</div>' : '')) + '</td></tr>').join('');
+  const m = openModal('<h2>Plus-value journalière : détail</h2><div class="sub">Pour chaque position : quantité détenue à la clôture précédente × (cours actuel − clôture précédente), converti en ' + esc(cur) + ' avec l\'effet de change du jour lorsque les taux de la veille sont connus, plus le gain des achats faits depuis. Total : <b class="' + (d.amount >= 0 ? 'pos' : 'neg') + '">' + sg(d.amount) + '</b> sur ' + d.count + ' / ' + d.total + ' position(s)' + (d.missing.length ? ' (' + d.missing.length + ' sans clôture précédente ou taux)' : '') + '.</div>' +
+    '<div class="tbl-wrap" style="max-height:55vh"><table class="tbl"><thead><tr><th>Actif</th><th class="r">Qté</th><th class="r">Cours</th><th class="r">Clôture préc.</th><th class="r">Écart</th></tr></thead><tbody>' + tr + '</tbody></table></div>' +
+    '<div class="modal-actions"><button class="btn" type="button" id="ddCopy">Copier le détail</button><button class="btn primary" type="button" data-close>Fermer</button></div>', { wide: true });
+  $('#ddCopy', m).onclick = async () => {
+    const txt = 'Plus-value journalière ' + sg(d.amount) + ' (' + d.count + '/' + d.total + ' positions)\nActif\tQté\tCours\tClôture préc.\tDate\tÉcart (' + cur + ')\tNote\n' + rows.map((r) => [r.name, r.qty, r.price, r.prevClose || '', r.prevCloseAt || '', r.delta === null ? '' : Math.round(r.delta * 100) / 100, r.why || (r.fx ? 'change inclus' : '')].join('\t')).join('\n');
+    try { await navigator.clipboard.writeText(txt); } catch (er) { const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e2) { /* ignoré */ } ta.remove(); }
+    toast('Détail copié.');
+  };
 }

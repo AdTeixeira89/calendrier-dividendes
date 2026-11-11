@@ -248,6 +248,19 @@ console.log(n + ' tests passed');
     const d = E.dailyChange({ holdings: [a, b, c], transactions: tx }, (x) => x, null, '2026-10-14');
     assert.strictEqual(d.amount, 20); assert.strictEqual(d.count, 2); assert.deepStrictEqual(d.missing, ['T']); assert.ok(Math.abs(d.pct - 20 / 1180) < 1e-12, 'achat du jour de b : quantité à la clôture précédente = 0');
   });
+  t('variation journalière : effet de change du jour inclus (taux de la veille), gain des achats du jour depuis leur prix d\'achat, détail par position', () => {
+    const usd = hh({ id: 'u', currency: 'USD', quantity: 10, price: 110, prevClose: 100, prevCloseAt: '2026-10-13' });
+    const opts = { rate: (c) => (c === 'USD' ? 1.10 : 1), ratePrev: (c) => (c === 'USD' ? 1.0 : 1), base: 'EUR' };
+    const d = E.dailyChange({ holdings: [usd], transactions: [] }, (x, c) => (c === 'USD' ? x / 1.10 : x), null, '2026-10-14', opts);
+    assert.ok(Math.abs(d.amount) < 1e-9, 'hausse de 10 % en dollars, dollar −10 % : 0 € en euros (' + d.amount + ')'); assert.strictEqual(d.rows[0].fx, true);
+    const d2 = E.dailyChange({ holdings: [usd], transactions: [] }, (x, c) => (c === 'USD' ? x / 1.10 : x), null, '2026-10-14');
+    assert.ok(Math.abs(d2.amount - 100 / 1.10) < 1e-9, 'sans taux de la veille : repli sur le taux actuel');
+    const h = hh({ id: 'b', quantity: 10, price: 110, prevClose: 100, prevCloseAt: '2026-10-13' });
+    const tx = [{ id: '1', holdingId: 'b', date: '2020-01-01', type: 'buy', qty: 5, price: 50, currency: 'EUR' }, { id: '2', holdingId: 'b', date: '2026-10-14', type: 'buy', qty: 5, price: 105, currency: 'EUR' }];
+    const d3 = E.dailyChange({ holdings: [h], transactions: tx }, (x) => x, null, '2026-10-14');
+    assert.strictEqual(d3.amount, 5 * 10 + 5 * 5, 'quantité de la veille × écart + achat du jour × (cours − prix d\'achat)'); assert.strictEqual(d3.rows[0].bought, 25);
+    const d4 = E.dailyChange({ holdings: [hh({ id: 'z', price: 10, prevClose: null })], transactions: [] }, (x) => x, null, '2026-10-14'); assert.deepStrictEqual([d4.count, d4.rows[0].why], [0, 'clôture précédente absente']);
+  });
   t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
     const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
     const ref = new Date(2026, 0, 1);

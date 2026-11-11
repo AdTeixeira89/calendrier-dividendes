@@ -1118,7 +1118,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const pg = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
     ok(!/Bruts|Nets\b|Par secteur|Par pays|vs PRU|Rendement sur coût|Actifs\b|Prochains dividendes/.test(pg), 'anciennes cases supprimées : ' + pg.slice(0, 600));
     ok(/1\s?450\s?€/.test(pg), 'valeur totale = 10 × 120 + 5 × 50 = 1 450 €'); ok(/PLUS-VALUE TOTALE \| \+200\s?€/i.test(pg), 'plus-value totale = 1 450 − (1 000 + 250) = +200 € : ' + pg.slice(0, 300));
-    ok(/PLUS-VALUE JOURNALIÈRE \| \+20\s?€/i.test(pg) && /\+1,69\s?%/.test(pg), 'plus-value journalière = 10 × (120 − 118) = +20 € : l\'achat du jour (Bêta) ne compte pas : ' + pg.slice(0, 500));
+    ok(/PLUS-VALUE JOURNALIÈRE( ›)? \| \+20\s?€/i.test(pg) && /\+1,69\s?%/.test(pg), 'plus-value journalière = 10 × (120 − 118) = +20 € : l\'achat du jour (Bêta) ne compte pas : ' + pg.slice(0, 500));
     ok(!(await p.locator('.xirr-chip').count()) && !/Rendement annuel moyen|annualisé/i.test(pg), 'le taux de rendement annuel n\'est plus affiché');
     const geo = await p.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), hero = cs.find((c) => c.classList.contains('hero')), div = cs.find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')), perf = cs.find((c) => /^PERFORMANCES/.test((c.querySelector('h3') || {}).textContent || '')); const r = (e) => e.getBoundingClientRect(); return { hero: r(hero), div: r(div), perf: r(perf) }; });
     ok(geo.hero.right <= geo.div.left + 1 && Math.abs(geo.hero.top - geo.div.top) < 4, 'ordinateur : valeur et dividendes côte à côte : ' + JSON.stringify([geo.hero.left, geo.hero.right, geo.div.left, geo.hero.top, geo.div.top]));
@@ -1128,7 +1128,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const seed2 = SEED(0); seed2.holdings = [H(0, { name: 'Alpha', quantity: 10, avgCost: 100, price: 120, priceAt: iso(T), hist: { from: ymAgo(6), c: [100, 102, 104, 108, 112, 116, 120] } })];
     seed2.transactions = [{ id: 't1', holdingId: 'h0', date: ymAgo(5) + '-15', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }];
     const q = await device({ guest: true, seed: seed2 }); await q.open(); await q.waitForSelector('.hero'); ok(!(await q.locator('.xirr-chip').count()), 'moins d\'un an : aucun indicateur annuel affiché');
-    ok(/PLUS-VALUE JOURNALIÈRE \| —/i.test((await q.locator('#page').innerText()).replace(/\n/g, ' | ')), 'sans clôture précédente : « — » (pas de chiffre inventé)');
+    ok(/PLUS-VALUE JOURNALIÈRE( ›)? \| —/i.test((await q.locator('#page').innerText()).replace(/\n/g, ' | ')), 'sans clôture précédente : « — » (pas de chiffre inventé)');
     // téléphone : pas de débordement
     const m = await device({ guest: true, seed, mobile: true, viewport: { width: 360, height: 800 } }); await m.open(); await m.waitForSelector('.hero');
     const o = await m.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth })); ok(o.sw <= o.iw + 1, 'mobile sans débordement : ' + JSON.stringify(o));
@@ -1487,6 +1487,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('[data-sg]:has-text("LHYFE.PA")'); await p.waitForFunction(() => document.querySelector('#hTicker').value === 'LHYFE.PA'); await p.waitForTimeout(400); await p.click('#hSave');
     await p.waitForFunction(() => { const h = state.holdings[0]; return h.ticker === 'LHYFE.PA' && h.price > 0 && !h.marketError; }, null, { timeout: 12000 }); await p.waitForTimeout(500);
     tx = await bellOpen(p); eq(await p.locator('#bellPanel [data-nt="market:fail"], #bellPanel [data-nt^="mkt:delist:"]').count(), 0, 'après correction : plus aucune notification d\'échec');
+  });
+  await test('plus-value journalière : détail position par position (ouvrable depuis la carte), total identique, effet de change annoncé, copie du détail', async () => {
+    const seed = SEED(0); const y = '2026-11-10';
+    seed.holdings = [{ id: 'a', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 90, price: 120, prevClose: 110, prevCloseAt: y, priceAt: '2026-11-11T10:00:00.000Z', account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } },
+      { id: 'b', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 50, price: 60, prevClose: null, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForSelector('[data-do="daily-detail"]');
+    ok(/plus-value journalière/i.test(await p.locator('[data-do="daily-detail"]').innerText()), 'carte cliquable');
+    await p.click('[data-do="daily-detail"]'); await p.waitForSelector('#ddCopy', { timeout: 5000 }).catch(async () => { throw new Error('modale absente : ' + JSON.stringify(p.errors || []) + ' ' + (await p.evaluate(() => { try { openDailyDetail(); return 'ok'; } catch (e) { return String(e.stack || e); } }))); }); const tx = await p.locator('.modal').innerText();
+    ok(/Alpha/.test(tx) && /\+100,00/.test(tx.replace(/\u202f|\u00a0/g, '')) && /Beta/.test(tx) && /clôture précédente absente/.test(tx), 'détail : Alpha +100 €, Beta signalée sans clôture précédente : ' + tx.replace(/\s+/g, ' ').slice(0, 300));
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

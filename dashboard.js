@@ -68,7 +68,7 @@ function renderHome(host) {
   const today = new Date(), mode = incomeMode(), ids = visibleIds(), y = today.getFullYear(), mask = !!state.settings.hideNumbers, todayS = todayISO();
   const nowYM = Engine.ymOf(today), cvAt = (a_, c_, y_) => (y_ === nowYM ? convert(a_, c_) : convertAt(a_, c_, y_));      // mois en cours : taux du jour (comme la valeur affichée en haut)
   const cache = {}, histFor = (m_) => cache[m_] || (cache[m_] = Engine.portfolioHistory(state, cvAt, { months: m_, today, ids }));
-  const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), daily = Engine.dailyChange(state, convert, ids, todayS);
+  const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), daily = Engine.dailyChange(state, convert, ids, todayS, dailyFxOpts());
   const hist = histFor(view.home.period), hs = visibleHoldings();
   const lbl = (dt, per) => fmtDate(dt, { day: 'numeric', month: 'short', year: per === 0 || per >= 12 ? '2-digit' : undefined });
   const dn = (iso_) => Math.round(Date.UTC(+iso_.slice(0, 4), +iso_.slice(5, 7) - 1, +iso_.slice(8, 10)) / 86400000), tLabel = (per) => (n_) => lbl(new Date(n_ * 86400000).toISOString().slice(0, 10), per);
@@ -103,7 +103,7 @@ function renderHome(host) {
   Notify.set('home', hn);
   const unitNote = un.count < pv.count ? un.count + ' / ' + pv.count + ' positions avec PRU' : un.count + ' position(s) avec PRU';
   const indGain = '<div class="ind"><span>Plus-value totale</span>' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + signed(un.gain) + '</b>') + '<small>' + sens(fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis') + ' · ' + unitNote + '</small>' : '<b>—</b><small>Nécessite un PRU fiable et le cours</small>') + '</div>';
-  const indDay = '<div class="ind"><span>Plus-value journalière</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + ' · séance du ' + esc(fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' })) + ' vs clôture précédente' + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + '</small>'
+  const indDay = '<div class="ind" data-do="daily-detail" role="button" tabindex="0" title="Voir le détail position par position" style="cursor:pointer"><span>Plus-value journalière ›</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + ' · séance du ' + esc(fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' })) + ' vs clôture précédente · effet de change ' + (daily.rows.some((r) => r.fx) ? 'inclus' : 'non inclus') + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + '</small>'
     : '<b>—</b><small>Données insuffisantes (clôture précédente indisponible : actualisez avec le relais à jour)</small>') + '</div>';
   /* --- Rentabilité réelle de la période choisie pour le portefeuille affiché : gain = marché + dividendes, apports neutralisés --- */
   const per = view.home.period, acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);

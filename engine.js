@@ -564,18 +564,34 @@
 
   /* ---------- variation journalière : mouvement de marché de la dernière séance sur les quantités détenues à la clôture précédente
      (un achat ou une vente du jour, un dépôt ou un retrait n'y comptent pas) ---------- */
-  function dailyChange(state, convert, ids, todayISO) {
-    let amount = 0, base = 0, cnt = 0, total = 0, asOf = null; const missing = [];
+  function dailyChange(state, convert, ids, todayISO, opts) {
+    /* opts (facultatif) : { rate(cur), ratePrev(cur) } = taux du jour et de la veille (unités de devise pour 1 €) : l'effet de change du jour est alors inclus
+       (comme chez un courtier : valeur en euros d'aujourd'hui − valeur en euros de la veille). Sans taux de la veille, repli sur le taux actuel. */
+    const o = opts || {}, fxOn = typeof o.rate === 'function' && typeof o.ratePrev === 'function', baseCode = o.base || 'EUR';
+    let amount = 0, base = 0, cnt = 0, total = 0, asOf = null; const missing = [], rows = [];
     (state.holdings || []).forEach((h) => {
       if (ids && !ids.has(h.id)) return;
       if (!(num(h.quantity) > 0) || !(h.price > 0)) return;
-      total++;
-      if (!(h.prevClose > 0) || !h.prevCloseAt) { missing.push(h.name || h.displayTicker || h.ticker); return; }
-      const q = quantityAt(state, h, h.prevCloseAt), a = convert(q * (h.price - h.prevClose), h.currency || 'EUR'), b = convert(q * h.prevClose, h.currency || 'EUR');
-      if (a === null || b === null) { missing.push(h.name || h.displayTicker || h.ticker); return; }
-      amount += a; base += b; cnt++; if (!asOf || h.prevCloseAt > asOf) asOf = h.prevCloseAt;
+      total++; const name = h.name || h.displayTicker || h.ticker, cur = h.currency || 'EUR';
+      if (!(h.prevClose > 0) || !h.prevCloseAt) { missing.push(name); rows.push({ id: h.id, name, cur, qty: num(h.quantity), price: h.price, prevClose: null, delta: null, why: 'clôture précédente absente' }); return; }
+      const txs = (state.transactions || []).filter((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell')), consistent = txs.length && Math.abs(txs.reduce((s, t) => s + (t.type === 'buy' ? 1 : -1) * num(t.qty), 0) - num(h.quantity)) <= 1e-6;
+      const q = quantityAt(state, h, h.prevCloseAt);
+      let nowB = null, prevB = null, fxUsed = false;
+      if (fxOn) {
+        const rc = cur === 'EUR' ? 1 : o.rate(cur), rcp = cur === 'EUR' ? 1 : o.ratePrev(cur), rb = baseCode === 'EUR' ? 1 : o.rate(baseCode), rbp = baseCode === 'EUR' ? 1 : o.ratePrev(baseCode);
+        if (rc && rcp && rb && rbp) { nowB = q * h.price / rc * rb; prevB = q * h.prevClose / rcp * rbp; fxUsed = cur !== baseCode; }
+      }
+      if (nowB === null) { nowB = convert(q * h.price, cur); prevB = convert(q * h.prevClose, cur); }
+      if (nowB === null || prevB === null) { missing.push(name); rows.push({ id: h.id, name, cur, qty: q, price: h.price, prevClose: h.prevClose, delta: null, why: 'taux de change indisponible' }); return; }
+      let a = nowB - prevB, bought = 0;
+      if (consistent) {            // achats faits depuis la clôture précédente : gain depuis leur prix d'achat (prix connu, même devise)
+        const gain = txs.filter((t) => t.type === 'buy' && t.date > h.prevCloseAt && num(t.price) > 0 && (t.currency || cur) === cur).reduce((s, t) => s + num(t.qty) * (h.price - num(t.price)), 0);
+        const g = gain ? convert(gain, cur) : 0; if (g !== null && g) { a += g; bought = g; }
+      }
+      amount += a; base += prevB; cnt++; if (!asOf || h.prevCloseAt > asOf) asOf = h.prevCloseAt;
+      rows.push({ id: h.id, name, cur, qty: q, price: h.price, prevClose: h.prevClose, prevCloseAt: h.prevCloseAt, priceAt: h.priceAt || null, delta: a, pct: prevB > 0 ? a / prevB : null, fx: fxUsed, bought });
     });
-    return { amount, pct: base > 0 ? amount / base : null, count: cnt, total, missing, prevDate: asOf };
+    return { amount, pct: base > 0 ? amount / base : null, count: cnt, total, missing, prevDate: asOf, rows };
   }
 
   /* ---------- rendement annualisé pondéré par les flux (TRI / XIRR) ----------
