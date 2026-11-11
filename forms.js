@@ -852,9 +852,19 @@ function markDelisted(inst, date, source) {
   if (held) { const dv = inst.dividend = inst.dividend || {}; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; }
 }
 const validISODate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && !isNaN(Date.parse(d)) && d <= todayISO();
-async function importDelistFile() {
-  const file = await pickFile('application/json,.json,text/plain,.txt'); if (!file) return;
-  let data; try { data = JSON.parse((await file.text()).replace(/^\uFEFF/, '').replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '')); } catch (e) { toast('Fichier illisible : ce n\'est pas un JSON valide.', { error: true }); return; }
+/* Fenêtre d'import : toujours visible immédiatement ; fichier (tous types acceptés, utile sur téléphone) OU contenu collé. */
+function importDelistFile() {
+  const m = openModal('<h2>Importer les dates de radiation</h2><div class="sub">Choisissez le fichier de résultats (<b>radiations.json</b>), ou collez son contenu ci-dessous. Vous verrez un aperçu avant que quoi que ce soit soit appliqué.</div>' +
+    '<div class="btn-row" style="margin:8px 0"><button class="btn primary" type="button" id="dlPick">' + icon('upload') + 'Choisir le fichier…</button><span class="hint" id="dlPickMsg"></span></div>' +
+    fld('… ou coller le contenu du fichier', '<textarea id="dlText" rows="6" placeholder="{ &quot;radiations&quot;: [ … ] }" style="width:100%;font-family:monospace;font-size:12px"></textarea>', '', 'dlText') +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="dlGo">Continuer avec le texte collé</button></div>');
+  $('#dlGo', m).onclick = () => { const t = $('#dlText', m).value.trim(); if (!t) { toast('Collez d\'abord le contenu du fichier.', { error: true }); return; } closeModal(); applyDelistText(t); };
+  const inp = document.createElement('input'); inp.type = 'file'; inp.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;width:1px;height:1px'; m.appendChild(inp);          // sans filtre de type : un .json enregistré depuis une conversation peut avoir un autre type
+  inp.onchange = async () => { const file = inp.files && inp.files[0]; if (!file) return; $('#dlPickMsg', m).textContent = 'Lecture de ' + file.name + '…'; let txt = ''; try { txt = await file.text(); } catch (e) { toast('Impossible de lire ce fichier : collez son contenu à la place.', { error: true }); return; } closeModal(); applyDelistText(txt); };
+  $('#dlPick', m).onclick = () => { inp.click(); };
+}
+async function applyDelistText(text) {
+  let data; try { data = JSON.parse(String(text).replace(/^\uFEFF/, '').replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); } catch (e) { toast('Fichier illisible : ce n\'est pas un JSON valide.', { error: true }); return; }
   const items = Array.isArray(data) ? data : (data && Array.isArray(data.radiations) ? data.radiations : null);
   if (!items) { toast('Format non reconnu : attendu { "radiations": [ … ] }.', { error: true }); return; }
   const insts = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');

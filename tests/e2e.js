@@ -1456,12 +1456,23 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(buf.slice(0, 5).toString() === '%PDF-' && buf.toString('latin1').includes('SOCIETE 7') && buf.toString('latin1').includes('FR0000000007'), 'PDF généré avec les positions (nom, ISIN)'); ok(/positions-a-verifier-\d{4}-\d{2}-\d{2}\.pdf/.test(dl.suggestedFilename()), 'nom de fichier : ' + dl.suggestedFilename());
     // import des résultats
     const json = JSON.stringify({ radiations: [{ isin: 'FR0000000001', name: 'SOCIETE 1', status: 'radiee', delistedAt: '2023-05-02', source: 'https://example.org/a', note: 'liquidation' }, { isin: 'FR0000000002', status: 'toujours_cotee', symbol: 'AAPL', note: 'mauvais symbole' }, { isin: 'XX9999999999', name: 'Inconnue', status: 'radiee', delistedAt: '2023-01-01' }] });
-    await p.evaluate(() => { document.querySelector('#bellBtn').click(); }); const fcP = p.waitForEvent('filechooser'); await p.click('[data-nt="mkt:bulk"] [data-nt-act=more1]'); const fc = await fcP; await fc.setFiles({ name: 'radiations.json', mimeType: 'application/json', buffer: Buffer.from(json) });
+    await p.evaluate(() => { document.querySelector('#bellBtn').click(); }); await p.click('[data-nt="mkt:bulk"] [data-nt-act=more1]'); await p.waitForSelector('#dlPick'); const fcP = p.waitForEvent('filechooser'); await p.click('#dlPick'); const fc = await fcP; await fc.setFiles({ name: 'radiations.json', mimeType: 'application/json', buffer: Buffer.from(json) });
     await p.waitForSelector('#dlApply'); const prev = await p.locator('.modal').innerText(); ok(/SOCIETE 1/.test(prev) && /Toujours cotée/.test(prev) && /1 ligne\(s\) du fichier ne correspondent/.test(prev), 'aperçu : radiée, toujours cotée, ligne inconnue ignorée'); eq(await p.locator('[data-dl-on]:checked').count(), 1, 'seule la ligne « radiée » est cochée');
     await p.check('#dlLiq'); await p.click('#dlApply'); await p.waitForTimeout(500);
     const s = await storeOf(p); const a1 = s.archive.find((a) => a.id === 'z1'), a2 = s.archive.find((a) => a.id === 'z2');
     ok(a1.listing === 'delisted' && a1.delistedAt === '2023-05-02' && a1.delistedSource === 'https://example.org/a', 'SOCIETE 1 : plus cotée, date de radiation et source enregistrées'); ok(a2.listing !== 'delisted', 'SOCIETE 2 (toujours cotée) non modifiée');
     const sell = s.transactions.find((x) => x.holdingId === 'z1' && x.type === 'sell'); ok(sell && sell.amountAcct === 0 && sell.date === '2023-05-02', 'liquidation à 0 enregistrée à la date de radiation (moins-value = coût)'); eq(s.transactions.filter((x) => x.holdingId === 'z1' && x.type === 'buy').length, 1, 'achat conservé');
+  });
+  await test('import des dates de radiation : fenêtre immédiate, contenu collé accepté, fichier réel de 27 lignes (aperçu 27, 18 cochées)', async () => {
+    const f = process.env.RADIATIONS_JSON || '/tmp/claude-0/-home-user-calendrier-dividendes/62b21f27-c08f-5efd-b075-fac5ce9ba1ba/scratchpad/radiations.json';
+    if (!require('fs').existsSync(f)) { console.log('     (fichier radiations.json absent : test ignoré)'); return; }
+    const txt = require('fs').readFileSync(f, 'utf8'), list = JSON.parse(txt).radiations;
+    const seed = SEED(0); seed.holdings = []; seed.archive = list.map((r, i) => ({ id: 'r' + i, account: 'main', ticker: r.isin, displayTicker: r.isin, isin: r.isin, name: r.name, currency: 'EUR', quantity: 0, type: 'stock', userArchived: true }));
+    const p = await device({ guest: true, seed, viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { importDelistFile(); }); await p.waitForSelector('#dlPick'); ok(await p.locator('#dlText').count() === 1, 'fenêtre d\'import affichée tout de suite, avec zone de collage');
+    await p.fill('#dlText', txt); await p.click('#dlGo'); await p.waitForSelector('#dlApply');
+    eq(await p.locator('[data-dl-on]').count(), 27, '27 lignes dans l\'aperçu'); eq(await p.locator('[data-dl-on]:checked').count(), 18, '18 lignes « radiée » cochées');
+    await p.click('#dlApply'); await p.waitForTimeout(500); const s = await storeOf(p); eq(s.archive.filter((a) => a.listing === 'delisted').length, 18, '18 positions marquées plus cotées'); eq(s.archive.find((a) => a.isin === 'US98986T1088').delistedAt, '2022-05-23', 'date de radiation de Zynga enregistrée');
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
