@@ -18,3 +18,8 @@ Le plan gratuit Cloudflare autorise 100 000 requêtes par jour.
 La version actuelle de `worker.js` accepte en plus deux paramètres facultatifs (`range`, `interval`) et renvoie aussi les **fractionnements d'actions**. L'application demande alors **10 ans de cours quotidiens**, ce qui permet les périodes 1 M / 3 M / 6 M de la courbe du portefeuille et la reconstitution depuis votre première opération.
 
 Pour en profiter : Cloudflare → votre worker → **Edit code** → remplacez le code par le nouveau `worker.js` → **Deploy**. Aucune autre action : sans cette mise à jour l'application continue de fonctionner (5 ans de cours mensuels), et le signale sous la courbe.
+
+
+## Mise à jour facultative (actualisations plus légères)
+
+La version actuelle de `worker.js` accepte aussi la période `6mo` (6 mois) pour la route `/chart`. L'application l'utilise pour actualiser les cours en ne téléchargeant que 6 mois de données par actif (au lieu de 5 ans). **Sans cette mise à jour du relais, tout continue de fonctionner** : l'application reçoit simplement plus de données qu'elle n'en a besoin. Pour la faire : coller le contenu de `worker.js` dans l'éditeur du Worker Cloudflare, puis « Déployer ».

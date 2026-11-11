@@ -194,7 +194,7 @@ async function refreshMarket(list, o) {
   // positions entièrement vendues : leurs cours passés servent à reconstituer la courbe de valeur
   let ares = null;
   if (!refreshCancel && !res.stopped && (list === state.holdings || list.length === visibleHoldings().length)) {
-    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && (o.quick ? !x.hist : (!x.hist || x.marketAt !== nowISO)));      // légère : positions clôturées seulement si leur historique manque
+    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && x.listing !== 'delisted' && (o.quick ? (!x.hist && !(x.listingSuspect && x.listingSuspect.at === nowISO)) : (!x.hist || x.marketAt !== nowISO)));      // légère : positions clôturées seulement si leur historique manque
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;
@@ -213,13 +213,13 @@ async function refreshMarket(list, o) {
 /* Notifications d'actualisation, recalculées depuis l'ÉTAT des actifs (une correction les fait donc disparaître) :
    une par société probablement plus cotée (avec l'option « Marquer comme plus cotée »), une pour les autres échecs. */
 function updateMarketNotices(res) {
-  const out = [], live = state.holdings.filter((h) => h.listing !== 'delisted');
+  const out = [], live = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');
   const nm = (h) => h.name || h.displayTicker || h.ticker;
   live.filter((h) => h.listingSuspect).forEach((h) => {
     const s = h.listingSuspect, days = s.since ? Math.round((Date.now() - Date.parse(s.since)) / 86400000) : null;
     const why = s.kind === 'stale' ? 'Dernière cotation le ' + esc(fmtDate(s.since)) + (days ? ' (il y a ' + days + ' jours)' : '') + ' : cotation arrêtée ou suspendue.' : esc(s.msg || 'Yahoo Finance ne connaît plus ce titre.');
     out.push({ id: 'mkt:delist:' + h.id, level: 'warn', title: nm(h) + ' — probablement plus cotée en bourse', body: why + ' Si la société a été radiée, liquidée ou rachetée, marquez-la « plus cotée » : l\'actualisation s\'arrête pour ce titre et l\'erreur ne revient plus. Si le symbole est simplement faux, corrigez-le.',
-      accept: { label: 'Marquer comme plus cotée', run: () => openDelistModal(h.id), ack: false }, more: [{ label: 'Corriger le symbole / l\'ISIN…', run: () => openHoldingModal(h.id) }], edit: { label: 'Ouvrir la fiche', run: () => openHoldingModal(h.id) } });
+      accept: { label: 'Marquer comme plus cotée', run: () => openDelistModal(h.id), ack: false }, more: [{ label: 'Corriger le symbole / l\'ISIN…', run: () => openInstrumentFix(h.id) }], edit: { label: 'Ouvrir la fiche', run: () => openInstrumentFix(h.id) } });
   });
   const other = live.filter((h) => h.marketError && !h.listingSuspect);
   if (other.length) out.push({ id: 'market:fail', level: 'warn', title: 'Actualisation incomplète', body: other.length + ' actif(s) non actualisé(s) : ' + other.slice(0, 3).map((h) => esc(nm(h)) + ' (' + esc(h.marketError) + ')').join(' ; ') + (other.length > 3 ? ' …' : '') + '. Les dernières données connues sont conservées.',
@@ -231,7 +231,7 @@ async function refreshArchive(entries, nowISO) {
   for (let i = 0; i < entries.length; i++) {
     const a = entries[i];
     try { const f = await market.fetchAsset(a.ticker || a.isin, a.name, { needSector: false }); Market.applyToArchive(a, f, nowISO); out.ok++; }
-    catch (e) { a.marketError = e.message; out.fail++; if (e.rate || e.fatal) break; }
+    catch (e) { a.marketError = e.message; out.fail++; if (e.delisted || e.notFound) a.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message }; if (e.rate || e.fatal) break; }
     await new Promise((r) => setTimeout(r, 150));
   }
   return out;

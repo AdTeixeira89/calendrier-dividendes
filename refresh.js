@@ -4,7 +4,7 @@
    2. cours / dividendes / historique Yahoo des actifs affichés, 3. taux de change, 4. actualités, 5. synchronisation du compte.
    APP_BUILD doit rester égal au numéro de version du cache du service worker (sw.js : dividendes-shell-vNN) : un test le vérifie.
    ================================================================== */
-const APP_BUILD = 47;
+const APP_BUILD = 48;
 let pullBusy = false, updateAvail = false;
 
 /* Version publiée (sw.js lu sans cache). null = injoignable / hors-ligne. */
@@ -49,7 +49,7 @@ async function runFullRefresh(source) {
     const parts = []; let err = null;
     if (state.settings.relayUrl && state.holdings.length) {
       label('Actualisation des cours…');
-      try { const res = await refreshMarket(visibleHoldings(), { silent: true, quick: true }); if (res) { parts.push('cours et dividendes à jour (' + res.ok + ' actif(s)' + (res.skipped ? ', ' + res.skipped + ' déjà à jour' : '') + ')'); if (res.fail && !res.ok) err = (res.errors && res.errors[0] && res.errors[0].message) || 'échec de l\'actualisation'; } }
+      try { const res = await refreshMarket(visibleHoldings(), { silent: true, quick: true }); if (res) { parts.push(res.ok ? 'cours actualisés' + (res.newDiv ? ' · ' + res.newDiv + ' nouveau(x) dividende(s)' : '') : 'cours déjà à jour'); if (res.fail && res.ok) parts.push(res.fail + ' en erreur (voir la cloche)'); if (res.fail && !res.ok) err = (res.errors && res.errors[0] && res.errors[0].message) || 'échec de l\'actualisation'; } }
       catch (e) { err = e.message; }
     } else if (!state.settings.relayUrl) parts.push('relais de données non configuré (Paramètres)');
     label('Taux de change et actualités…');

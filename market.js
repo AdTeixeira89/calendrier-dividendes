@@ -161,7 +161,7 @@
     async function fetchAsset(input, nameHint, opts) {
       opts = opts || {};
       const symbol = await resolveSymbol(input, nameHint);
-      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=' + (opts.range === '5y' ? '5y' : '10y') + '&interval=1d');
+      const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=' + (opts.range === '6mo' || opts.range === '5y' ? opts.range : '10y') + '&interval=1d');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) {
         const desc = data.chart && data.chart.error && data.chart.error.description;
@@ -324,7 +324,7 @@
     if (f.currency) a.currency = f.currency;
     if (f.hist) a.hist = f.hist;
     if (f.splits) a.splits = f.splits;
-    a.marketAt = nowISO; a.marketError = null;
+    a.marketAt = nowISO; a.marketError = null; delete a.listingSuspect;
     return a;
   }
   function shiftMonths(iso, n) {
@@ -348,7 +348,11 @@
     const keys = Object.keys(by).sort(); if (!keys.length) return old;
     const out = [], y1 = Number(keys[keys.length - 1].slice(0, 4)), m1 = Number(keys[keys.length - 1].slice(5));
     for (let y = Number(keys[0].slice(0, 4)), mo = Number(keys[0].slice(5)); ; mo++) { if (mo > 12) { mo = 1; y++; } const k = y + '-' + padM(mo); out.push(by[k] === undefined ? null : by[k]); if (y === y1 && mo === m1) break; }
-    const res = { from: keys[0], c: out }, d = nw.d || old.d; if (d) res.d = d;
+    const res = { from: keys[0], c: out };
+    if (nw.d && old.d && nw.d.t && old.d.t) {                      // quotidien : union par date, les nouveaux cours l'emportent, 140 séances conservées
+      const dm = {}; [old.d, nw.d].forEach((s) => s.t.forEach((t, i) => { dm[t] = s.c[i]; }));
+      const ts = Object.keys(dm).map(Number).sort((a, b) => a - b).slice(-140); res.d = { t: ts, c: ts.map((t) => dm[t]) };
+    } else if (nw.d || old.d) res.d = nw.d || old.d;
     return res;
   }
   /* Fractionnement apparu depuis la dernière fois : les anciens cours sont alors tous ajustés, la fusion serait fausse → actualisation complète de cet actif. */
@@ -365,27 +369,41 @@
     else delete h.listingSuspect;
   }
   const needsFull = (h, now) => !h.hist || !h.hist.c || !h.hist.c.length || (h.fullAt && now - h.fullAt > FULL_EVERY_MS);
+  /* Mise à jour LÉGÈRE d'un actif : cours, variation du jour, devise et fin de l'historique. Les dividendes et le calendrier ne sont pas recalculés. */
+  function applyQuote(h, a, nowISO) {
+    if (a.currency) h.currency = a.currency;
+    if (a.price > 0) { h.price = a.price; h.priceAt = a.priceAt || nowISO; }
+    if (a.instrumentType) h.instrumentType = a.instrumentType;
+    if ('prevClose' in a) { h.prevClose = a.prevClose; h.prevCloseAt = a.prevCloseAt || null; }
+    if (a.hist) h.hist = mergeHist(h.hist, a.hist);
+    return h;
+  }
+  /* Nouveaux dividendes = détachements absents de ceux déjà enregistrés (les 16 derniers). */
+  function newDividends(h, a) {
+    const st = ((h.dividend || {}).history || []), known = new Set(st.map((x) => x.exDate)), min = st.length >= 16 ? st.reduce((mn, x) => (x.exDate < mn ? x.exDate : mn), '9999') : '';
+    return (a.dividends || []).filter((x) => !known.has(x.exDate) && x.exDate > min);
+  }
 
-  /* Actualise plusieurs actifs, un par un, avec une pause ; s'arrête sur quota/relais refusé.
-     hooks.quick : actualisation légère (voir ci-dessus). */
+  /* Actualise plusieurs actifs ; s'arrête sur quota/relais refusé.
+     hooks.quick : actualisation légère (voir ci-dessus), 4 requêtes en parallèle ; sinon un actif à la fois avec une pause. */
   async function refreshMany(client, holdings, nowISO, hooks) {
     hooks = hooks || {};
-    const res = { ok: 0, fail: 0, skipped: 0, errors: [], stopped: false }, now = Date.now();
-    for (let i = 0; i < holdings.length; i++) {
-      if (hooks.cancelled && hooks.cancelled()) { res.stopped = true; break; }
-      const h = holdings[i]; let pause = true;
-      if (h.listing === 'delisted') { res.skipped++; if (hooks.progress) hooks.progress(i + 1, holdings.length, h); continue; }      // société déclarée plus cotée : plus aucune requête
+    const quick = !!hooks.quick, res = { ok: 0, fail: 0, skipped: 0, newDiv: 0, errors: [], stopped: false }, now = Date.now();
+    let next = 0, halt = false, done = 0;
+    const one = async (h) => {
+      let pause = true;
+      if (h.listing === 'delisted') { res.skipped++; return; }                       // société déclarée plus cotée : plus aucune requête
       try {
-        if (hooks.quick && !needsFull(h, now)) {
-          if (h.quickAt && now - h.quickAt < QUICK_MIN_MS) { res.skipped++; pause = false; }      // tout juste actualisé : rien à refaire
+        if (quick && !needsFull(h, now)) {
+          if (h.quickAt && now - h.quickAt < QUICK_MIN_MS) { res.skipped++; pause = false; }            // tout juste actualisé
+          else if (h.listingSuspect && h.listingSuspect.kind !== 'stale' && h.listingSuspect.at === nowISO) { res.skipped++; pause = false; }   // déjà tenté aujourd'hui (introuvable)
           else {
-            const a = await client.fetchAsset(h.ticker, h.name, { needSector: false, range: '5y' });
-            if (splitsChanged(h, a)) { const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked }); applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; }
-            else {
-              const from = a.hist && a.hist.from ? a.hist.from + '-01' : '';
-              a.hist = mergeHist(h.hist, a.hist); a.splits = (h.splits || []).filter((s) => s.date < from).concat(a.splits || []);
-              const fresh = a.priceAt; applyToHolding(h, a, nowISO); noteListing(h, { priceAt: fresh }, nowISO); if (!h.fullAt) h.fullAt = now;
-            }
+            const a = await client.fetchAsset(h.ticker, h.name, { needSector: false, range: '6mo' });
+            const fresh = newDividends(h, a);
+            if (fresh.length || splitsChanged(h, a)) {                                                    // nouveau dividende ou fractionnement : revue complète de CET actif seulement
+              const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
+              applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; if (fresh.length) res.newDiv++;
+            } else { applyQuote(h, a, nowISO); noteListing(h, a, nowISO); if (!h.fullAt) h.fullAt = now; }
             h.quickAt = now; h.marketError = null; res.ok++;
           }
         } else {
@@ -396,15 +414,23 @@
       } catch (e) {
         res.fail++; res.errors.push({ ticker: h.displayTicker || h.ticker, message: e.message }); h.marketError = e.message;
         if (e.delisted || e.notFound) h.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message };
-        if (e.rate || e.fatal) { res.stopped = true; if (hooks.progress) hooks.progress(i + 1, holdings.length, h); break; }
+        if (e.rate || e.fatal) { res.stopped = true; halt = true; }
       }
-      if (hooks.progress) hooks.progress(i + 1, holdings.length, h);
-      if (pause && opts_delay > 0) await new Promise((r) => setTimeout(r, opts_delay));
-    }
+      const gap = quick ? Math.min(opts_delay, 80) : opts_delay;
+      if (pause && gap > 0 && !halt) await new Promise((r) => setTimeout(r, gap));
+    };
+    const worker = async () => {
+      while (!halt) {
+        if (hooks.cancelled && hooks.cancelled()) { res.stopped = true; halt = true; break; }
+        const i = next++; if (i >= holdings.length) break;
+        await one(holdings[i]); done++; if (hooks.progress) hooks.progress(done, holdings.length, holdings[i]);
+      }
+    };
+    await Promise.all(Array.from({ length: quick ? 4 : 1 }, worker));
     return res;
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, newDividends, applyQuote, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);

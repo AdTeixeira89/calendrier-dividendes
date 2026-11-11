@@ -71,7 +71,7 @@ export default {
       if(!/^[A-Za-z0-9.\-^=]{1,20}$/.test(symbol)) return reply({ error: 'Symbole invalide' }, 400, origin);
       // Période et pas facultatifs (liste blanche) : l'application demande 10 ans en quotidien ; une ancienne version
       // du relais ignore ces paramètres et renvoie 5 ans en mensuel (l'application sait s'en contenter).
-      const range = ['5y', '10y', 'max'].includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '5y';
+      const range = ['6mo', '5y', '10y', 'max'].includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '5y';
       const interval = ['1mo', '1wk', '1d'].includes(url.searchParams.get('interval')) ? url.searchParams.get('interval') : '1mo';
       target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&events=div,splits`;
     }else if(url.pathname === '/search'){
