@@ -39,7 +39,7 @@ function openHoldingModal(id) {
   const payer = !dv.none;
   const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' un actif</h2><div class="sub">Action ou ETF. Seuls le ticker (ou ISIN) et la quantité sont indispensables.</div>' +
     '<div style="position:relative">' + fld('Nom, ticker ou ISIN', '<input type="text" id="hTicker" value="' + esc(d.ticker) + '" placeholder="ex : Air Liquide, AAPL, AI.PA, FR0000120073" autocomplete="off">',
-      'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div>' +
+      'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div><div id="hSym" style="margin:-4px 0 10px"></div>' +
     (ex ? fld('Cotation', '<select id="hListing">' + opt('', 'Cotée en bourse', d.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', d.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur) et aucun dividende n\'est prévu ; vos versements déjà reçus sont conservés.', 'hListing') : '') +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
     fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Ce que vous avez payé par titre — sert au rendement sur coût et à la plus-value', 'hCost') + '</div>' +
@@ -70,6 +70,7 @@ function openHoldingModal(id) {
   $('#hType', m).onchange = sync; $('#hPays', m).onchange = sync; sync();
   $('#hFetch', m).onclick = () => fetchIntoHoldingForm(m);
   wireTickerSearch(m);
+  if (ex && (ex.marketError || !(ex.price > 0)) && Market.isISIN(ex.isin || ex.ticker)) showSymbolSuggestions($('#hSym', m), ex.isin || ex.ticker, ex.name, (x) => { $('#hTicker', m).value = x.symbol; fetchIntoHoldingForm(m); });
   if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
   if (ex && $('#hBuys', m)) $('#hBuys', m).onclick = () => { closeModal(); openBuysModal(ex.id); };
   if (ex && $('#hSell', m)) $('#hSell', m).onclick = () => { closeModal(); openSellModal(ex.id); };
@@ -712,9 +713,10 @@ function openInstrumentFix(id) {
   if (state.holdings.some((h) => h.id === id)) { openHoldingModal(id); return; }
   const a = (state.archive || []).find((x) => x.id === id); if (!a) { toast('Actif introuvable.', { error: true }); return; }
   const m = openModal('<h2>' + esc(a.name || a.ticker || a.isin) + ' <span class="muted" style="font-weight:400">· position clôturée</span></h2><div class="sub">Cette position n\'est plus détenue : son symbole sert seulement à valoriser le passé (courbe de valeur). Corrigez-le, ou indiquez que la société n\'est plus cotée.</div>' +
-    fld('Symbole boursier ou ISIN', '<input type="text" id="afTicker" value="' + esc(a.ticker || a.isin || '') + '" autocomplete="off" autocapitalize="characters">', 'Ex. AI.PA (Paris), SAP.DE (Allemagne), ou l\'ISIN.', 'afTicker') +
+    fld('Symbole boursier ou ISIN', '<input type="text" id="afTicker" value="' + esc(a.ticker || a.isin || '') + '" autocomplete="off" autocapitalize="characters">', 'Ex. AI.PA (Paris), SAP.DE (Allemagne), ou l\'ISIN.', 'afTicker') + '<div id="afSym" style="margin:-4px 0 10px"></div>' +
     fld('Cotation', '<select id="afListing">' + opt('', 'Cotée en bourse', a.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', a.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur).', 'afListing') +
     '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="afOk">Enregistrer</button></div>');
+  if (a.marketError && Market.isISIN(a.isin || a.ticker)) showSymbolSuggestions($('#afSym', m), a.isin || a.ticker, a.name, (x) => { $('#afTicker', m).value = x.symbol; });
   $('#afOk', m).onclick = async () => {
     const t = $('#afTicker', m).value.trim(), lst = $('#afListing', m).value, before = JSON.stringify([a.ticker, a.listing]);
     if (lst !== 'delisted' && !t) { toast('Renseignez un symbole ou un ISIN.', { error: true }); return; }
@@ -901,4 +903,16 @@ async function markAllDelisted() {
   if (!c.ok) return;
   const prevUndo = state.undo; snapshotForUndo('positions marquées plus cotées'); list.forEach((h) => markDelisted(h, null, null)); saveState(); afterInstrumentFix();
   toast(list.length + ' position(s) marquée(s) « plus cotées ».', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+}
+
+/* Symboles possibles pour un ISIN (ancien / nouveau symbole, autres places) avec leur dernier cours : l'utilisateur touche le bon, rien n'est appliqué tout seul. */
+async function showSymbolSuggestions(box, isin, name, onPick) {
+  if (!box || !state.settings.relayUrl || !Market.isISIN(isin)) return;
+  box.innerHTML = '<span class="hint">Recherche des symboles possibles pour ' + esc(isin) + '…</span>';
+  try {
+    const list = await market.suggestSymbols(isin, name);
+    if (!list.length) { box.innerHTML = '<span class="hint">Aucun symbole trouvé pour cet ISIN chez Yahoo Finance : la société n\'est peut-être plus cotée.</span>'; return; }
+    box.innerHTML = '<div class="hint" style="margin-bottom:4px">Symboles trouvés pour cet ISIN — touchez le bon :</div>' + list.map((x, i) => '<button type="button" class="btn sm' + (x.price > 0 ? ' primary' : '') + '" data-sg="' + i + '" style="margin:2px 4px 2px 0">' + esc(x.symbol) + (x.price > 0 ? ' · ' + esc(fmtMoney(x.price, x.currency || 'EUR')) : ' · aucun cours') + (x.exchange ? ' · ' + esc(x.exchange) : '') + '</button>').join('');
+    $$('[data-sg]', box).forEach((b) => b.onclick = () => onPick(list[Number(b.dataset.sg)]));
+  } catch (e) { box.innerHTML = '<span class="hint">' + esc(e.message) + '</span>'; }
 }

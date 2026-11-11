@@ -130,3 +130,18 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   M.noteListing(st, { priceAt: '2026-11-10T10:00:00Z' }, '2026-11-11'); assert.ok(!st.listingSuspect, 'cotation récente : repère retiré');
   console.log('ok   société plus cotée : détection (Yahoo « delisted », ISIN absent, cotation ancienne), jamais décidée automatiquement, aucune requête une fois déclarée');
 })();
+(async () => {
+  M.setDelay(0);
+  // ISIN avec deux cotations : la première (ancien symbole) n'a pas de cours → la seconde est retenue ; sans aucune cotation valide, la réponse vide est renvoyée (anomalie signalée)
+  const mk = (prices) => M.makeClient({ getRelay: () => 'https://r.dev', fetch: async (u) => ({ status: 200, ok: true, json: async () => {
+    if (u.includes('/search')) return { quotes: [{ symbol: 'OLD.PA', quoteType: 'EQUITY' }, { symbol: 'NEW.PA', quoteType: 'EQUITY' }] };
+    const sym = new URL(u).searchParams.get('symbol'); return { chart: { result: [{ meta: { currency: 'EUR', regularMarketPrice: prices[sym], regularMarketTime: 1762000000 }, timestamp: [], indicators: { quote: [{ close: [] }] } }] } };
+  } }) });
+  const a = await mk({ 'OLD.PA': undefined, 'NEW.PA': 2.1 }).fetchAsset('FR0014009YQ1', 'Lhyfe', { needSector: false });
+  assert.deepStrictEqual([a.symbol, a.price, a.resolved], ['NEW.PA', 2.1, true], 'le symbole avec un cours est retenu');
+  const b = await mk({}).fetchAsset('FR0014009YQ1', 'Lhyfe', { needSector: false }); assert.strictEqual(b.price, null, 'aucune cotation valide : réponse sans cours renvoyée');
+  const sg = await mk({ 'OLD.PA': undefined, 'NEW.PA': 2.1 }).suggestSymbols('FR0014009YQ1', 'Lhyfe'); assert.deepStrictEqual(sg.map((x) => [x.symbol, x.price]), [['OLD.PA', null], ['NEW.PA', 2.1]]);
+  const h = { id: 'h', ticker: 'OLD.PA', name: 'L', dividend: {} }, r = await M.refreshMany({ fetchAsset: async () => ({ symbol: 'OLD.PA', price: null, hist: null, dividends: [], resolved: false }) }, [h], '2026-11-11', {});
+  assert.deepStrictEqual([r.fail, r.ok], [1, 0]); assert.ok(/aucun cours pour OLD\.PA/.test(h.marketError), 'cours vide = erreur explicite');
+  console.log('ok   ISIN à plusieurs cotations : celle qui a un cours est retenue, suggestions pour l\'utilisateur, cours vide signalé');
+})();

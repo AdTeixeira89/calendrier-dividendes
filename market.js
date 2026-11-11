@@ -28,6 +28,14 @@
     return rows[0].symbol;
   }
 
+  /* Toutes les cotations plausibles d'un ISIN, la plus cohérente avec le pays de l'ISIN en premier (pour essayer les suivantes si la première n'a pas de cours). */
+  function rankSymbols(quotes, isin) {
+    const rows = (quotes || []).filter((q) => q && q.symbol && (!q.quoteType || ['EQUITY', 'ETF'].indexOf(q.quoteType) >= 0)), out = [];
+    const want = COUNTRY_SUFFIX[String(isin || '').slice(0, 2).toUpperCase()] || [];
+    want.forEach((suf) => rows.forEach((q) => { if ((suf === '' ? q.symbol.indexOf('.') < 0 : q.symbol.toUpperCase().endsWith(suf)) && out.indexOf(q.symbol) < 0) out.push(q.symbol); }));
+    rows.forEach((q) => { if (out.indexOf(q.symbol) < 0) out.push(q.symbol); });
+    return out;
+  }
   const COUNTRY_NAME = { US: 'États-Unis', FR: 'France', DE: 'Allemagne', NL: 'Pays-Bas', GB: 'Royaume-Uni', CH: 'Suisse', IT: 'Italie', ES: 'Espagne', BE: 'Belgique', PT: 'Portugal',
     SE: 'Suède', DK: 'Danemark', FI: 'Finlande', NO: 'Norvège', IE: 'Irlande', AT: 'Autriche', LU: 'Luxembourg', CA: 'Canada', JP: 'Japon', AU: 'Australie', CN: 'Chine', HK: 'Hong Kong',
     KY: 'Îles Caïmans', BM: 'Bermudes', JE: 'Jersey', GG: 'Guernesey', SG: 'Singapour', KR: 'Corée du Sud', TW: 'Taïwan', IN: 'Inde', BR: 'Brésil', MX: 'Mexique', PL: 'Pologne', GR: 'Grèce' };
@@ -144,23 +152,21 @@
       return (data.quotes || []).filter((x) => x && x.symbol);
     }
 
-    async function resolveSymbol(input, nameHint) {
+    async function candidates(input, nameHint) {
       const t = String(input || '').trim();
-      if (!isISIN(t)) return t;
+      if (!isISIN(t)) return [t];
       const queries = [t.toUpperCase()];
       if (nameHint && String(nameHint).trim()) queries.push(String(nameHint).trim().slice(0, 60));
       for (let i = 0; i < queries.length; i++) {
         const quotes = await search(queries[i]).catch((e) => { if (e.rate || e.fatal) throw e; return []; });
-        const sym = pickSymbol(quotes, t);
-        if (sym) return sym;
+        const syms = rankSymbols(quotes, t);
+        if (syms.length) return syms.slice(0, 4);
       }
       throw Object.assign(new Error('ISIN introuvable chez Yahoo Finance : la société n\'est peut-être plus cotée (radiation, liquidation, rachat), ou renseignez le symbole boursier (ex : AI.PA).'), { notFound: true });
     }
 
     /* Données d'un actif. Renvoie toujours un objet explicite, jamais de valeurs inventées. */
-    async function fetchAsset(input, nameHint, opts) {
-      opts = opts || {};
-      const symbol = await resolveSymbol(input, nameHint);
+    async function fetchChart(symbol, input, opts) {
       const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=' + (opts.range === '6mo' || opts.range === '5y' ? opts.range : '10y') + '&interval=1d');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) {
@@ -175,27 +181,49 @@
         .filter((d) => d && d.amount > 0 && d.date)
         .map((d) => ({ exDate: new Date(d.date * 1000).toISOString().slice(0, 10), payDate: null, amount: pence ? d.amount / 100 : d.amount }))
         .sort((a, b) => (a.exDate < b.exDate ? -1 : 1));
-      let sector = null, industry = null;
-      if (opts.needSector !== false) {      // un appel de plus, une seule fois par actif (le secteur ne change presque jamais)
-        try {
-          const q = (await search(symbol)).find((x) => x.symbol && x.symbol.toUpperCase() === symbol.toUpperCase());
-          if (q) { sector = q.sector || null; industry = q.industry || null; }
-        } catch (e) { if (e.rate || e.fatal) throw e; }
-      }
       return {
         symbol, resolved: symbol.toUpperCase() !== String(input).trim().toUpperCase(),
         name: meta.longName || meta.shortName || null, currency, exchange: meta.fullExchangeName || meta.exchangeName || null,
         instrumentType: meta.instrumentType || null,        // EQUITY | ETF | …
         price: meta.regularMarketPrice > 0 ? (pence ? meta.regularMarketPrice / 100 : meta.regularMarketPrice) : null,
         priceAt: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
-        hist: withDaily(monthlySeries(res, pence), dailySeries(res, pence)), splits: splitList(res), sector, industry, ...prevCloseOf(res, meta, pence),
+        hist: withDaily(monthlySeries(res, pence), dailySeries(res, pence)), splits: splitList(res), sector: null, industry: null, ...prevCloseOf(res, meta, pence),
         dividends: divs
       };
     }
 
+    /* Données d'un actif. Pour un ISIN, plusieurs cotations peuvent exister (ancien et nouveau symbole, autre place) : on essaie la plus cohérente, puis les suivantes
+       tant qu'aucune ne donne un cours ; sinon on renvoie la première réponse (cours vide) pour que l'anomalie soit signalée. */
+    async function fetchAsset(input, nameHint, opts) {
+      opts = opts || {};
+      const cands = await candidates(input, nameHint); let first = null, firstErr = null, best = null;
+      for (let i = 0; i < cands.length; i++) {
+        try { const r = await fetchChart(cands[i], input, opts); if (r.price > 0) { best = r; break; } if (!first) first = r; }
+        catch (e) { if (e.rate || e.fatal) throw e; if (!firstErr) firstErr = e; }
+      }
+      best = best || first; if (!best) throw firstErr || new Error('Symbole inconnu.');
+      if (opts.needSector !== false) {      // un appel de plus, une seule fois par actif (le secteur ne change presque jamais)
+        try {
+          const q = (await search(best.symbol)).find((x) => x.symbol && x.symbol.toUpperCase() === best.symbol.toUpperCase());
+          if (q) { best.sector = q.sector || null; best.industry = q.industry || null; }
+        } catch (e) { if (e.rate || e.fatal) throw e; }
+      }
+      return best;
+    }
+    /* Symboles possibles pour un ISIN, avec le dernier cours de chacun (à la demande de l'utilisateur, jamais appliqués automatiquement). */
+    async function suggestSymbols(isin, nameHint) {
+      const out = []; let cands = [];
+      try { cands = await candidates(isin, nameHint); } catch (e) { if (e.rate || e.fatal) throw e; return out; }
+      for (let i = 0; i < cands.length; i++) {
+        try { const r = await fetchChart(cands[i], isin, { range: '6mo' }); out.push({ symbol: cands[i], name: r.name, exchange: r.exchange, currency: r.currency, price: r.price, priceAt: r.priceAt }); }
+        catch (e) { if (e.rate || e.fatal) throw e; out.push({ symbol: cands[i], name: null, exchange: null, currency: null, price: null, priceAt: null, error: e.message }); }
+      }
+      return out;
+    }
+
     /* Fractionnements d'un actif (Yahoo) : [{ date, ratio }]. Un ancien relais ne les renvoie pas (liste vide). */
     async function fetchSplits(input, nameHint) {
-      const symbol = await resolveSymbol(input, nameHint);
+      const symbol = (await candidates(input, nameHint))[0];
       const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=max&interval=1mo');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) throw new Error('Symbole inconnu.');
@@ -204,7 +232,7 @@
 
     /* Historique complet des dividendes en espèces d'un titre (Yahoo : date de détachement + montant par titre, devise de cotation). La date de PAIEMENT n'est pas fournie. */
     async function fetchDividends(input, nameHint) {
-      const symbol = await resolveSymbol(input, nameHint);
+      const symbol = (await candidates(input, nameHint))[0];
       const data = await call('/chart?symbol=' + encodeURIComponent(symbol) + '&range=max&interval=1mo');
       const res = data.chart && data.chart.result && data.chart.result[0];
       if (!res) throw new Error('Symbole inconnu.');
@@ -240,7 +268,7 @@
       }));
     }
 
-    return { call, search, resolveSymbol, fetchAsset, fetchSplits, fetchDividends, fetchNews, translate, translateDirect };
+    return { call, search, candidates, suggestSymbols, fetchAsset, fetchSplits, fetchDividends, fetchNews, translate, translateDirect };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX
@@ -368,6 +396,7 @@
     if (!isNaN(t) && Date.parse(nowISO) - t > STALE_DAYS * 86400000) h.listingSuspect = { kind: 'stale', since: a.priceAt.slice(0, 10), at: nowISO };
     else delete h.listingSuspect;
   }
+  const noPriceMsg = (a) => 'Yahoo Finance ne renvoie aucun cours pour ' + (a.symbol || 'ce symbole') + ' (symbole sans cotation : essayez un autre symbole pour cet ISIN).';
   const needsFull = (h, now) => !h.hist || !h.hist.c || !h.hist.c.length || (h.fullAt && now - h.fullAt > FULL_EVERY_MS);
   /* Mise à jour LÉGÈRE d'un actif : cours, variation du jour, devise et fin de l'historique. Les dividendes et le calendrier ne sont pas recalculés. */
   function applyQuote(h, a, nowISO) {
@@ -404,11 +433,14 @@
               const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
               applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; if (fresh.length) res.newDiv++;
             } else { applyQuote(h, a, nowISO); noteListing(h, a, nowISO); if (!h.fullAt) h.fullAt = now; }
-            h.quickAt = now; h.marketError = null; res.ok++;
+            h.quickAt = now; h.marketError = null;
+            if (!(a.price > 0) && !fresh.length) throw new Error(noPriceMsg(a));
+            res.ok++;
           }
         } else {
           const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
           applyToHolding(h, a, nowISO); noteListing(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null;
+          if (!(a.price > 0)) throw new Error(noPriceMsg(a));
           res.ok++;
         }
       } catch (e) {
@@ -431,6 +463,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, newDividends, applyQuote, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, rankSymbols, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, newDividends, applyQuote, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);
