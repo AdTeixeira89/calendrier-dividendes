@@ -267,6 +267,13 @@ console.log(n + ' tests passed');
     assert.deepStrictEqual([d.amount, d.count, d.total, d.noPru], [20, 1, 2, ['T']]); assert.ok(/PRU absent/.test(d.rows.find((r) => r.id === 'n').why));
     assert.strictEqual(E.portfolioValue({ holdings: [a, nopru] }, (x) => x, null).total, 10 * 120 + 10 * 50, 'valeur du portefeuille : les deux positions comptent');
   });
+  t('exemple utilisateur : 1 action achetée 20 € ; jour 1 clôture 25 € → jour 5 € et total 5 € ; jour 2 clôture 30 € → jour 5 € et total 10 €', () => {
+    const tx = [{ id: 't', holdingId: 'h', date: '2026-11-12', type: 'buy', qty: 1, price: 20, fees: 0, currency: 'EUR' }];
+    const day1 = hh({ id: 'h', quantity: 1, avgCost: 20, price: 25, prevClose: 19, prevCloseAt: '2026-11-11' }), d1 = E.dailyChange({ holdings: [day1], transactions: tx }, (x) => x, null, '2026-11-12'), u1 = E.unrealized({ holdings: [day1] }, (x) => x, null);
+    assert.deepStrictEqual([d1.amount, u1.gain], [5, 5], 'jour 1 : l\'achat du jour compte depuis son prix d\'achat');
+    const day2 = hh({ id: 'h', quantity: 1, avgCost: 20, price: 30, prevClose: 25, prevCloseAt: '2026-11-12' }), d2 = E.dailyChange({ holdings: [day2], transactions: tx }, (x) => x, null, '2026-11-13'), u2 = E.unrealized({ holdings: [day2] }, (x) => x, null);
+    assert.deepStrictEqual([d2.amount, u2.gain], [5, 10], 'jour 2 : +5 sur la journée, +10 au total');
+  });
   t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
     const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
     const ref = new Date(2026, 0, 1);
