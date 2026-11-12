@@ -211,6 +211,7 @@ async function refreshMarket(list, o) {
   }
   refreshing = false;
   updateMarketNotices(res);
+  (res.healed || []).forEach((x) => Notify.push({ level: 'info', title: x.name + ' : symbole corrigé automatiquement', body: 'Le symbole <b>' + esc(x.from) + '</b> ne donnait aucun cours ; l\'ISIN a permis de retrouver <b>' + esc(x.to) + '</b> (même titre, même devise ' + esc(x.currency || '') + ', PRU inchangé). Le cours est à jour.' }));
   (res.started || []).forEach((s) => Notify.push({ level: 'info', title: s.name + ' commence à verser un dividende', body: 'Premier dividende connu : <b>' + esc(fmtNum(s.amount, 4)) + ' ' + esc(s.currency) + '</b> par titre (détachement le ' + esc(fmtDate(s.ex)) + '). La position est désormais marquée « verse un dividende » et entre dans les prévisions et le calendrier. Pour les versements déjà passés, lancez l\'analyse des dividendes.', accept: { label: 'Analyser cette position', run: () => runDividendAnalysis({ ids: new Set([s.id]) }), ack: false } }));
   if (res.ok || (ares && ares.ok)) { Dividends.learnPayLags(state, Market, nowISO); state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
@@ -243,7 +244,12 @@ function updateMarketNotices(res) {
   const stale = state.holdings.filter((h) => h.marketOff && Number(h.quantity) > 0 && (!h.priceAt || (Date.now() - Date.parse(String(h.priceAt).slice(0, 10))) > 30 * 86400000));
   if (stale.length) out.push({ id: 'mkt:manual', level: 'warn', title: 'Cours saisi à la main à mettre à jour (' + stale.length + ')', body: stale.slice(0, 4).map((h) => '<b>' + esc(nm(h)) + '</b> : ' + (h.priceAt ? 'cours du ' + esc(fmtDate(String(h.priceAt).slice(0, 10))) : 'aucun cours saisi')).join('<br>') + (stale.length > 4 ? '<br>…' : '') + '<br>Ces titres ne sont pas actualisés automatiquement : ressaisissez leur cours pour que la valeur et les plus-values restent justes.',
     accept: { label: 'Saisir le cours…', run: () => setMarketOff(stale[0].id), ack: false }, more: stale.slice(1, 4).map((h) => ({ label: nm(h) + '…', run: () => setMarketOff(h.id) })) });
-  const other = live.filter((h) => h.marketError && !h.listingSuspect);
+  live.filter((h) => h.marketError && Array.isArray(h.symbolSuggest) && h.symbolSuggest.length).forEach((h) => {
+    const sg = h.symbolSuggest, btn = (x) => ({ label: x.symbol + ' · ' + fmtMoney(x.price, x.currency || 'EUR') + (x.exchange ? ' · ' + x.exchange : ''), run: () => applySymbolChoice(h.id, x.symbol) });
+    out.push({ id: 'mkt:sym:' + h.id, level: 'warn', title: nm(h) + ' : quel symbole choisir ?', body: 'Le symbole actuel <b>' + esc(h.ticker) + '</b> ne donne aucun cours. Yahoo propose pour cet ISIN : ' + sg.map((x) => '<b>' + esc(x.symbol) + '</b> (' + esc(fmtMoney(x.price, x.currency || 'EUR')) + (x.exchange ? ', ' + esc(x.exchange) : '') + ')').join(' ; ') + '. Choisissez la cotation que vous suivez (la devise peut changer).',
+      accept: Object.assign(btn(sg[0]), { ack: false }), more: sg.slice(1, 4).map(btn), edit: { label: 'Ouvrir la fiche', run: () => openInstrumentFix(h.id) } });
+  });
+  const other = live.filter((h) => h.marketError && !h.listingSuspect && !(Array.isArray(h.symbolSuggest) && h.symbolSuggest.length));
   if (other.length) out.push({ id: 'market:fail', level: 'warn', title: 'Actualisation incomplète', body: other.length + ' actif(s) non actualisé(s) : ' + other.slice(0, 3).map((h) => esc(nm(h)) + ' (' + esc(h.marketError) + ')').join(' ; ') + (other.length > 3 ? ' …' : '') + '. Les dernières données connues sont conservées. <b>Si ce titre n\'existe pas chez Yahoo</b> (fonds, ligne technique du courtier, petite valeur non cotée en continu), choisissez « Ne plus actualiser » : vous saisissez son cours à la main et l\'erreur disparaît.',
     accept: { label: 'Réessayer', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Corriger les actifs…', run: () => openFailingHoldings() } });
   Notify.set('market', out);
@@ -253,7 +259,8 @@ async function refreshArchive(entries, nowISO) {
   for (let i = 0; i < entries.length; i++) {
     const a = entries[i];
     try { const f = await market.fetchAsset(a.ticker || a.isin, a.name, { needSector: false }); Market.applyToArchive(a, f, nowISO); out.ok++; }
-    catch (e) { a.marketError = e.message; out.fail++; if (e.delisted || e.notFound) a.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message }; if (e.rate || e.fatal) break; }
+    catch (e) { a.marketError = e.message; out.fail++; if (e.delisted || e.notFound) a.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message }; if (e.rate || e.fatal) break;
+      try { const r = await Market.healSymbol(market, a, nowISO); if (r.healed) { delete a.hist; const f2 = await market.fetchAsset(a.ticker, a.name, { needSector: false }); Market.applyToArchive(a, f2, nowISO); out.fail--; out.ok++; (out.healed = out.healed || []).push(r.healed); } } catch (e2) { /* sans suite */ } }
     await new Promise((r) => setTimeout(r, 150));
   }
   return out;

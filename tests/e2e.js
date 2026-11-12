@@ -57,9 +57,10 @@ const YAHOO = {
   'NOVO-B.CO': { name: 'Novo Nordisk A/S', cur: 'DKK', type: 'EQUITY', price: 700, sector: 'Healthcare', divs: [] },
   'DIVX': { name: 'Dividend Corp', cur: 'EUR', type: 'EQUITY', price: 50, sector: 'Utilities', divs: [['2022-03-10', 1], ['2022-09-10', 1], ['2023-03-10', 0.8], ['2023-09-10', 0.8], ['2024-03-10', 0.8], ['2024-09-10', 0.8], ['2025-03-10', 0.8], ['2025-09-10', 0.8]] },
   'ALHYF.PA': { name: 'Lhyfe (ancien symbole)', cur: 'EUR', type: 'EQUITY', divs: [] },
-  'LHYFE.PA': { name: 'Lhyfe SA', cur: 'EUR', type: 'EQUITY', price: 2.1, divs: [] }
+  'LHYFE.PA': { name: 'Lhyfe SA', cur: 'EUR', type: 'EQUITY', price: 2.1, divs: [] },
+  'LHYF2.F': { name: 'Lhyfe SA (Francfort)', cur: 'EUR', type: 'EQUITY', price: 2.2, divs: [] }
 };
-const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS', 'FR0000120271': 'TTE.PA', 'DK0062498333': 'NOVO-B.CO', 'FR0014009YQ1': ['ALHYF.PA', 'LHYFE.PA'] };
+const ISIN = { 'FR0000120073': 'AI.PA', 'US0378331005': 'AAPL', 'IE00B4L5Y983': 'IWDA.AS', 'FR0000120271': 'TTE.PA', 'DK0062498333': 'NOVO-B.CO', 'FR0014009YQ1': ['ALHYF.PA', 'LHYFE.PA'], 'FR0014009YQ2': ['ALHYF.PA', 'LHYFE.PA', 'LHYF2.F'] };
 const RELAY = { old: false };    // true : simule l'ancienne version du relais (5 ans mensuels, ignore range / interval)
 function chartSeries(y, interval) {
   if (interval === '1d' && !RELAY.old) {           // quotidien : ~3 ans de séances, cours en hausse régulière jusqu'au dernier cours
@@ -1413,7 +1414,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   await test('position clôturée sans cotation (ex. Carmat) : option « plus cotée » depuis la cloche et depuis « Corriger les actifs… » ; symbole corrigé : notification retirée tout de suite ; bilan sobre', async () => {
     RELAY.old = false;
     const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 1, avgCost: 100, price: 190, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }];
-    seed.archive = [{ id: 'ca', account: 'main', ticker: 'ALCAR.PA', displayTicker: 'ALCAR.PA', isin: 'FR0010907956', name: 'CARMAT SA', currency: 'EUR', quantity: 0, type: 'stock' }, { id: 'lh', account: 'main', ticker: 'ZZLHYF', displayTicker: 'ZZLHYF', isin: 'FR0014009YQ1', name: 'LHYFE SA', currency: 'EUR', quantity: 0, type: 'stock' }];
+    seed.archive = [{ id: 'ca', account: 'main', ticker: 'ALCAR.PA', displayTicker: 'ALCAR.PA', isin: 'FR0010907956', name: 'CARMAT SA', currency: 'EUR', quantity: 0, type: 'stock' }, { id: 'lh', account: 'main', ticker: 'ZZLHYF', displayTicker: 'ZZLHYF', isin: 'FR00140099ZZ', name: 'LHYFE SA', currency: 'EUR', quantity: 0, type: 'stock' }];
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 900 } }); await p.open(); await p.waitForTimeout(600);
     await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.archive.every((a) => a.marketError), null, { timeout: 12000 });
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
@@ -1479,17 +1480,20 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(await p.locator('[data-dl-on]').count(), 27, '27 lignes dans l\'aperçu'); eq(await p.locator('[data-dl-on]:checked').count(), 20, '18 lignes « radiée » + 2 corrections de symbole cochées');
     await p.click('#dlApply'); await p.waitForTimeout(500); const s = await storeOf(p); eq(s.archive.filter((a) => a.listing === 'delisted').length, 18, '18 positions marquées plus cotées'); eq(s.archive.find((a) => a.isin === 'US98986T1088').delistedAt, '2022-05-23', 'date de radiation de Zynga enregistrée'); eq(s.archive.find((a) => a.isin === 'US5381461012').ticker, 'LPSN', 'LivePerson : symbole corrigé en LPSN'); ok(s.archive.find((a) => a.isin === 'US5381461012').listing !== 'delisted', 'LivePerson jamais marquée plus cotée');
   });
-  await test('symbole sans cours (ex. Lhyfe : ancien symbole encore connu de Yahoo) : erreur explicite, symboles proposés pour l\'ISIN, un clic corrige et l\'anomalie disparaît', async () => {
+  await test('symbole sans cours (ex. Lhyfe : ancien symbole encore connu de Yahoo) : retrouvé tout seul par l\'ISIN (même devise), sinon proposé en un clic ; l\'anomalie disparaît', async () => {
     RELAY.old = false;
-    const seed = SEED(0); seed.holdings = [{ id: 'lh', ticker: 'ALHYF.PA', displayTicker: 'ALHYF.PA', isin: 'FR0014009YQ1', name: 'LHYFE SA', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 8, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: {} }];
-    const p = await device({ guest: true, seed, viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForTimeout(500);
-    await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].marketError, null, { timeout: 10000 });
-    const me = await p.evaluate(() => state.holdings[0].marketError); ok(/aucun cours pour ALHYF\.PA/.test(me), 'erreur explicite : ' + me);
-    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); let tx = await bellOpen(p); ok(/Actualisation incomplète/.test(tx) && /Lhyfe|LHYFE/i.test(tx), 'signalée dans la cloche : ' + tx.slice(0, 160)); await bellClose(p);
-    await p.evaluate(() => { openHoldingModal('lh'); }); await p.waitForSelector('[data-sg]'); const sg = await p.locator('#hSym').innerText(); ok(/LHYFE\.PA/.test(sg) && /ALHYF\.PA/.test(sg) && /aucun cours/.test(sg), 'symboles proposés pour l\'ISIN : ' + sg.replace(/\n/g, ' | '));
-    await p.click('[data-sg]:has-text("LHYFE.PA")'); await p.waitForFunction(() => document.querySelector('#hTicker').value === 'LHYFE.PA'); await p.waitForTimeout(400); await p.click('#hSave');
-    await p.waitForFunction(() => { const h = state.holdings[0]; return h.ticker === 'LHYFE.PA' && h.price > 0 && !h.marketError; }, null, { timeout: 12000 }); await p.waitForTimeout(500);
-    tx = await bellOpen(p); eq(await p.locator('#bellPanel [data-nt="market:fail"], #bellPanel [data-nt^="mkt:delist:"]').count(), 0, 'après correction : plus aucune notification d\'échec');
+    const mkSeed = (isin) => { const seed = SEED(0); seed.holdings = [{ id: 'lh', ticker: 'ALHYF.PA', displayTicker: 'ALHYF.PA', isin, name: 'LHYFE SA', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 8, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: {} }]; return seed; };
+    // A : une seule cotation avec cours → corrigé automatiquement
+    const p = await device({ guest: true, seed: mkSeed('FR0014009YQ1'), viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].ticker === 'LHYFE.PA' && state.holdings[0].price > 0 && !state.holdings[0].marketError, null, { timeout: 15000 });
+    await p.waitForFunction(() => Notify.pending().some((n) => /symbole corrigé automatiquement/.test(n.title)), null, { timeout: 8000 }).catch(() => {}); ok(await p.evaluate(() => Notify.pending().some((n) => /symbole corrigé automatiquement/.test(n.title))), 'notification : symbole corrigé automatiquement'); eq(await p.evaluate(() => [state.holdings[0].quantity, state.holdings[0].avgCost, state.holdings[0].currency]), [5, 8, 'EUR'], 'quantité, PRU et devise inchangés');
+    // B : plusieurs cotations avec cours → proposition, un clic
+    const q = await device({ guest: true, seed: mkSeed('FR0014009YQ2'), viewport: { width: 390, height: 844 }, mobile: true }); await q.open(); await q.waitForTimeout(500);
+    await q.evaluate(() => { refreshMarket(null, { silent: true }); }); await q.waitForFunction(() => state.holdings[0].symbolSuggest && state.holdings[0].symbolSuggest.length, null, { timeout: 15000 });
+    eq(await q.evaluate(() => state.holdings[0].ticker), 'ALHYF.PA', 'plusieurs cotations : rien d\'appliqué seul'); await q.evaluate(() => { collectGlobalNotices(); }); await q.waitForTimeout(400);
+    ok(await q.evaluate(() => Notify.pending().some((n) => n.id === 'mkt:sym:lh' && /LHYFE\.PA/.test(n.body))), 'proposition dans la cloche'); await bellOpen(q); await q.click('[data-nt="mkt:sym:lh"] [data-nt-act=accept]');
+    await q.waitForFunction(() => state.holdings[0].ticker === 'LHYFE.PA' && state.holdings[0].price > 0 && !state.holdings[0].marketError, null, { timeout: 15000 }); await q.waitForTimeout(500);
+    eq(await q.evaluate(() => Notify.pending().filter((n) => /^(market:fail|mkt:sym)/.test(n.id)).length), 0, 'après le choix : plus aucune anomalie');
   });
   await test('plus-value journalière : détail position par position (ouvrable depuis la carte), total identique, effet de change annoncé, copie du détail', async () => {
     const seed = SEED(0); const y = '2026-11-10';

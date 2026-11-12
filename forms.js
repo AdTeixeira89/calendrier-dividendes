@@ -1016,3 +1016,12 @@ function setMarketOff(id) {
     toast((h.name || h.ticker) + ' : cours ' + fmtMoney(v, cur) + ' enregistré (non actualisé).', { ms: 9000, action: { label: 'Annuler', fn: () => { delete h.marketOff; saveState(); afterInstrumentFix(); renderPage(); } } });
   };
 }
+
+/* Choix d'un symbole proposé pour l'ISIN : la position reprend ce symbole, ses cours et dividendes sont relus (PRU et quantité inchangés). */
+async function applySymbolChoice(id, symbol) {
+  const h = instrumentById(id); if (!h) return;
+  h.ticker = symbol; h.displayTicker = String(symbol).toUpperCase(); h.marketError = null; delete h.listingSuspect; delete h.symbolSuggest; delete h.divHist; h.fullAt = 1; delete h.quickAt; saveState();
+  toast('Vérification de ' + symbol + '…', { ms: 2000 });
+  if (state.holdings.some((x) => x.id === id)) await refreshMarket([h], { silent: true }); else { delete h.hist; await refreshArchive([h], todayISO()); saveState(); }
+  toast(h.marketError ? 'Toujours sans cours : ' + h.marketError : symbol + ' : cours à jour.', { error: !!h.marketError, ms: 6000 }); afterInstrumentFix();
+}

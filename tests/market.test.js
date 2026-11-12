@@ -157,3 +157,18 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.strictEqual(tesla.dividend.none, false); assert.strictEqual(tesla.dividend.lastAmount, 0.25);
   console.log('ok   société qui commence à verser un dividende : détectée à l\'actualisation, position remise « verse un dividende »');
 })();
+
+(async () => {
+  M.setDelay(0);
+  const mk = (map) => ({ suggestSymbols: async () => map.sug, fetchAsset: async (s) => ({ symbol: s, resolved: false, name: 'Lhyfe', currency: map.cur, price: 2.1, priceAt: '2026-11-11T10:00:00Z', hist: { from: '2026-05', c: [2] }, splits: [], sector: null, dividends: [] }) });
+  const h1 = { id: 'h', ticker: 'ALHYF.PA', isin: 'FR0014009YQ1', name: 'Lhyfe', currency: 'EUR', dividend: {}, marketError: 'x' };
+  const r1 = await M.healSymbol(mk({ cur: 'EUR', sug: [{ symbol: 'ALHYF.PA', price: null }, { symbol: 'LHYFE.PA', price: 2.1, currency: 'EUR' }] }), h1, '2026-11-12');
+  assert.strictEqual(r1.healed.to, 'LHYFE.PA'); assert.deepStrictEqual([h1.ticker, h1.marketError], ['LHYFE.PA', null], 'une seule cotation avec cours, même devise : corrigée toute seule');
+  const h2 = { id: 'h2', ticker: 'OLD', isin: 'FR0014009YQ1', name: 'L', currency: 'EUR', dividend: {} };
+  const r2 = await M.healSymbol(mk({ cur: 'USD', sug: [{ symbol: 'L.US', price: 3, currency: 'USD' }] }), h2, '2026-11-12'); assert.strictEqual(r2.healed, null); assert.strictEqual(h2.symbolSuggest[0].symbol, 'L.US', 'devise différente : proposée, jamais appliquée seule');
+  const h3 = { id: 'h3', ticker: 'OLD', isin: 'FR0014009YQ1', name: 'L', currency: 'EUR', dividend: {} };
+  const r3 = await M.healSymbol(mk({ cur: 'EUR', sug: [{ symbol: 'A.PA', price: 1, currency: 'EUR' }, { symbol: 'B.F', price: 1, currency: 'EUR' }] }), h3, '2026-11-12'); assert.strictEqual(r3.healed, null); assert.strictEqual(h3.symbolSuggest.length, 2, 'plusieurs cotations : proposées');
+  const h4 = { id: 'h4', ticker: 'OLD', name: 'L', currency: 'EUR', dividend: {} }; assert.strictEqual((await M.healSymbol(mk({ sug: [] }), h4, '2026-11-12')).healed, null, 'sans ISIN : rien');
+  const r5 = await M.healSymbol(mk({ cur: 'EUR', sug: [{ symbol: 'Z.PA', price: 1, currency: 'EUR' }] }), h2, '2026-11-12'); assert.strictEqual(r5.healed, null, 'une seule tentative par jour');
+  console.log('ok   symbole en échec : retrouvé par l\'ISIN (une cotation, même devise) ou proposé (plusieurs / autre devise), une tentative par jour');
+})();

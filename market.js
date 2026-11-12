@@ -402,6 +402,20 @@
     else delete h.listingSuspect;
   }
   const noPriceMsg = (a) => 'Yahoo Finance ne renvoie aucun cours pour ' + (a.symbol || 'ce symbole') + ' (symbole sans cotation : essayez un autre symbole pour cet ISIN).';
+  /* Symbole en échec (introuvable, sans cours) : l'ISIN permet de retrouver les cotations existantes. Une seule cotation avec cours, dans la MÊME devise que la position
+     → symbole corrigé tout seul (même ISIN = même titre, devise inchangée : PRU intact). Plusieurs possibilités ou devise différente → proposées à l'utilisateur, jamais appliquées seules. */
+  async function healSymbol(client, h, nowISO) {
+    const out = { healed: null, suggestions: [] }, isin = isISIN(h.isin) ? String(h.isin).toUpperCase() : (isISIN(h.ticker) ? String(h.ticker).toUpperCase() : null);
+    if (!isin || h.healAt === nowISO) return out; h.healAt = nowISO;
+    const sug = (await client.suggestSymbols(isin, h.name)).filter((x) => x.price > 0 && String(x.symbol).toUpperCase() !== String(h.ticker || '').toUpperCase());
+    const same = sug.filter((x) => !h.currency || !x.currency || x.currency === h.currency);
+    if (same.length === 1) {
+      const f = await client.fetchAsset(same[0].symbol, h.name, { needSector: !h.sector && !h.geoLocked }); const from = h.ticker;
+      applyToHolding(h, f, nowISO); h.ticker = f.symbol; h.displayTicker = f.symbol.toUpperCase(); h.marketError = null; delete h.listingSuspect; delete h.symbolSuggest; delete h.divHist; h.fullAt = Date.now(); h.quickAt = Date.now();
+      out.healed = { id: h.id, name: h.name || h.displayTicker, from, to: f.symbol, currency: h.currency };
+    } else { h.symbolSuggest = sug.slice(0, 5).map((x) => ({ symbol: x.symbol, price: x.price, currency: x.currency, exchange: x.exchange })); out.suggestions = h.symbolSuggest; }
+    return out;
+  }
   const needsFull = (h, now) => !h.hist || !h.hist.c || !h.hist.c.length || (h.fullAt && now - h.fullAt > FULL_EVERY_MS);
   /* Mise à jour LÉGÈRE d'un actif : cours, variation du jour, devise et fin de l'historique. Les dividendes et le calendrier ne sont pas recalculés. */
   function applyQuote(h, a, nowISO) {
@@ -422,7 +436,7 @@
      hooks.quick : actualisation légère (voir ci-dessus), 4 requêtes en parallèle ; sinon un actif à la fois avec une pause. */
   async function refreshMany(client, holdings, nowISO, hooks) {
     hooks = hooks || {};
-    const quick = !!hooks.quick, res = { ok: 0, fail: 0, skipped: 0, newDiv: 0, started: [], errors: [], stopped: false }, now = Date.now();
+    const quick = !!hooks.quick, res = { ok: 0, fail: 0, skipped: 0, newDiv: 0, started: [], healed: [], errors: [], stopped: false }, now = Date.now();
     let next = 0, halt = false, done = 0;
     /* « Commence à verser » : la position n'avait aucun dividende connu (déjà interrogée au moins une fois) et en a maintenant. */
     const pays = (h) => !!(h.dividend && !h.dividend.none && Array.isArray(h.dividend.history) && h.dividend.history.length);
@@ -455,6 +469,9 @@
         res.fail++; res.errors.push({ ticker: h.displayTicker || h.ticker, message: e.message }); h.marketError = e.message;
         if (e.delisted || e.notFound) h.listingSuspect = { kind: e.delisted ? 'delisted' : 'notfound', at: nowISO, msg: e.message };
         if (e.rate || e.fatal) { res.stopped = true; halt = true; }
+        else if (hooks.heal !== false) {                       // symbole en échec : retrouvé par l'ISIN si possible
+          try { const r = await healSymbol(client, h, nowISO); if (r.healed) { res.fail--; res.ok++; res.errors.pop(); res.healed.push(r.healed); } } catch (e2) { /* sans suite : l'anomalie reste signalée */ }
+        }
       }
       const gap = quick ? Math.min(opts_delay, 80) : opts_delay;
       if (pause && gap > 0 && !halt) await new Promise((r) => setTimeout(r, gap));
@@ -471,6 +488,6 @@
   }
   let opts_delay = 250;
 
-  root.Market = { isISIN, pickSymbol, rankSymbols, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, mergeHist, splitsChanged, noteListing, newDividends, applyQuote, setDelay: (ms) => { opts_delay = ms; } };
+  root.Market = { isISIN, pickSymbol, rankSymbols, parseNews, detectFrequency, buildSlots, deriveCountry, monthlySeries, dailySeries, splitList, COUNTRY_NAME, makeClient, applyToHolding, deriveSchedule, addDaysISO, LAG_DEFAUT, applyToArchive, refreshMany, healSymbol, mergeHist, splitsChanged, noteListing, newDividends, applyQuote, setDelay: (ms) => { opts_delay = ms; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Market;
 })(typeof self !== 'undefined' ? self : this);
