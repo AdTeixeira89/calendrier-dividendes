@@ -258,4 +258,16 @@ t('19. Continuité des dividendes : trimestriel régulier = continu ; trou d\'un
   assert.strictEqual(D.continuity(['2022-03-10', '2023-03-10'], '2022-01-01', '2025-01-01').status, 'insufficient', 'moins de 3 dividendes connus'); assert.strictEqual(D.continuity(q, '2010-01-01', '2012-01-01').status, 'insufficient', 'avant l\'historique connu');
 });
 
+t('20. Analyse des dividendes : droits à chaque détachement (quantité de la veille), évolution annuelle, baisse et interruption', () => {
+  const items = [['2021-03-10', 1], ['2021-09-10', 1], ['2022-03-10', 1.2], ['2022-09-10', 1.2], ['2023-03-10', 1.0], ['2023-09-10', 1.0], ['2024-03-10', 1.0], ['2024-09-10', 1.0]];
+  const qtyBefore = (ex) => (ex < '2021-06-01' ? 10 : ex < '2023-01-01' ? 20 : 15);          // 10 titres, achat de 10 de plus en juin 2021, vente de 5 fin 2022
+  const a = D.analyse(items, '2021-01-05', '2025-02-01', qtyBefore, '2025-02-01');
+  assert.strictEqual(a.pays, true); assert.deepStrictEqual(a.rows.map((r) => r.gross), [10, 20, 24, 24, 15, 15, 15, 15], 'quantité détenue la veille × montant');
+  assert.deepStrictEqual(a.years.map((y) => [y.year, y.perShare]), [[2021, 2], [2022, 2.4], [2023, 2], [2024, 2]]); assert.deepStrictEqual(a.decreases, [2023], 'baisse de 2022 à 2023 (−17 %)');
+  assert.strictEqual(a.years[1].change, 0.2); assert.strictEqual(a.continuity.status, 'continuous');
+  const b = D.analyse(items, '2023-04-01', '2024-12-31', () => 5, '2025-02-01'); assert.deepStrictEqual(b.rows.map((r) => r.ex), ['2023-09-10', '2024-03-10', '2024-09-10'], 'seuls les détachements pendant la détention');
+  const gap = D.analyse([['2021-03-10', 1], ['2021-06-10', 1], ['2021-09-10', 1], ['2021-12-10', 1], ['2023-03-10', 1], ['2023-06-10', 1]], '2021-01-01', '2023-07-01', () => 1, '2025-02-01'); assert.strictEqual(gap.continuity.status, 'interrupted');
+  assert.deepStrictEqual(D.analyse([], '2021-01-01', '2024-01-01', () => 1, '2025-01-01').rows, [], 'aucun dividende connu'); assert.strictEqual(D.analyse([['2019-03-10', 1]], '2021-01-01', '2024-01-01', () => 1, '2025-01-01').pays, false, 'dernier dividende trop ancien : ne verse plus');
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

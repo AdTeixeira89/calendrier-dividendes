@@ -63,6 +63,7 @@ function wireDo(host) {
     else if (a === 'add-payment') openPaymentModal(null);
     else if (a === 'settings') go('settings');
     else if (a === 'div-history') runDividendHistory();
+    else if (a === 'div-analyze') runDividendAnalysis({ ids: visibleIds() });
     else if (a === 'div-migrate') openDividendMigration();
   }));
 }
@@ -478,7 +479,7 @@ function renderHistory(host) {
     '<select id="hYear" aria-label="Année" style="width:auto"><option value="all">Toutes les années</option>' + years.map((y) => '<option value="' + y + '">' + y + '</option>').join('') + '</select>' +
     '<select id="hMonth" aria-label="Mois" style="width:auto"><option value="all">Tous les mois</option>' + MOIS.map((m, i) => '<option value="' + pad2(i + 1) + '">' + m + '</option>').join('') + '</select>' +
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
-    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Dividendes dus</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
+    '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-analyze">' + icon('refresh') + 'Analyser mes dividendes</button><button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Dividendes dus</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
     '' +
     '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Uniquement les versements réellement perçus (relevés, CSV, saisie). Un total marqué * est partiel : certains versements n\'ont ni retenue ni net connus (non estimés, non remplacés par le brut).</p>' : '');
   $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset;

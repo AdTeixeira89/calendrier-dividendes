@@ -352,7 +352,6 @@
     if (f.currency) a.currency = f.currency;
     if (f.hist) a.hist = f.hist;
     if (f.splits) a.splits = f.splits;
-    if (Array.isArray(f.dividends)) a.divHist = f.dividends.map((x) => [x.exDate, x.amount]);          // dividendes connus : sert au contrôle de continuité
     a.marketAt = nowISO; a.marketError = null; delete a.listingSuspect;
     return a;
   }

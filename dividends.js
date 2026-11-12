@@ -197,6 +197,26 @@
     const last = ds[ds.length - 1]; if (to > last && days(last, to) > limit) { const s = last > from ? last : from; if (days(s, to) >= 30) gaps.push({ from: s, to, days: Math.round(days(s, to)) }); }
     return { status: gaps.length ? 'interrupted' : 'continuous', gaps, medianDays: Math.round(med) };
   }
-  root.Dividends = { continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
+  /* Analyse d'une position : dividendes auxquels on avait droit (quantité détenue la veille du détachement), évolution annuelle par titre, interruptions.
+     items : [[exDate, montant par titre]] (historique de la société) ; qtyBefore(exDate) : quantité détenue la veille (ou null). */
+  function analyse(items, from, to, qtyBefore, today) {
+    const its = (items || []).filter((x) => x && x[0] && Number(x[1]) > 0).map((x) => ({ ex: x[0], amt: Number(x[1]) })).sort((p, q) => (p.ex < q.ex ? -1 : p.ex > q.ex ? 1 : 0));
+    const out = { pays: false, rows: [], eligibleGross: 0, years: [], decreases: [], continuity: null, latest: its.length ? its[its.length - 1] : null };
+    if (!its.length) return out;
+    const t = today || to, dd = new Date(t + 'T00:00:00Z'); dd.setUTCMonth(dd.getUTCMonth() - 18); const y18 = dd.toISOString().slice(0, 10);
+    out.pays = its.some((d) => d.ex >= from && d.ex <= to) || its[its.length - 1].ex >= y18;
+    its.filter((d) => d.ex >= from && d.ex <= to).forEach((d) => { const q = qtyBefore ? qtyBefore(d.ex) : null; if (q > 1e-9) { const g = Math.round(q * d.amt * 100) / 100; out.rows.push({ ex: d.ex, amt: d.amt, qty: q, gross: g }); out.eligibleGross += g; } });
+    out.eligibleGross = Math.round(out.eligibleGross * 100) / 100;
+    const by = {}; its.forEach((d) => { const y = d.ex.slice(0, 4); by[y] = (by[y] || 0) + d.amt; });
+    const y0 = Number(from.slice(0, 4)), y1 = Math.min(Number(to.slice(0, 4)), Number(t.slice(0, 4)) - 1);      // années complètes seulement
+    for (let y = Math.max(y0, Number(its[0].ex.slice(0, 4))); y <= y1; y++) {
+      const cur = by[String(y)] || 0, prev = out.years.length && out.years[out.years.length - 1].year === y - 1 ? out.years[out.years.length - 1].perShare : null;
+      out.years.push({ year: y, perShare: Math.round(cur * 1e4) / 1e4, change: prev > 0 && cur > 0 ? Math.round((cur - prev) / prev * 1e4) / 1e4 : null });
+    }
+    out.decreases = out.years.filter((y) => y.change !== null && y.change < -0.03).map((y) => y.year);
+    out.continuity = continuity(its.map((d) => d.ex), from, to);
+    return out;
+  }
+  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

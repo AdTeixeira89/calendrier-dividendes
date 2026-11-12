@@ -59,7 +59,7 @@ function openHoldingModal(id) {
     fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement ; le paiement est estimé (détachement + délai habituel).', 'hKind') + '</div>' +
     '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
     fld('Retenue à la source (%)', '<input type="number" id="hTax" min="0" max="100" step="any" inputmode="decimal" value="' + esc(dv.taxRate === null || dv.taxRate === undefined ? '' : dv.taxRate) + '" placeholder="facultatif">', 'Permet d\'estimer le net.', 'hTax') + '</div></div></div>' +
-    '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex ? '<button class="btn" type="button" id="hBuys">Achats…</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
+    '<div class="modal-actions"><div class="btn-row">' + (ex ? '<button class="btn" type="button" id="hAnalyze">Analyser les dividendes</button>' : '') + (ex ? '<button class="btn danger" type="button" id="hDel">' + icon('trash') + 'Supprimer</button>' : '') + (ex ? '<button class="btn" type="button" id="hBuys">Achats…</button>' : '') + (ex && Number(ex.quantity) > 0 ? '<button class="btn" type="button" id="hSell">Vendre / clôturer…</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="hSave">Enregistrer</button></div></div>', { wide: true });
   const sync = () => {
     const acc = $('#hType', m).value === 'etf_acc', none = $('#hPays', m).value === '0';
     $('#hDivBox', m).classList.toggle('hide', false);
@@ -73,6 +73,7 @@ function openHoldingModal(id) {
   wireTickerSearch(m);
   if (ex && (ex.marketError || !(ex.price > 0)) && Market.isISIN(ex.isin || ex.ticker)) showSymbolSuggestions($('#hSym', m), ex.isin || ex.ticker, ex.name, (x) => { $('#hTicker', m).value = x.symbol; fetchIntoHoldingForm(m); });
   if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
+  if (ex && $('#hAnalyze', m)) $('#hAnalyze', m).onclick = () => { closeModal(); runDividendAnalysis({ ids: new Set([ex.id]) }); };
   if (ex && $('#hBuys', m)) $('#hBuys', m).onclick = () => { closeModal(); openBuysModal(ex.id); };
   if (ex && $('#hSell', m)) $('#hSell', m).onclick = () => { closeModal(); openSellModal(ex.id); };
   $('#hSave', m).onclick = () => saveHoldingForm(m, ex);
@@ -698,7 +699,7 @@ function commitTransactions(p, o) {
   if (created.length) msg.push(created.length + ' actif(s) créé(s)');
   if (dupTx) { msg.push(dupTx + ' opération(s) déjà connue(s)'); notifyDuplicates(lastImportName, Object.keys(dupBy).map((k) => ({ name: k, n: dupBy[k] }))); } if (noHolding) msg.push(noHolding + ' sans actif correspondant');
   toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
-  if (created.length && state.settings.relayUrl) refreshMarket(created);
+  (created.length && state.settings.relayUrl ? refreshMarket(created) : Promise.resolve()).then(() => runDividendAnalysis({ auto: true, ids: null })).catch((e) => console.error(e));
 }
 
 
@@ -959,7 +960,7 @@ function openPositionsToComplete() {
 function dividendGapRows() {
   const out = [], today = todayISO();
   state.holdings.map((h) => ({ h, held: true })).concat((state.archive || []).filter((a) => !a.statementOnly).map((h) => ({ h, held: false }))).forEach(({ h, held }) => {
-    const divs = held ? ((h.dividend || {}).history || []).map((x) => x.exDate) : (h.divHist || []).map((x) => x[0]);
+    const divs = h.divHist && Array.isArray(h.divHist.items) && h.divHist.items.length ? h.divHist.items.map((x) => x[0]) : (held ? ((h.dividend || {}).history || []).map((x) => x.exDate) : []);
     if (divs.length < 3) return;
     const led = Ledger.run(Ledger.entriesFor(state, h).entries), from = led.first || String(h.addedAt || '').slice(0, 10);
     let to = held ? today : (led.last || h.closedAt || ''); if (h.listing === 'delisted') to = h.delistedAt || led.last || ''; if (!from || !to) return;

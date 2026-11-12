@@ -304,7 +304,7 @@ async function confirmDegiro(m, cur) {
   const parts = [r.tx + ' opération(s)']; if (divRes) parts.push('dividendes : ' + divRes.fresh + ' nouveau(x), ' + (divRes.known + divRes.adopted) + ' déjà connu(s), ' + divRes.updated + ' mis à jour, ' + divRes.ignored + ' ignoré(s)' + (divRes.stubs.length ? ', ' + divRes.stubs.length + ' société(s) non détenue(s)' : '')); if (r.created.length) parts.push(r.created.length + ' position(s) créée(s)'); if (r.archived.length) parts.push(r.archived.length + ' soldée(s) archivée(s)'); if (r.checked.length) parts.push(r.checked.length + ' à vérifier'); if (r.filled) parts.push(r.filled + ' complétée(s)'); if (r.aligned) parts.push(r.aligned + ' alignée(s)');
   go('portfolio'); renderPage();
   toast('Import terminé : ' + parts.join(' · ') + '.', { ms: 14000, action: { label: 'Annuler l\'import', fn: undoLastImport } });
-  enrichAfterImport(r.created, r.archived.concat(r.checked));
+  enrichAfterImport(r.created, r.archived.concat(r.checked)).then(() => runDividendAnalysis({ auto: true, ids: null })).catch((e) => console.error(e));
 }
 
 /* Plan d'import des dividendes d'un relevé de compte : positions (même compte), identifiants stables, rapprochement avec l'existant (Dividends.reconcile). Pur : n'écrit rien. */

@@ -55,6 +55,7 @@ const YAHOO = {
   'IWDA.AS': { name: 'iShares Core MSCI World', cur: 'EUR', type: 'ETF', divs: [] },
   'TTE.PA': { name: 'TotalEnergies SE', cur: 'EUR', type: 'EQUITY', price: 62, sector: 'Energy', divs: [['2026-03-20', .79]], splits: [['2023-06-01', 2, 1]] },
   'NOVO-B.CO': { name: 'Novo Nordisk A/S', cur: 'DKK', type: 'EQUITY', price: 700, sector: 'Healthcare', divs: [] },
+  'DIVX': { name: 'Dividend Corp', cur: 'EUR', type: 'EQUITY', price: 50, sector: 'Utilities', divs: [['2022-03-10', 1], ['2022-09-10', 1], ['2023-03-10', 0.8], ['2023-09-10', 0.8], ['2024-03-10', 0.8], ['2024-09-10', 0.8], ['2025-03-10', 0.8], ['2025-09-10', 0.8]] },
   'ALHYF.PA': { name: 'Lhyfe (ancien symbole)', cur: 'EUR', type: 'EQUITY', divs: [] },
   'LHYFE.PA': { name: 'Lhyfe SA', cur: 'EUR', type: 'EQUITY', price: 2.1, divs: [] }
 };
@@ -604,6 +605,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   await test('import DEGIRO : idempotent — réimporter le même fichier (ou le fichier trié à l\'envers) ne change rien', async () => {
     RELAY.old = false;
     const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV); await dgConfirm(p); await waitIdle(p);
+    await p.waitForFunction(() => Notify.pending().some((n) => /Analyse des dividendes/.test(n.title)), null, { timeout: 30000 }); ok(true, 'analyse des dividendes lancée automatiquement après l\'import (résultat dans la cloche)');
     const key = async () => { const s = await storeOf(p); return JSON.stringify([s.holdings.map((h) => [h.id, h.quantity, h.avgCost, h.isin]), s.archive.map((a) => [a.id, a.isin]), s.transactions.map((t) => [t.id, t.extId, t.qty, t.price]), s.accounts]); };
     const before = await key();
     await dgOpen(p, DG_CSV);
@@ -1520,6 +1522,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(600);
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const tx = await bellOpen(p); ok(/interruption de dividende/.test(tx) && /Société à trou/.test(tx) && /aucun dividende du/.test(tx), 'interruption signalée : ' + tx.slice(0, 260)); await bellClose(p);
     await p.evaluate(() => { notifyDuplicates('fichier.csv', [{ name: 'AIR LIQUIDE', n: 3 }, { name: 'TOTAL', n: 1 }], 2); }); await p.waitForTimeout(300); const t2 = await bellOpen(p); ok(/6 doublon\(s\) ignoré\(s\)/.test(t2) && /AIR LIQUIDE \(3\)/.test(t2) && /non recomptés/.test(t2), 'doublons signalés dans la cloche : ' + t2.slice(0, 260));
+  });
+  await test('analyse des dividendes : droits à chaque détachement, baisse du dividende, différences avec les données actuelles → question avant tout changement (cases), annulable', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'dx', ticker: 'DIVX', displayTicker: 'DIVX', isin: '', name: 'Dividend Corp', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 40, price: 50, account: 'main', logo: null, source: 'degiro', addedAt: '2022-01-05', dividend: { lastAmount: 1, frequency: 'quarterly', anchorMonth: 3, dateKind: 'pay' } }];
+    seed.transactions = [{ id: 'tx1', holdingId: 'dx', date: '2022-01-05', type: 'buy', qty: 10, price: 40, fees: 0, currency: 'EUR', amountAcct: 400, acctCur: 'EUR', source: 'degiro' }];
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForSelector('[data-do=div-analyze]'); await p.click('[data-do=div-analyze]');
+    await p.waitForSelector('[data-adf]', { timeout: 20000 }); const tx = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
+    ok(/Dividend Corp/.test(tx) && /Verse un dividende/.test(tx) && /8 versement\(s\) éligible\(s\)/.test(tx), 'positions analysées, versements éligibles : ' + tx.slice(0, 260)); ok(/baisse en 2023/.test(tx), 'baisse du dividende détectée (1,00 → 0,80 par titre en 2023)');
+    ok(/Différences avec vos données actuelles/i.test(tx) && /dividende enregistré 1 → dernier versement connu 0,8/.test(tx.replace(/\u202f|\u00a0/g, ' ')) && /fréquence trimestrielle → semestrielle/.test(tx), 'différence proposée avec question : ' + tx.slice(tx.toLowerCase().lastIndexOf('différences avec vos données actuelles'), tx.toLowerCase().lastIndexOf('différences avec vos données actuelles') + 330));
+    let s = await storeOf(p); eq(s.holdings[0].dividend.lastAmount, 1, 'rien modifié avant validation');
+    await p.click('#anApply'); await p.waitForTimeout(500); s = await storeOf(p); eq([s.holdings[0].dividend.lastAmount, s.holdings[0].dividend.frequency], [0.8, 'semiannual'], 'changement appliqué après validation');
+    await p.click('.toast button:has-text("Annuler")'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(700); s = await storeOf(p); eq(s.holdings[0].dividend.lastAmount, 1, 'annulable');
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
