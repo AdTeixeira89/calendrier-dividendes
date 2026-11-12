@@ -50,7 +50,7 @@ function analyseInstrument(h, closed, props) {
   const a = Dividends.analyse(div.items, from, to, f.qtyBefore, today); res.a = a; res.from = from; res.to = to; res.cur = div.currency || h.currency || 'EUR';
   res.missing = props.proposals.filter((p) => p.holdingId === h.id); res.already = props.already.filter((p) => p.holdingId === h.id).length;
   if (!closed && h.listing !== 'delisted') {
-    const dv = h.dividend || {}, items = div.items, hCur = h.currency || 'EUR', dCur = div.currency || hCur;
+    const dv = h.dividend || {}, items = div.items, hCur = Engine.divCur(h), dCur = div.currency || h.currency || 'EUR';
     // les dividendes de l'historique sont dans la devise de la cotation interrogée (ex. HKD) : ramenés dans la devise de la position (ex. EUR) avant toute comparaison
     const toH = (v) => { if (dCur === hCur) return v; const a = convert(v, dCur), b = convert(1, hCur); return a !== null && b ? a / b : null; };
     const lastRaw = items.length ? Number(items[items.length - 1][1]) : null, lastConv = lastRaw === null ? null : toH(lastRaw);

@@ -338,11 +338,14 @@
     } else {
       d.none = false;
       const last = active[active.length - 1];
+      const manualCur = !!(d.currency && d.currency !== (h.currency || ''));       // devise du dividende choisie à la main : le montant saisi n'est pas écrasé par la cotation (autre devise)
+      if (!manualCur) {
       d.lastAmount = last.amount;
       let freq = detectFrequency(a.dividends.slice(-8).map((x) => x.exDate));
       if (freq === 'irregular' && active.length === 1) freq = 'annual';
       d.frequency = freq;
       deriveSchedule(h, nowISO, a.dividends);          // mois, jour et créneaux de PAIEMENT (détachement + délai)
+      }
       if (a.instrumentType === 'ETF' && !h.typeLocked && h.type === 'stock') h.type = 'etf_dist';
     }
     return h;

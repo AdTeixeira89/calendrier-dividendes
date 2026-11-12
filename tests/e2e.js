@@ -1564,6 +1564,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { window.__divAutoTest = true; state.meta.lastDivAnalysisAt = 0; autoDivAnalysisIfDue(); }); await p.waitForFunction(() => Notify.pending().some((n) => /Analyse des dividendes/.test(n.title)), null, { timeout: 20000 });
     const at = await p.evaluate(() => state.meta.lastDivAnalysisAt); ok(at > Date.now() - 60000, 'date de la dernière analyse enregistrée'); const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { autoDivAnalysisIfDue(); }); await p.waitForTimeout(800); eq((RELAY.chartCalls || 0) - c0, 0, 'pas de nouvelle analyse avant 30 jours');
   });
+  await test('devise du dividende choisie dans la fiche (ex. cotée en EUR, dividende en HKD) : enregistrée, montant conservé à l\'actualisation, affichée dans la devise du dividende', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'dx', ticker: 'DIVX', displayTicker: 'DIVX', name: 'Dividend Corp', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 40, price: 50, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { lastAmount: 5, frequency: 'annual', anchorMonth: 7, dateKind: 'pay' } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1100 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { openHoldingModal('dx'); }); await p.waitForSelector('#hDivCur'); ok(/HKD/.test(await p.locator('#hDivCur').innerText()), 'devise du dividende proposée (HKD…)');
+    await p.selectOption('#hDivCur', 'HKD'); await p.fill('#hDiv', '8'); await p.click('#hSave'); await p.waitForTimeout(400);
+    let s = await storeOf(p); eq([s.holdings[0].dividend.currency, s.holdings[0].dividend.lastAmount], ['HKD', 8], 'devise du dividende enregistrée');
+    await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].dividend.history && state.holdings[0].dividend.history.length, null, { timeout: 12000 });
+    eq(await p.evaluate(() => state.holdings[0].dividend.lastAmount), 8, 'le montant saisi n\'est pas écrasé par la cotation (autre devise)');
+    await p.evaluate(() => { view.divTab = 'history'; go('portfolio'); }); await p.waitForTimeout(400);
+    eq(await p.evaluate(() => Engine.divCur(state.holdings[0])), 'HKD', 'devise du dividende utilisée par le moteur');
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {

@@ -12,7 +12,7 @@ function todayISO() { return Engine.toISO(new Date()); }
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const MOIS_C = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 const JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'SEK', 'DKK', 'NOK', 'JPY', 'AUD'];
+const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'CAD', 'SEK', 'DKK', 'NOK', 'JPY', 'AUD', 'HKD', 'CNY', 'SGD', 'NZD', 'PLN', 'CZK', 'HUF', 'ZAR', 'INR', 'KRW', 'BRL', 'MXN', 'TRY', 'ILS', 'THB'];      // devises proposées (toutes disponibles chez la BCE)
 
 /* ---------- formats ---------- */
 const _nf = {};

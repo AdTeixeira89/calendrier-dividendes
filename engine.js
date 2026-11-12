@@ -45,12 +45,19 @@
     return 'missing';
   }
 
+  /* Devise du dividende : celle choisie dans la fiche (ex. HKD) ; à défaut, celle de la cotation. Le dividende par titre est exprimé dans cette devise. */
+  function divCur(h) { return (h.dividend && h.dividend.currency) || h.currency || 'EUR'; }
   function annualPerShare(h) {
     if (!isPayer(h)) return 0;
     const sl = h.dividend.slots;
     if (Array.isArray(sl) && sl.length) return sl.reduce(function (s, x) { return s + num(x.amount); }, 0);
     const step = P.freqMonths(h.dividend.frequency);
     return num(h.dividend.lastAmount) * (12 / step);
+  }
+  /* Dividende annuel par titre ramené dans la devise de la position (pour le comparer au cours ou au prix de revient). */
+  function annualInPos(h, convert) {
+    const a = annualPerShare(h), dc = divCur(h), pc = h.currency || 'EUR'; if (!a || dc === pc || !convert) return a;
+    const x = convert(a, dc), y = convert(1, pc); return x !== null && y ? x / y : 0;
   }
   function taxRate(h) {
     const r = h.dividend && h.dividend.taxRate;
@@ -168,7 +175,7 @@
           if (qty <= 0) continue;
           const gross = p.amount * qty;
           events.push(makeEvent(base, {
-            id: 'f-' + h.id + '-' + p.date, date: p.date,
+            id: 'f-' + h.id + '-' + p.date, date: p.date, currency: divCur(h),
             dateKind: confirmed ? 'pay' : ((h.dividend || {}).dateKind || 'pay'),
             status: p.date < todayISO ? 'unrecorded' : (confirmed ? 'confirmed' : 'forecast'),
             perShare: p.amount, qty, gross,
@@ -211,7 +218,7 @@
       const rate = taxRate(h);
       let v = g;
       if (mode === 'net') { if (rate === null) fallbacks++; else v = g * (1 - rate / 100); }
-      const c = convert(v, h.currency || 'EUR');
+      const c = convert(v, divCur(h));
       if (c === null) { missing.add(h.currency); return; }
       total += c; per.push({ holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name, value: c, currency: h.currency });
     });
@@ -227,7 +234,7 @@
       payers++;
       const inv = invested(h);
       if (inv === null) return;
-      const ci = convert(annualPerShare(h) * num(h.quantity), h.currency || 'EUR');
+      const ci = convert(annualPerShare(h) * num(h.quantity), divCur(h));
       const cc = convert(inv, costCur(h));
       if (ci === null || cc === null) return;
       income += ci; cost += cc; withCost++;
@@ -280,7 +287,7 @@
     (state.holdings || []).forEach((h) => {
       if (filterIds && !filterIds.has(h.id) || !isPayer(h)) return;
       const v = value(h); if (v === null) return;
-      const ci = convert(annualPerShare(h) * num(h.quantity), h.currency || 'EUR'), cv = convert(v, h.currency || 'EUR'); if (ci === null || cv === null) return;
+      const ci = convert(annualPerShare(h) * num(h.quantity), divCur(h)), cv = convert(v, h.currency || 'EUR'); if (ci === null || cv === null) return;
       income += ci; val += cv; n++;
     });
     return { rate: val > 0 ? income / val : null, count: n };
@@ -688,7 +695,7 @@
     (state.holdings || []).forEach((h) => {
       if (ids && !ids.has(h.id)) return;
       let w = null;
-      if (basis === 'dividend') { const g = annualPerShare(h) * num(h.quantity); w = g > 0 ? convert(g, h.currency || 'EUR') : null; }
+      if (basis === 'dividend') { const g = annualPerShare(h) * num(h.quantity); w = g > 0 ? convert(g, divCur(h)) : null; }
       else if (basis === 'cost') { const i = invested(h); w = i === null ? null : convert(i, costCur(h)); }
       else {                                       // valeur de marché ; à défaut, montant investi (compté à part)
         const v = value_(h); w = v === null ? null : convert(v, h.currency || 'EUR');
@@ -772,7 +779,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };

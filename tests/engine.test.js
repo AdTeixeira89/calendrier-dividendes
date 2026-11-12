@@ -274,6 +274,15 @@ console.log(n + ' tests passed');
     const day2 = hh({ id: 'h', quantity: 1, avgCost: 20, price: 30, prevClose: 25, prevCloseAt: '2026-11-12' }), d2 = E.dailyChange({ holdings: [day2], transactions: tx }, (x) => x, null, '2026-11-13'), u2 = E.unrealized({ holdings: [day2] }, (x) => x, null);
     assert.deepStrictEqual([d2.amount, u2.gain], [5, 10], 'jour 2 : +5 sur la journée, +10 au total');
   });
+  t('devise du dividende distincte de la cotation (ex. cotée en EUR, dividende en HKD) : prévisions et rendements convertis depuis la devise du dividende', () => {
+    const h = hh({ id: 'c', currency: 'EUR', quantity: 10, avgCost: 50, price: 100, dividend: { lastAmount: 8, frequency: 'annual', anchorMonth: 7, dateKind: 'pay', currency: 'HKD' } });
+    const conv = (v, c) => (c === 'HKD' ? v / 9 : v);          // 9 HKD = 1 EUR
+    assert.strictEqual(E.divCur(h), 'HKD'); assert.strictEqual(E.annualPerShare(h), 8); assert.ok(Math.abs(E.annualInPos(h, conv) - 8 / 9) < 1e-12);
+    const rr = E.runRate({ holdings: [h] }, 'gross', conv, null); assert.ok(Math.abs(rr.total - 80 / 9) < 1e-9, 'revenu annuel estimé converti depuis la devise du dividende : ' + rr.total);
+    const ev = E.buildEvents({ holdings: [h], payments: [], transactions: [] }, new Date(2026, 5, 1), new Date(2026, 11, 31), new Date(2026, 10, 1), null).filter((x) => !x.detached);
+    assert.ok(ev.length && ev.every((x) => x.currency === 'HKD'), 'événements prévus dans la devise du dividende');
+    assert.strictEqual(E.divCur(hh({ currency: 'EUR' })), 'EUR', 'sans devise choisie : celle de la cotation');
+  });
   t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
     const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
     const ref = new Date(2026, 0, 1);

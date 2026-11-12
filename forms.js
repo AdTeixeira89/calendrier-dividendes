@@ -55,6 +55,7 @@ function openHoldingModal(id) {
     fld('Distribution', '<select id="hPays"><option value="1"' + (payer ? ' selected' : '') + '>Verse un dividende</option><option value="0"' + (!payer ? ' selected' : '') + '>Ne verse pas de dividende</option></select>', 'Aucun dividende n\'est jamais inventé : sans données, l\'actif reste « données manquantes ».', 'hPays') +
     '<div id="hDivFields"><div class="row2">' + fld('Dividende par titre (dernier)', '<input type="number" id="hDiv" step="any" inputmode="decimal" value="' + esc(dv.lastAmount === null || dv.lastAmount === undefined ? '' : dv.lastAmount) + '">', '', 'hDiv') +
     fld('Fréquence', '<select id="hFreq">' + ['monthly', 'quarterly', 'semiannual', 'annual'].map((f) => opt(f, FREQ_LABEL[f], dv.frequency === f)).join('') + '</select>', '', 'hFreq') + '</div>' +
+    fld('Devise du dividende', '<select id="hDivCur"><option value=""' + (!dv.currency ? ' selected' : '') + '>Même devise que le cours (' + esc(d.currency || '') + ')</option>' + CURRENCIES.filter((c) => c !== d.currency).map((c) => opt(c, c, dv.currency === c)).join('') + '</select>', 'À choisir si la société verse son dividende dans une autre devise que celle de la cotation (ex. HKD pour une action de Hong Kong cotée en euros). Le montant saisi est alors conservé et converti au taux du jour.', 'hDivCur') +
     '<div class="row2">' + fld('Mois d\'un versement', '<select id="hMonth"><option value="">—</option>' + MOIS.map((mm, i) => opt(i + 1, mm, Number(dv.anchorMonth) === i + 1)).join('') + '</select>', 'Les autres mois sont déduits de la fréquence.', 'hMonth') +
     fld('Ce mois correspond à…', '<select id="hKind">' + opt('pay', 'la date de paiement', (dv.dateKind || 'pay') === 'pay') + opt('ex', 'la date de détachement', dv.dateKind === 'ex') + '</select>', 'Les données de marché donnent le détachement ; le paiement est estimé (détachement + délai habituel).', 'hKind') + '</div>' +
     '<div class="row2">' + fld('Jour de paiement (facultatif)', '<select id="hDay"><option value="">Inconnu</option>' + Array.from({ length: 31 }, (_, i) => opt(i + 1, i + 1, Number(dv.payDay) === i + 1)).join('') + '</select>', '', 'hDay') +
@@ -154,6 +155,7 @@ function saveHoldingForm(m, ex) {
   if (none) { dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; }
   else {
     dv.lastAmount = numOrNull($('#hDiv', m).value); dv.frequency = $('#hFreq', m).value;
+    { const dc = $('#hDivCur', m) ? $('#hDivCur', m).value : ''; if (dc && dc !== d.currency) dv.currency = dc; else delete dv.currency; }
     const mo = $('#hMonth', m).value; dv.anchorMonth = mo ? Number(mo) : null; dv.dateKind = $('#hKind', m).value;
     const day = $('#hDay', m).value; dv.payDay = day ? Number(day) : null; dv.taxRate = numOrNull($('#hTax', m).value);
   }
