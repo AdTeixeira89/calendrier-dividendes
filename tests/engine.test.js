@@ -261,6 +261,12 @@ console.log(n + ' tests passed');
     assert.strictEqual(d3.amount, 5 * 10 + 5 * 5, 'quantité de la veille × écart + achat du jour × (cours − prix d\'achat)'); assert.strictEqual(d3.rows[0].bought, 25);
     const d4 = E.dailyChange({ holdings: [hh({ id: 'z', price: 10, prevClose: null })], transactions: [] }, (x) => x, null, '2026-10-14'); assert.deepStrictEqual([d4.count, d4.rows[0].why], [0, 'clôture précédente absente']);
   });
+  t('variation journalière : une position sans PRU n\'est pas comptée dans la plus-value (sa valeur reste dans le portefeuille)', () => {
+    const a = hh({ id: 'a', quantity: 10, price: 120, prevClose: 118, prevCloseAt: '2026-10-13' }), nopru = hh({ id: 'n', avgCost: null, quantity: 10, price: 50, prevClose: 40, prevCloseAt: '2026-10-13' });
+    const d = E.dailyChange({ holdings: [a, nopru], transactions: [] }, (x) => x, null, '2026-10-14');
+    assert.deepStrictEqual([d.amount, d.count, d.total, d.noPru], [20, 1, 2, ['T']]); assert.ok(/PRU absent/.test(d.rows.find((r) => r.id === 'n').why));
+    assert.strictEqual(E.portfolioValue({ holdings: [a, nopru] }, (x) => x, null).total, 10 * 120 + 10 * 50, 'valeur du portefeuille : les deux positions comptent');
+  });
   t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
     const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
     const ref = new Date(2026, 0, 1);

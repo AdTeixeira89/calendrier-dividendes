@@ -183,6 +183,20 @@
     state.payments = m.before.payments; state.archive = m.before.archive; state.estimates = m.before.estimates; state.migrations = state.migrations.filter((x) => x.id !== id); return true;
   }
 
-  root.Dividends = { isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
+  /* Continuité des dividendes pendant la détention (de from à to) : repère les périodes anormalement longues sans dividende par rapport à
+     l'intervalle habituel (médiane) de la société. Aucune conclusion avec moins de 3 dividendes connus ou hors de l'historique connu. */
+  function continuity(exDates, from, to) {
+    const ds = Array.from(new Set((exDates || []).filter(Boolean))).sort();
+    if (ds.length < 3 || !from || !to || to < ds[0]) return { status: 'insufficient', gaps: [], medianDays: null };
+    const days = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000, ints = [];
+    for (let i = 1; i < ds.length; i++) ints.push(days(ds[i - 1], ds[i]));
+    const sorted = ints.slice().sort((a, b) => a - b), med = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+    const limit = Math.max(med * 1.6, med + 45), gaps = [];
+    const consider = (a, b) => { const s = a > from ? a : from, en = b < to ? b : to; if (en > s && days(s, en) >= 30 && days(a, b) > limit) gaps.push({ from: s, to: en, days: Math.round(days(s, en)) }); };
+    for (let i = 1; i < ds.length; i++) consider(ds[i - 1], ds[i]);
+    const last = ds[ds.length - 1]; if (to > last && days(last, to) > limit) { const s = last > from ? last : from; if (days(s, to) >= 30) gaps.push({ from: s, to, days: Math.round(days(s, to)) }); }
+    return { status: gaps.length ? 'interrupted' : 'continuous', gaps, medianDays: Math.round(med) };
+  }
+  root.Dividends = { continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

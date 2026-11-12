@@ -42,7 +42,8 @@ function openHoldingModal(id) {
       'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div><div id="hSym" style="margin:-4px 0 10px"></div>' +
     (ex ? fld('Cotation', '<select id="hListing">' + opt('', 'Cotée en bourse', d.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', d.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur) et aucun dividende n\'est prévu ; vos versements déjà reçus sont conservés.', 'hListing') : '') +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
-    fld('Prix de revient unitaire (PRU)', '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="facultatif">', 'Ce que vous avez payé par titre — sert au rendement sur coût et à la plus-value', 'hCost') + '</div>' +
+    fld('Prix de revient unitaire (PRU)' + (ex ? '' : ' *'), '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="' + (ex ? 'facultatif' : 'obligatoire') + '">', 'Ce que vous avez payé par titre. Sans PRU, la position compte dans la valeur du portefeuille mais <b>pas</b> dans la plus-value.', 'hCost') + '</div>' +
+    (ex ? '' : '<div class="row2">' + fld('Date d\'achat *', '<input type="date" id="hBuyDate" max="' + todayISO() + '">', 'Date de l\'achat (ou du premier achat).', 'hBuyDate') + '<div class="field"><label class="chk"><input type="checkbox" id="hNoPru"><span>Je ne connais pas mon PRU</span></label><label class="chk"><input type="checkbox" id="hNoDate"><span>Je ne connais pas la date d\'achat</span></label></div></div>') +
     '<div class="row2">' + fld('Devise du PRU', '<select id="hCostCur">' + (CURRENCIES.indexOf(d.costCurrency || d.currency) < 0 ? [d.costCurrency || d.currency] : []).concat(CURRENCIES).map((c) => opt(c, c, c === (d.costCurrency || d.currency))).join('') + '</select>', 'Souvent l\'euro, même pour une action cotée en dollars', 'hCostCur') + fld('Cours actuel', '<input type="number" id="hPrice" min="0" step="any" inputmode="decimal" value="' + esc(d.price > 0 ? d.price : '') + '" placeholder="automatique">', d.priceAt ? 'Mis à jour automatiquement (cours du ' + esc(fmtDate(d.priceAt.slice(0, 10))) + ')' : 'Mis à jour par « Actualiser » ; saisie manuelle possible', 'hPrice') + '</div>' +
     '<div class="row2">' + fld('Nom', '<input type="text" id="hName" value="' + esc(d.name) + '">', '', 'hName') + fld('Compte', '<select id="hAcc">' + state.accounts.map((a) => opt(a.id, a.name, a.id === d.account)).join('') + '</select>', '', 'hAcc') + '</div>' +
     '<div class="row2">' + fld('Catégorie', '<select id="hType">' + (ex && Engine.category(d) === 'unknown' ? '<option value="" selected>À classer (à confirmer)</option>' : '') + Object.keys(Engine.TYPES).map((k) => opt(k, Engine.TYPES[k], !(ex && Engine.category(d) === 'unknown') && d.type === k)).join('') + '</select>', 'ETF ou action : un choix manuel est enregistré et jamais écrasé par un import ou une actualisation. Un ETF capitalisant ne verse aucun dividende.', 'hType') +
@@ -121,6 +122,14 @@ function saveHoldingForm(m, ex) {
   if (!t) { toast('Renseignez un ticker ou un ISIN.', { error: true }); return; }
   const d = hDraft, q = numOrNull($('#hQty', m).value);
   if (q === null || q < 0) { toast('Quantité invalide.', { error: true }); return; }
+  let buyDate = '';
+  if (!ex) {          // nouvelle position : PRU et date d'achat obligatoires, sauf case « inconnu » (non bloquant ; sans PRU, pas de comptage dans la plus-value)
+    const noPru = !!($('#hNoPru', m) && $('#hNoPru', m).checked), noDate = !!($('#hNoDate', m) && $('#hNoDate', m).checked), cost0 = numOrNull($('#hCost', m).value); buyDate = ($('#hBuyDate', m) || { value: '' }).value;
+    if (!(cost0 > 0) && !noPru) { toast('Renseignez le PRU, ou cochez « Je ne connais pas mon PRU » (la position ne comptera alors pas dans la plus-value).', { error: true }); $('#hCost', m).focus(); return; }
+    if (!buyDate && !noDate) { toast('Renseignez la date d\'achat, ou cochez « Je ne connais pas la date d\'achat ».', { error: true }); $('#hBuyDate', m).focus(); return; }
+    if (buyDate && buyDate > todayISO()) { toast('Date d\'achat dans le futur.', { error: true }); return; }
+    if (noPru) $('#hCost', m).value = '';
+  }
   const prevType = ex ? ex.type : null;
   d.ticker = t; d.displayTicker = t.toUpperCase(); d.quantity = q; d.avgCost = numOrNull($('#hCost', m).value);
   d.price = numOrNull($('#hPrice', m).value); if (!(d.price > 0)) { d.price = null; d.priceAt = null; } else if (!ex || ex.price !== d.price) d.priceAt = todayISO();
@@ -153,6 +162,7 @@ function saveHoldingForm(m, ex) {
   if (symChanged) { d.marketError = null; delete d.listingSuspect; d.fullAt = 1; delete d.quickAt; }      // nouveau symbole : l'ancienne erreur ne vaut plus, actualisation complète
   const i = state.holdings.findIndex((h) => h.id === d.id);
   if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
+  if (!ex && buyDate) { d.addedAt = buyDate; if (d.avgCost > 0 && d.quantity > 0) Ledger.addPurchase(state, d.id, { date: buyDate, qty: d.quantity, price: d.avgCost, fees: 0 }, { uid, today: todayISO() }); }      // l'achat daté alimente l'historique (dividendes éligibles, plus-value)
   saveState(); closeModal(); toast('Actif enregistré.'); renderPage();
   if ((symChanged || (ex && d.listing !== 'delisted' && ex.listing === 'delisted')) && state.settings.relayUrl) { toast('Vérification du symbole…', { ms: 2000 }); refreshMarket([d], { silent: true }).then(() => { const cur = holdingById(d.id); toast(cur && cur.marketError ? 'Toujours introuvable : ' + cur.marketError : 'Symbole vérifié : cours et dividendes à jour.', { error: !!(cur && cur.marketError), ms: 6000 }); afterInstrumentFix(); }); }
   else afterInstrumentFix();
@@ -527,6 +537,7 @@ function renderPositionsMapping(rows, hIdx) {
   $('#mGo', m).onclick = async () => {
     const c = cols(); if (c.t < 0 || c.q < 0) { toast('Sélectionnez au minimum les colonnes ticker et quantité.', { error: true }); return; }
     const r = classifyPositions(rows, hIdx, c), added = r.fresh;
+    notifyDuplicates('relevé de portefeuille', r.dups.map((x) => ({ name: String(x), n: 1 })));
     if (!added.length) { closeModal(); toast('Aucun nouvel actif : ' + r.dups.length + ' déjà présent(s), conservé(s) tel(s) quel(s)' + (r.bad ? ' · ' + r.bad + ' ligne(s) invalide(s) (colonnes mal choisies ?)' : '') + '.', { ms: 6000 }); return; }
     // Les actifs existants ne sont JAMAIS modifiés : on n'ajoute que les nouveaux.
     state.holdings.push.apply(state.holdings, added); saveState(); closeModal(); renderPage();
@@ -641,7 +652,7 @@ function commitTransactions(p, o) {
     const s = r.sym.toUpperCase(), nmn = norm(r.name);
     return state.holdings.find((h) => h.account === o.acc && ((s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn)));   // les comptes restent indépendants : jamais de rattachement à la position d'un autre compte
   };
-  const created = [], touched = new Set(); let dupTx = 0, noHolding = 0;
+  const created = [], touched = new Set(), dupBy = {}; let dupTx = 0, noHolding = 0;
   const all = p.buys.map((x) => Object.assign(x, { kind: 'buy' })).concat(p.sells.map((x) => Object.assign(x, { kind: 'sell' })), p.dividends.map((x) => Object.assign(x, { kind: 'dividend' })));
   const resolve = (r) => {
     let h = findHolding(r) || created.find((c) => (r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name)));
@@ -665,7 +676,7 @@ function commitTransactions(p, o) {
     } else {
       const tx = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || r.name, date: r.date, type: r.kind, qty: r.qty, price: r.price, fees: r.fees || 0, currency: r.currency || h.currency, source: 'csv', extId: r.ext || undefined };
       const key = r.ext || [tx.type, tx.date, tx.holdingId, tx.qty, tx.price].join('|');
-      if (txKeys.has(key)) { dupTx++; return; }
+      if (txKeys.has(key)) { dupTx++; const nm = h.name || h.displayTicker || h.ticker; dupBy[nm] = (dupBy[nm] || 0) + 1; return; }
       txKeys.add(key); newTx.push(tx);
     }
   });
@@ -685,7 +696,7 @@ function commitTransactions(p, o) {
   saveState(); closeModal(); renderPage();
   const msg = [newTx.length + ' opération(s)', 'dividendes : ' + dv.fresh + ' nouveau(x), ' + (dv.known + dv.adopted) + ' déjà connu(s), ' + dv.updated + ' mis à jour, ' + dv.ignored + ' ignoré(s)'];
   if (created.length) msg.push(created.length + ' actif(s) créé(s)');
-  if (dupTx) msg.push(dupTx + ' opération(s) déjà connue(s)'); if (noHolding) msg.push(noHolding + ' sans actif correspondant');
+  if (dupTx) { msg.push(dupTx + ' opération(s) déjà connue(s)'); notifyDuplicates(lastImportName, Object.keys(dupBy).map((k) => ({ name: k, n: dupBy[k] }))); } if (noHolding) msg.push(noHolding + ' sans actif correspondant');
   toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
   if (created.length && state.settings.relayUrl) refreshMarket(created);
 }
@@ -915,4 +926,54 @@ async function showSymbolSuggestions(box, isin, name, onPick) {
     box.innerHTML = '<div class="hint" style="margin-bottom:4px">Symboles trouvés pour cet ISIN — touchez le bon :</div>' + list.map((x, i) => '<button type="button" class="btn sm' + (x.price > 0 ? ' primary' : '') + '" data-sg="' + i + '" style="margin:2px 4px 2px 0">' + esc(x.symbol) + (x.price > 0 ? ' · ' + esc(fmtMoney(x.price, x.currency || 'EUR')) : ' · aucun cours') + (x.exchange ? ' · ' + esc(x.exchange) : '') + '</button>').join('');
     $$('[data-sg]', box).forEach((b) => b.onclick = () => onPick(list[Number(b.dataset.sg)]));
   } catch (e) { box.innerHTML = '<span class="hint">' + esc(e.message) + '</span>'; }
+}
+
+
+/* ==================================================================
+   DOUBLONS D'IMPORT, POSITIONS À COMPLÉTER, CONTINUITÉ DES DIVIDENDES (cloche)
+   ================================================================== */
+/* Un fichier réimporté (ou en partie déjà connu) : rien n'est recompté, la cloche l'indique. */
+function notifyDuplicates(file, list, divKnown) {
+  const n = list.reduce((s, x) => s + x.n, 0) + (divKnown || 0); if (!n) return;
+  const top = list.slice().sort((a, b) => b.n - a.n).slice(0, 6).map((x) => esc(x.name) + ' (' + x.n + ')');
+  Notify.push({ level: 'info', title: 'Import' + (file ? ' « ' + String(file).slice(0, 60) + ' »' : '') + ' : ' + n + ' doublon(s) ignoré(s)',
+    body: 'Déjà enregistrés, donc <b>non recomptés</b>' + (top.length ? ' : ' + top.join(', ') + (list.length > 6 ? '…' : '') : '') + (divKnown ? (top.length ? ' · ' : ' : ') + divKnown + ' dividende(s) déjà connu(s)' : '') + '. Une ligne n\'est ajoutée que si elle porte une autre date ou un autre prix (nouvel achat).' });
+}
+/* Positions détenues sans PRU (non comptées dans la plus-value) ou sans date d'achat. */
+function positionsToComplete() {
+  const hs = state.holdings.filter((h) => Number(h.quantity) > 0);
+  return { noPru: hs.filter((h) => !(Number(h.avgCost) > 0)), noDate: hs.filter((h) => !state.transactions.some((t) => t.holdingId === h.id && t.type === 'buy' && t.date)) };
+}
+function positionNotices() {
+  const p = positionsToComplete(), ids = new Set(p.noPru.concat(p.noDate).map((h) => h.id)); if (!ids.size) return [];
+  return [{ id: 'pos:todo', level: 'warn', title: ids.size + ' position(s) à compléter (PRU, date d\'achat)', body: (p.noPru.length ? '<b>' + p.noPru.length + '</b> sans PRU : leur valeur reste dans le portefeuille mais elles ne comptent <b>ni dans la plus-value totale ni dans celle du jour</b>. ' : '') + (p.noDate.length ? '<b>' + p.noDate.length + '</b> sans date d\'achat : les dividendes éligibles ne peuvent pas être vérifiés précisément.' : ''),
+    accept: { label: 'Compléter…', run: () => openPositionsToComplete(), ack: false } }];
+}
+function openPositionsToComplete() {
+  const p = positionsToComplete(), all = new Map(); p.noPru.forEach((h) => all.set(h.id, h)); p.noDate.forEach((h) => all.set(h.id, h));
+  const hs = Array.from(all.values()).sort((a, b) => (a.name || a.ticker || '').localeCompare(b.name || b.ticker || ''));
+  if (!hs.length) { toast('Toutes les positions sont complètes.'); return; }
+  openActionList('Positions à compléter', 'Un PRU et une date d\'achat fiables donnent une plus-value juste. Sans PRU, la position n\'est pas comptée dans la plus-value (jamais de faux chiffre).', hs.slice(0, 60).map((h) => { const miss = [!(Number(h.avgCost) > 0) ? 'PRU manquant' : '', !state.transactions.some((t) => t.holdingId === h.id && t.type === 'buy' && t.date) ? 'date d\'achat manquante' : ''].filter(Boolean).join(' · '); return { label: (h.name || h.displayTicker || h.ticker), note: miss, btn: 'Saisir le PRU…', run: () => openHoldingModal(h.id), btn2: 'Ajouter un achat daté…', run2: () => openBuysModal(h.id) }; }), hs.length > 60 ? (hs.length - 60) + ' autre(s) non affichées.' : '');
+}
+/* Interruption de dividende pendant la détention (aussi pour les positions vendues ou radiées). */
+function dividendGapRows() {
+  const out = [], today = todayISO();
+  state.holdings.map((h) => ({ h, held: true })).concat((state.archive || []).filter((a) => !a.statementOnly).map((h) => ({ h, held: false }))).forEach(({ h, held }) => {
+    const divs = held ? ((h.dividend || {}).history || []).map((x) => x.exDate) : (h.divHist || []).map((x) => x[0]);
+    if (divs.length < 3) return;
+    const led = Ledger.run(Ledger.entriesFor(state, h).entries), from = led.first || String(h.addedAt || '').slice(0, 10);
+    let to = held ? today : (led.last || h.closedAt || ''); if (h.listing === 'delisted') to = h.delistedAt || led.last || ''; if (!from || !to) return;
+    const r = Dividends.continuity(divs, from, to); if (r.status === 'interrupted') out.push({ id: h.id, name: h.name || h.displayTicker || h.ticker, held, gaps: r.gaps, every: r.medianDays });
+  });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+const gapText = (r) => r.gaps.slice(0, 2).map((g) => 'aucun dividende du ' + fmtDate(g.from) + ' au ' + fmtDate(g.to)).join(' ; ') + ' (habituellement tous les ~' + (r.every >= 330 ? Math.round(r.every / 365) + ' an(s)' : Math.max(1, Math.round(r.every / 30)) + ' mois') + ')';
+function continuityNotices() {
+  const rows = dividendGapRows(); if (!rows.length) return [];
+  return [{ id: 'div:continuity', level: 'info', title: rows.length + ' position(s) avec une interruption de dividende pendant la détention', body: rows.slice(0, 3).map((r) => '<b>' + esc(r.name) + '</b> : ' + esc(gapText(r))).join('<br>') + (rows.length > 3 ? '<br>…' : '') + '<br>Peut être normal (société qui a suspendu son dividende) ou signaler un versement non enregistré.',
+    accept: { label: 'Voir la liste', run: () => openContinuityList(), ack: false } }];
+}
+function openContinuityList() {
+  const rows = dividendGapRows(); if (!rows.length) { toast('Aucune interruption de dividende détectée.'); return; }
+  openActionList('Dividendes interrompus pendant la détention', 'Comparaison entre vos dates de détention et l\'historique des dividendes de la société (Yahoo Finance). Vérifiez si un versement manque dans vos relevés.', rows.slice(0, 60).map((r) => ({ label: r.name + (r.held ? '' : ' · position clôturée'), note: gapText(r), btn: 'Voir les opérations', run: () => { view.port.tab = 'ops'; view.ops.asset = r.id; go('portfolio'); } })), rows.length > 60 ? (rows.length - 60) + ' autre(s) non affichées.' : '');
 }

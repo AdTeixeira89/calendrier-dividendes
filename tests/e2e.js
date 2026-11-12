@@ -139,7 +139,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true }); await p.open();
     ok(await p.locator('text=Bienvenue').count(), 'état vide affiché');
     await p.click('[data-do=add]'); await p.fill('#hTicker', 'AAPL'); await p.fill('#hQty', '5'); await p.fill('#hCost', '100');
-    await p.selectOption('#hFreq', 'quarterly'); await p.fill('#hDiv', '0.25'); await p.selectOption('#hMonth', '2'); await p.click('#hSave'); await p.waitForTimeout(200);
+    await p.selectOption('#hFreq', 'quarterly'); await p.fill('#hDiv', '0.25'); await p.selectOption('#hMonth', '2'); await p.check('#hNoDate'); await p.click('#hSave'); await p.waitForTimeout(200);
     const s = await storeOf(p); eq(s.holdings.length, 1, 'un actif'); eq(s.holdings[0].avgCost, 100, 'PRU'); eq(s.holdings[0].dividend.lastAmount, 0.25, 'dividende');
     await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(300); const txt = await p.locator('#page').innerText();
     ok(/Prévision : dividendes annuels\s+5,00\s?€/.test(txt), 'dividendes annuels estimés = 5 × 0,25 × 4 = 5 € — obtenu : ' + txt.slice(0, 160));
@@ -287,7 +287,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true }); await p.open(); await p.click('[data-do=add]');
     await p.fill('#hTicker', 'Apple'); await p.waitForSelector('#hSuggest [data-sym]', { timeout: 4000 }); await p.click('#hSuggest [data-sym]'); await p.waitForTimeout(600);
     eq(await p.inputValue('#hTicker'), 'AAPL', 'ticker choisi'); eq(await p.inputValue('#hCur'), 'USD', 'devise récupérée'); eq(await p.inputValue('#hFreq'), 'quarterly', 'fréquence'); eq(await p.inputValue('#hKind'), 'pay', 'date = paiement estimé');
-    ok(Number(await p.inputValue('#hDiv')) > 0, 'dividende récupéré'); await p.fill('#hQty', '8'); await p.fill('#hCost', '150'); await p.click('#hSave'); await p.waitForTimeout(300);
+    ok(Number(await p.inputValue('#hDiv')) > 0, 'dividende récupéré'); await p.fill('#hQty', '8'); await p.fill('#hCost', '150'); await p.fill('#hBuyDate', '2025-03-05'); await p.click('#hSave'); await p.waitForTimeout(300);
     let s = await storeOf(p); eq(s.holdings.length, 1); eq(s.holdings[0].quantity, 8); eq(s.holdings[0].dividend.history.length > 0, true, 'historique de dividendes conservé');
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(150); await p.click('.asset'); await p.waitForSelector('#hType'); await p.selectOption('#hType', 'etf_acc'); ok(await p.locator('#hDivFields.hide').count(), 'champs dividende masqués pour un capitalisant');
     await p.click('#hSave'); await p.waitForTimeout(250); s = await storeOf(p); eq([s.holdings[0].type, s.holdings[0].dividend.none, s.holdings[0].dividend.lastAmount], ['etf_acc', true, null], 'capitalisant : aucun dividende');
@@ -609,7 +609,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await dgOpen(p, DG_CSV);
     let sum = (await p.locator('#dgSummary').innerText()).replace(/\n/g, ' | ');
     ok(/0\s+nouvelle\(s\) à ajouter/.test(sum) && /9\s+déjà connue\(s\) \/ doublon\(s\) ignoré\(s\)/.test(sum) && /Tout est déjà présent/.test(sum), 'récapitulatif : ' + sum);
-    ok(await p.locator('#dgGo').isDisabled(), 'bouton désactivé : rien à importer'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
+    ok(await p.locator('#dgGo').isDisabled(), 'bouton désactivé : rien à importer'); await p.keyboard.press('Escape'); await p.waitForTimeout(150); { const bt = await bellOpen(p); ok(/doublon\(s\) ignoré\(s\)/.test(bt), 'cloche : doublons signalés dès l\'aperçu — ' + bt.slice(0, 200)); await bellClose(p); }
     await dgOpen(p, [HEAD_DG].concat(DG_ROWS.slice().reverse()).join('\n')); ok(/0\s+nouvelle\(s\) à ajouter/.test(await p.locator('#dgSummary').innerText()), 'fichier trié à l\'envers : toujours 0 nouvelle'); await p.keyboard.press('Escape'); await p.waitForTimeout(150);
     eq(await key(), before, 'état strictement identique');
     // import partiel puis complet : les opérations manquantes seules sont ajoutées
@@ -1496,6 +1496,30 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/plus-value journalière/i.test(await p.locator('[data-do="daily-detail"]').innerText()), 'carte cliquable');
     await p.click('[data-do="daily-detail"]'); await p.waitForSelector('#ddCopy', { timeout: 5000 }).catch(async () => { throw new Error('modale absente : ' + JSON.stringify(p.errors || []) + ' ' + (await p.evaluate(() => { try { openDailyDetail(); return 'ok'; } catch (e) { return String(e.stack || e); } }))); }); const tx = await p.locator('.modal').innerText();
     ok(/Alpha/.test(tx) && /\+100,00/.test(tx.replace(/\u202f|\u00a0/g, '')) && /Beta/.test(tx) && /clôture précédente absente/.test(tx), 'détail : Alpha +100 €, Beta signalée sans clôture précédente : ' + tx.replace(/\s+/g, ' ').slice(0, 300));
+  });
+  await test('saisie d\'une position : PRU et date d\'achat obligatoires (avec « inconnu » non bloquant) ; sans PRU, pas de comptage dans la plus-value mais valeur conservée ; notification « à compléter » ; achat daté créé', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'k', ticker: 'KO', displayTicker: 'KO', name: 'Coca', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, price: 60, prevClose: 58, prevCloseAt: '2026-11-10', account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => openHoldingModal(null)); await p.waitForSelector('#hTicker'); await p.fill('#hTicker', 'NEW1'); await p.fill('#hQty', '4'); await p.click('#hSave');
+    ok(await p.locator('.toast:has-text("PRU")').count() > 0, 'bloqué sans PRU ni case « inconnu »'); eq((await storeOf(p)).holdings.length, 1, 'rien enregistré');
+    await p.fill('#hCost', '20'); await p.click('#hSave'); ok(await p.locator('.toast:has-text("date d\'achat")').count() > 0, 'bloqué sans date d\'achat ni case « inconnue »');
+    await p.fill('#hBuyDate', '2025-06-01'); await p.click('#hSave'); await p.waitForTimeout(400);
+    let s = await storeOf(p); const n1 = s.holdings.find((h) => h.ticker === 'NEW1'); ok(n1 && n1.avgCost === 20, 'position avec PRU enregistrée'); const tx = s.transactions.find((t) => t.holdingId === n1.id); ok(tx && tx.date === '2025-06-01' && tx.qty === 4 && tx.price === 20, 'achat daté créé (historique)');
+    await p.evaluate(() => openHoldingModal(null)); await p.waitForSelector('#hTicker'); await p.fill('#hTicker', 'NEW2'); await p.fill('#hQty', '3'); await p.check('#hNoPru'); await p.check('#hNoDate'); await p.click('#hSave'); await p.waitForTimeout(400);
+    s = await storeOf(p); const n2 = s.holdings.find((h) => h.ticker === 'NEW2'); ok(n2 && !(n2.avgCost > 0), 'position sans PRU acceptée (non bloquant)');
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const tx2 = await bellOpen(p); ok(/position\(s\) à compléter/.test(tx2) && /sans PRU/.test(tx2), 'cloche : positions à compléter : ' + tx2.slice(0, 200)); await bellClose(p);
+    const dc = await p.evaluate(() => { const d = Engine.dailyChange(state, convert, null, todayISO(), dailyFxOpts()); return { noPru: d.noPru, count: d.count }; }); ok(dc.noPru.length === 1 || dc.noPru.length === 0, 'plus-value du jour : sans PRU non comptée');
+    const val = await p.evaluate(() => Engine.portfolioValue(state, convert, null).total); ok(val >= 600, 'la valeur du portefeuille compte toujours les positions');
+  });
+  await test('continuité des dividendes : interruption pendant la détention signalée dans la cloche ; doublons d\'import signalés', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); const hist = ['2021-03-10', '2021-06-10', '2021-09-10', '2021-12-10', '2023-03-10', '2023-06-10', '2023-09-10', '2023-12-10'].map((d) => ({ exDate: d, payDate: null, amount: 1 }));
+    seed.holdings = [{ id: 'g', ticker: 'GAP', displayTicker: 'GAP', name: 'Société à trou', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, price: 60, account: 'main', logo: null, source: 'manual', addedAt: '2021-01-05', dividend: { lastAmount: 1, frequency: 'quarterly', anchorMonth: 3, history: hist } }];
+    seed.transactions = [{ id: 'tg', holdingId: 'g', date: '2021-01-05', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'degiro' }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(600);
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const tx = await bellOpen(p); ok(/interruption de dividende/.test(tx) && /Société à trou/.test(tx) && /aucun dividende du/.test(tx), 'interruption signalée : ' + tx.slice(0, 260)); await bellClose(p);
+    await p.evaluate(() => { notifyDuplicates('fichier.csv', [{ name: 'AIR LIQUIDE', n: 3 }, { name: 'TOTAL', n: 1 }], 2); }); await p.waitForTimeout(300); const t2 = await bellOpen(p); ok(/6 doublon\(s\) ignoré\(s\)/.test(t2) && /AIR LIQUIDE \(3\)/.test(t2) && /non recomptés/.test(t2), 'doublons signalés dans la cloche : ' + t2.slice(0, 260));
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

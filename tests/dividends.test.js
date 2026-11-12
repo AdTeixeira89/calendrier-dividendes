@@ -247,4 +247,15 @@ t('15. Un détachement futur n\'est pas « à recevoir » ; deux détachements p
   const e2 = E.buildEvents(m, new Date(2026, 9, 1), new Date(2026, 11, 31), new Date(2026, 10, 4), null).filter((e) => e.detached); assert.strictEqual(e2.length, 1, 'le versement du 4/11 couvre un seul des deux détachements (26/10 et 28/10) : l\'autre reste à recevoir');
 });
 
+t('19. Continuité des dividendes : trimestriel régulier = continu ; trou d\'un an pendant la détention = interruption ; hors détention ou historique insuffisant = aucune conclusion', () => {
+  const q = ['2022-03-10', '2022-06-10', '2022-09-10', '2022-12-10', '2023-03-10', '2023-06-10', '2023-09-10', '2023-12-10', '2024-03-10'];
+  assert.strictEqual(D.continuity(q, '2022-01-01', '2024-04-01').status, 'continuous', 'régulier');
+  const gap = ['2021-03-10', '2021-06-10', '2021-09-10', '2021-12-10', '2023-03-10', '2023-06-10', '2023-09-10'];
+  const r = D.continuity(gap, '2021-01-01', '2023-10-01'); assert.strictEqual(r.status, 'interrupted'); assert.deepStrictEqual([r.gaps[0].from, r.gaps[0].to], ['2021-12-10', '2023-03-10']); assert.ok(r.medianDays > 80 && r.medianDays < 100);
+  assert.strictEqual(D.continuity(gap, '2022-01-05', '2022-12-31').status, 'interrupted', 'détenu seulement pendant le trou : interruption');
+  assert.strictEqual(D.continuity(gap, '2023-04-01', '2023-10-01').status, 'continuous', 'détenu après le trou : continu');
+  const stop = D.continuity(q, '2022-01-01', '2025-06-01'); assert.strictEqual(stop.status, 'interrupted', 'plus aucun dividende depuis 2024-03 alors que la position est toujours détenue'); assert.strictEqual(stop.gaps[0].from, '2024-03-10');
+  assert.strictEqual(D.continuity(['2022-03-10', '2023-03-10'], '2022-01-01', '2025-01-01').status, 'insufficient', 'moins de 3 dividendes connus'); assert.strictEqual(D.continuity(q, '2010-01-01', '2012-01-01').status, 'insufficient', 'avant l\'historique connu');
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

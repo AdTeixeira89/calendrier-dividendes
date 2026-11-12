@@ -568,11 +568,12 @@
     /* opts (facultatif) : { rate(cur), ratePrev(cur) } = taux du jour et de la veille (unités de devise pour 1 €) : l'effet de change du jour est alors inclus
        (comme chez un courtier : valeur en euros d'aujourd'hui − valeur en euros de la veille). Sans taux de la veille, repli sur le taux actuel. */
     const o = opts || {}, fxOn = typeof o.rate === 'function' && typeof o.ratePrev === 'function', baseCode = o.base || 'EUR';
-    let amount = 0, base = 0, cnt = 0, total = 0, asOf = null; const missing = [], rows = [];
+    let amount = 0, base = 0, cnt = 0, total = 0, asOf = null; const missing = [], rows = [], noPru = [];
     (state.holdings || []).forEach((h) => {
       if (ids && !ids.has(h.id)) return;
       if (!(num(h.quantity) > 0) || !(h.price > 0)) return;
       total++; const name = h.name || h.displayTicker || h.ticker, cur = h.currency || 'EUR';
+      if (invested(h) === null) { noPru.push(name); rows.push({ id: h.id, name, cur, qty: num(h.quantity), price: h.price, prevClose: h.prevClose || null, delta: null, why: 'PRU absent : non comptée dans la plus-value (sa valeur reste dans le portefeuille)' }); return; }
       if (!(h.prevClose > 0) || !h.prevCloseAt) { missing.push(name); rows.push({ id: h.id, name, cur, qty: num(h.quantity), price: h.price, prevClose: null, delta: null, why: 'clôture précédente absente' }); return; }
       const txs = (state.transactions || []).filter((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell')), consistent = txs.length && Math.abs(txs.reduce((s, t) => s + (t.type === 'buy' ? 1 : -1) * num(t.qty), 0) - num(h.quantity)) <= 1e-6;
       const q = quantityAt(state, h, h.prevCloseAt);
@@ -591,7 +592,7 @@
       amount += a; base += prevB; cnt++; if (!asOf || h.prevCloseAt > asOf) asOf = h.prevCloseAt;
       rows.push({ id: h.id, name, cur, qty: q, price: h.price, prevClose: h.prevClose, prevCloseAt: h.prevCloseAt, priceAt: h.priceAt || null, delta: a, pct: prevB > 0 ? a / prevB : null, fx: fxUsed, bought });
     });
-    return { amount, pct: base > 0 ? amount / base : null, count: cnt, total, missing, prevDate: asOf, rows };
+    return { amount, pct: base > 0 ? amount / base : null, count: cnt, total, missing, noPru, prevDate: asOf, rows };
   }
 
   /* ---------- rendement annualisé pondéré par les flux (TRI / XIRR) ----------
