@@ -86,7 +86,7 @@ async function runDividendAnalysis(o) {
   }
   const errors = await fetchDivHistories(list, (i, n, h) => { if (!m) return; const msg = $('#anMsg', m), bar = $('#anBar', m); if (msg && h) msg.textContent = (h.name || h.displayTicker || h.ticker) + ' (' + (i + 1) + ' / ' + n + ')…'; if (bar) bar.style.width = Math.round(100 * i / n) + '%'; }, () => cancelled);
   if (cancelled) return;
-  saveState(); if (m) closeModal();
+  state.meta.lastDivAnalysisAt = Date.now(); saveState(); if (m) closeModal();
   const { results } = computeDividendAnalysis(new Set(list.map((x) => x.h.id))), issues = results.filter((r) => analysisIssues(r) > 0);
   view.lastDivAnalysis = { at: Date.now(), ids: new Set(list.map((x) => x.h.id)), errors };
   if (o.auto) {

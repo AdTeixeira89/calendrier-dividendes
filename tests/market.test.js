@@ -145,3 +145,15 @@ const chart = (cur, divs, type='EQUITY', name='Air Liquide') => ({ chart:{ resul
   assert.deepStrictEqual([r.fail, r.ok], [1, 0]); assert.ok(/aucun cours pour OLD\.PA/.test(h.marketError), 'cours vide = erreur explicite');
   console.log('ok   ISIN à plusieurs cotations : celle qui a un cours est retenue, suggestions pour l\'utilisateur, cours vide signalé');
 })();
+
+(async () => {
+  M.setDelay(0);
+  // société qui commence à verser un dividende : détectée à l'actualisation (pas pour un actif interrogé pour la première fois)
+  const client = { fetchAsset: async (tk) => ({ symbol: tk, resolved: false, name: tk, currency: 'USD', price: 300, priceAt: '2026-11-11T20:00:00Z', hist: { from: '2026-05', c: [1, 2] }, splits: [], sector: null, dividends: [{ exDate: '2026-10-20', amount: 0.25 }] }) };
+  const tesla = { id: 't', ticker: 'TSLA', name: 'Tesla', currency: 'USD', dividend: { none: true, history: [] }, hist: { from: '2026-01', c: [1, 2, 3] }, fullAt: Date.now() - 3600000 };
+  const fresh = { id: 'n', ticker: 'NEW', name: 'Nouvelle', currency: 'USD', dividend: {} };
+  const r = await M.refreshMany(client, [tesla, fresh], '2026-11-12', { quick: true });
+  assert.deepStrictEqual(r.started.map((x) => [x.name, x.amount, x.ex]), [['Tesla', 0.25, '2026-10-20']], 'Tesla commence à verser ; l\'actif tout juste ajouté n\'est pas signalé');
+  assert.strictEqual(tesla.dividend.none, false); assert.strictEqual(tesla.dividend.lastAmount, 0.25);
+  console.log('ok   société qui commence à verser un dividende : détectée à l\'actualisation, position remise « verse un dividende »');
+})();

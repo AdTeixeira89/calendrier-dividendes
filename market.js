@@ -419,10 +419,13 @@
      hooks.quick : actualisation légère (voir ci-dessus), 4 requêtes en parallèle ; sinon un actif à la fois avec une pause. */
   async function refreshMany(client, holdings, nowISO, hooks) {
     hooks = hooks || {};
-    const quick = !!hooks.quick, res = { ok: 0, fail: 0, skipped: 0, newDiv: 0, errors: [], stopped: false }, now = Date.now();
+    const quick = !!hooks.quick, res = { ok: 0, fail: 0, skipped: 0, newDiv: 0, started: [], errors: [], stopped: false }, now = Date.now();
     let next = 0, halt = false, done = 0;
+    /* « Commence à verser » : la position n'avait aucun dividende connu (déjà interrogée au moins une fois) et en a maintenant. */
+    const pays = (h) => !!(h.dividend && !h.dividend.none && Array.isArray(h.dividend.history) && h.dividend.history.length);
+    const noteStart = (h, wasPayer, hadFetch) => { if (hadFetch && !wasPayer && pays(h)) { const last = h.dividend.history[h.dividend.history.length - 1]; res.started.push({ id: h.id, name: h.name || h.displayTicker || h.ticker, amount: last.amount, ex: last.exDate, currency: h.currency || 'EUR' }); } };
     const one = async (h) => {
-      let pause = true;
+      let pause = true; const wasPayer = pays(h), hadFetch = !!h.fullAt;
       if (h.listing === 'delisted') { res.skipped++; return; }                       // société déclarée plus cotée : plus aucune requête
       try {
         if (quick && !needsFull(h, now)) {
@@ -433,7 +436,7 @@
             const fresh = newDividends(h, a);
             if (fresh.length || splitsChanged(h, a)) {                                                    // nouveau dividende ou fractionnement : revue complète de CET actif seulement
               const f = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
-              applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; if (fresh.length) res.newDiv++;
+              applyToHolding(h, f, nowISO); noteListing(h, f, nowISO); h.fullAt = now; if (fresh.length) res.newDiv++; noteStart(h, wasPayer, hadFetch);
             } else { applyQuote(h, a, nowISO); noteListing(h, a, nowISO); if (!h.fullAt) h.fullAt = now; }
             h.quickAt = now; h.marketError = null;
             if (!(a.price > 0) && !fresh.length) throw new Error(noPriceMsg(a));
@@ -441,7 +444,7 @@
           }
         } else {
           const a = await client.fetchAsset(h.ticker, h.name, { needSector: !h.sector && !h.geoLocked });
-          applyToHolding(h, a, nowISO); noteListing(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null;
+          applyToHolding(h, a, nowISO); noteListing(h, a, nowISO); h.fullAt = now; h.quickAt = now; h.marketError = null; noteStart(h, wasPayer, hadFetch);
           if (!(a.price > 0)) throw new Error(noPriceMsg(a));
           res.ok++;
         }

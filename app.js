@@ -211,6 +211,7 @@ async function refreshMarket(list, o) {
   }
   refreshing = false;
   updateMarketNotices(res);
+  (res.started || []).forEach((s) => Notify.push({ level: 'info', title: s.name + ' commence à verser un dividende', body: 'Premier dividende connu : <b>' + esc(fmtNum(s.amount, 4)) + ' ' + esc(s.currency) + '</b> par titre (détachement le ' + esc(fmtDate(s.ex)) + '). La position est désormais marquée « verse un dividende » et entre dans les prévisions et le calendrier. Pour les versements déjà passés, lancez l\'analyse des dividendes.', accept: { label: 'Analyser cette position', run: () => runDividendAnalysis({ ids: new Set([s.id]) }), ack: false } }));
   if (res.ok || (ares && ares.ok)) { Dividends.learnPayLags(state, Market, nowISO); state.meta.lastMarketUpdate = Date.now(); saveState(); ensureFxHistory(); }   // rien à enregistrer (ni à synchroniser) si tout a échoué
   if (modal) closeModal();
   if (!o.silent) renderPage(); else if (res.ok) renderPageSoft();
@@ -257,6 +258,15 @@ async function refreshArchive(entries, nowISO) {
 const REFRESH_EVERY_H = 12;      // actualisation automatique : deux fois par jour au plus (à l'ouverture et au retour au premier plan)
 function staleMarket() { const t = state.meta.lastMarketUpdate; return !t || Date.now() - t > REFRESH_EVERY_H * 3600 * 1000; }
 let lastAutoTry = 0;
+/* Une fois par mois (par appareil) : recherche automatique des dividendes de toutes les positions (société qui commence à verser, nouveaux versements dus, baisses, interruptions). Résultat dans la cloche. */
+const DIV_ANALYSIS_EVERY_DAYS = 30;
+function autoDivAnalysisIfDue() {
+  const last = Number(state.meta.lastDivAnalysisAt) || 0;
+  if ((navigator.webdriver && !window.__divAutoTest) || !state.settings.relayUrl || !navigator.onLine || !state.holdings.length || Date.now() - last < DIV_ANALYSIS_EVERY_DAYS * 86400000 || (typeof lastDivAutoTry !== 'undefined' && Date.now() - lastDivAutoTry < 3600000)) return;
+  lastDivAutoTry = Date.now();
+  runDividendAnalysis({ auto: true, ids: null }).then(() => { state.meta.lastDivAnalysisAt = Date.now(); saveState(); }).catch((e) => console.error(e));
+}
+let lastDivAutoTry = 0;
 function autoRefreshIfStale() {
   if (!state.settings.autoRefresh || !state.settings.relayUrl || !state.holdings.length || refreshing || !navigator.onLine || !staleMarket() || Date.now() - lastAutoTry < 10 * 60 * 1000) return;
   lastAutoTry = Date.now(); refreshMarket(null, { silent: true, quick: true });
@@ -776,10 +786,10 @@ function startApp() {
     window.addEventListener('hashchange', () => { const tab = view.divTab, p = pageFromHash(); if (p !== view.page || (p === 'dividends' && tab !== view.divTab)) { view.page = p; renderPage(); } });
     window.addEventListener('online', () => { if (Cloud.user()) { pullIfChanged(); if (state.meta.dirty) scheduleSync(); } });
     window.addEventListener('offline', () => { if (Cloud.user()) setSync('offline', 'Hors-ligne'); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); setTimeout(autoRefreshIfStale, 1500); } });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pullIfChanged(); checkNotifications(); setTimeout(autoRefreshIfStale, 1500); setTimeout(autoDivAnalysisIfDue, 20000); } });
     ensureFx(); ensureFxHistory(); initPullRefresh();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js').then(() => { snapshotForWorker(); checkNotifications(); }).catch(() => {});
-    refreshPayLags(); setTimeout(autoRefreshIfStale, 2500);
+    refreshPayLags(); setTimeout(autoRefreshIfStale, 2500); setTimeout(autoDivAnalysisIfDue, 15000);
     setInterval(() => { if (document.visibilityState === 'visible' && Cloud.user() && navigator.onLine) pullIfChanged(); }, 30000);      // modifications d'un autre appareil reprises en moins de 30 s
   }
   renderPage();

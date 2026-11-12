@@ -1555,6 +1555,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { openHoldingModal('cl'); }); await p.waitForSelector('#hSymMore'); await p.click('#hSymMore'); await p.waitForSelector('[data-sg]'); ok(/LHYFE\.PA/.test(await p.locator('#hSym').innerText()), 'cotations proposées pour l\'ISIN malgré un cours existant');
     await p.click('[data-sg]:has-text("LHYFE.PA")'); await p.waitForFunction(() => document.querySelector('#hCur').value === 'EUR'); eq(await p.inputValue('#hTicker'), 'LHYFE.PA', 'symbole choisi'); eq(await p.inputValue('#hCur'), 'EUR', 'devise de la nouvelle cotation');
   });
+  await test('société qui commence à verser un dividende : détectée à l\'actualisation (notification), puis analyse automatique une fois par mois', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'dx', ticker: 'DIVX', displayTicker: 'DIVX', name: 'Dividend Corp', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 40, price: 50, hist: { from: '2026-01', c: [40, 41, 42, 43, 44, 45, 46, 47, 48, 49] }, fullAt: Date.now() - 3600000, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true, history: [] } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { refreshMarket(null, { silent: true, quick: true }); }); await p.waitForFunction(() => Notify.pending().some((n) => /commence à verser un dividende/.test(n.title)), null, { timeout: 15000 });
+    const h = await p.evaluate(() => state.holdings[0].dividend); eq([h.none, h.lastAmount], [false, 0.8], 'position remise « verse un dividende » avec le dernier montant');
+    await p.evaluate(() => { window.__divAutoTest = true; state.meta.lastDivAnalysisAt = 0; autoDivAnalysisIfDue(); }); await p.waitForFunction(() => Notify.pending().some((n) => /Analyse des dividendes/.test(n.title)), null, { timeout: 20000 });
+    const at = await p.evaluate(() => state.meta.lastDivAnalysisAt); ok(at > Date.now() - 60000, 'date de la dernière analyse enregistrée'); const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { autoDivAnalysisIfDue(); }); await p.waitForTimeout(800); eq((RELAY.chartCalls || 0) - c0, 0, 'pas de nouvelle analyse avant 30 jours');
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {
