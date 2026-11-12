@@ -36,7 +36,7 @@ function renderSettings(host) {
   host.innerHTML = pageHead('Paramètres', 'Compte, préférences d\'affichage et gestion des données') +
     (account ? sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) : '') + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
     (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Rappels de versement', '', notif) +
-    '<p class="hint" style="text-align:center;margin-top:18px">StockPilot · version 2 · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
+    '<p class="hint" style="text-align:center;margin-top:18px">StockPilot · build ' + APP_BUILD + ' · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
   wireDo(host);
   const on = (id, fn) => { const e = $('#' + id, host); if (e) e.onclick = fn; };
   on('sIn', () => showAuth('in'));
