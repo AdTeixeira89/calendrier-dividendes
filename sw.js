@@ -1,12 +1,13 @@
 /* Service worker — hors-ligne + rappels de versement */
 importScripts('payouts.js');
 
-const SHELL = 'dividendes-shell-v63';
+const SHELL = 'dividendes-shell-v64';
 const DATA = 'dividendes-data';
 const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'ledger.js', 'dividends.js', 'sync.js', 'pdf.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'notify.js', 'pages.js', 'dashboard.js', 'forms.js', 'analysis.js', 'history.js', 'check.js', 'refresh.js', 'settings.js', 'app.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 
+/* Installation ATOMIQUE : tous les fichiers de la version ou rien (si l'un échoue, l'ancienne version reste en place, complète). */
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES).catch(() => {})).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -16,18 +17,16 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Réseau d'abord (toujours la dernière version du code), cache en secours hors-ligne.
+/* Les fichiers de l'application sont servis depuis UNE SEULE version (le cache de cette version) : jamais de mélange entre fichiers de versions différentes,
+   même avec un mauvais réseau. Une nouvelle version s'installe d'un bloc (sw.js change) puis remplace l'ancienne. sw.js lui-même et tout ce qui n'est pas
+   dans la liste passent par le réseau. */
 self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin || /\/sw\.js$/.test(url.pathname)) return;
+  const key = url.origin + url.pathname;
   e.respondWith(
-    fetch(req, { cache: 'no-cache' })
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => {});
-        return res;
-      })
-      .catch(() => caches.match(req).then((r) => r || caches.match('index.html')))
+    caches.open(SHELL).then((c) => c.match(key).then((hit) => hit || (req.mode === 'navigate' ? c.match(new URL('index.html', self.registration.scope).href) : undefined)))
+      .then((hit) => hit || fetch(req).catch(() => caches.match('index.html')))
   );
 });
 

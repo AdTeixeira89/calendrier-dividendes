@@ -4,7 +4,7 @@
    2. cours / dividendes / historique Yahoo des actifs affichés, 3. taux de change, 4. actualités, 5. synchronisation du compte.
    APP_BUILD doit rester égal au numéro de version du cache du service worker (sw.js : dividendes-shell-vNN) : un test le vérifie.
    ================================================================== */
-const APP_BUILD = 63;
+const APP_BUILD = 64;
 let pullBusy = false, updateAvail = false;
 
 /* Version publiée (sw.js lu sans cache). null = injoignable / hors-ligne. */
@@ -18,7 +18,14 @@ async function updateAvailable() { const v = await fetchPublishedBuild(); return
 
 /* Recharge l'application avec la nouvelle version (le service worker est invité à se mettre à jour, puis la page est rechargée). */
 async function applyAppUpdate() {
-  try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) { /* le rechargement suffit : le service worker sert le réseau d'abord */ }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) {
+      await reg.update();
+      const w = reg.installing || reg.waiting;          // la nouvelle version s'installe d'un bloc puis s'active : on attend son activation avant de recharger
+      if (w && w.state !== 'activated') await new Promise((res) => { const t = setTimeout(res, 12000); w.addEventListener('statechange', () => { if (w.state === 'activated' || w.state === 'redundant') { clearTimeout(t); res(); } }); });
+    }
+  } catch (e) { /* le rechargement suffit */ }
   location.reload();
 }
 

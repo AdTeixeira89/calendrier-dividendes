@@ -1576,6 +1576,11 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { view.divTab = 'history'; go('portfolio'); }); await p.waitForTimeout(400);
     eq(await p.evaluate(() => Engine.divCur(state.holdings[0])), 'HKD', 'devise du dividende utilisée par le moteur');
   });
+  await test('démarrage avec un fichier manquant (mise à jour incomplète) : une seule tentative de réparation (cache vidé, rechargement), puis message explicite au lieu d\'une page cassée', async () => {
+    const p = await device({ guest: true, seed: SEED(1) }); await p.context().route('**/forms.js', (r) => r.abort());
+    let loads = 0; p.on('load', () => { loads++; }); await p.open(); await p.waitForFunction(() => /Mise à jour incomplète/.test(document.body.innerText), null, { timeout: 15000 });
+    ok(/holdingByNameAny|openActionList/.test(await p.locator('body').innerText()), 'message : parties manquantes nommées'); ok(loads >= 1 && loads <= 4, 'pas de boucle de rechargement (' + loads + ' chargement(s))');
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {

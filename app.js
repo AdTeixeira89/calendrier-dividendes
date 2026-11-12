@@ -827,3 +827,18 @@ async function boot() {
   setTimeout(() => { if (first && !Cloud.user()) noSession(); }, 6000);   // filet de sécurité
 }
 boot();
+
+
+/* Contrôle d'intégrité au démarrage : si une partie de l'application manque (fichiers de versions mélangées après une mise à jour interrompue, mauvais réseau),
+   le cache est vidé et la page rechargée UNE fois ; si le problème persiste, un message l'explique au lieu d'une page cassée. */
+(function integrityCheck() {
+  const need = ['holdingByNameAny', 'openActionList', 'runDividendAnalysis', 'openDelistModal', 'openLiquidationModal', 'notifyDuplicates', 'openManualFx', 'Pdf', 'Sync', 'Dividends', 'Ledger', 'Engine', 'Market', 'Notify', 'positionNotices', 'continuityNotices'];
+  const missing = need.filter((n) => { try { return new Function('return typeof ' + n)() === 'undefined'; } catch (e) { return true; } });
+  if (!missing.length) { try { sessionStorage.removeItem('sp_heal'); } catch (e) { /* ignoré */ } return; }
+  let tried = false; try { tried = sessionStorage.getItem('sp_heal') === '1'; sessionStorage.setItem('sp_heal', '1'); } catch (e) { /* ignoré */ }
+  if (!tried && typeof caches !== 'undefined') {
+    Promise.all([caches.keys().then((ks) => Promise.all(ks.filter((k) => k.indexOf('dividendes-shell') === 0).map((k) => caches.delete(k)))), navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.unregister()))) : null]).catch(() => {}).then(() => location.reload());
+    return;
+  }
+  window.addEventListener('DOMContentLoaded', () => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:99999;background:#fff3cd;color:#664d03;border:1px solid #ffecb5;border-radius:10px;padding:12px;font:14px system-ui'; d.textContent = 'Mise à jour incomplète (' + missing.join(', ') + ' manquant). Vérifiez votre connexion puis fermez et rouvrez l\'application.'; document.body.appendChild(d); });
+})();
