@@ -978,3 +978,14 @@ function openContinuityList() {
   const rows = dividendGapRows(); if (!rows.length) { toast('Aucune interruption de dividende détectée.'); return; }
   openActionList('Dividendes interrompus pendant la détention', 'Comparaison entre vos dates de détention et l\'historique des dividendes de la société (Yahoo Finance). Vérifiez si un versement manque dans vos relevés.', rows.slice(0, 60).map((r) => ({ label: r.name + (r.held ? '' : ' · position clôturée'), note: gapText(r), btn: 'Voir les opérations', run: () => { view.port.tab = 'ops'; view.ops.asset = r.id; go('portfolio'); } })), rows.length > 60 ? (rows.length - 60) + ' autre(s) non affichées.' : '');
 }
+
+/* Mise à jour du relais Cloudflare (5 étapes) avec copie du nouveau code. */
+function openRelayUpdateHelp() {
+  const m = openModal('<h2>Mettre à jour le relais de données</h2><div class="sub">Le relais est le petit programme Cloudflare qui va chercher les cours chez Yahoo. L\'ancienne version garde chaque cours 6 h en mémoire ; la nouvelle, 1 minute.</div>' +
+    '<ol style="margin:8px 0 8px 18px;line-height:1.6"><li>Appuyez sur <b>« Copier le nouveau code »</b> ci-dessous.</li><li>Ouvrez <b>dash.cloudflare.com</b> → <b>Workers &amp; Pages</b> → votre relais (ex. <i>dividende-relais</i>).</li><li>Appuyez sur <b>Edit code</b>, <b>supprimez tout</b> le code existant, puis <b>collez</b> le nouveau.</li><li>Appuyez sur <b>Deploy</b>.</li><li>Revenez ici et actualisez : l\'alerte disparaît.</li></ol>' +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Fermer</button><button class="btn primary" type="button" id="rlCopy">Copier le nouveau code</button></div>');
+  $('#rlCopy', m).onclick = async () => {
+    try { const r = await fetch('relay/worker.js', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); const txt = await r.text(); try { await navigator.clipboard.writeText(txt); } catch (e) { const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } toast('Code copié (' + txt.length + ' caractères) : collez-le dans Cloudflare.', { ms: 8000 }); }
+    catch (e) { toast('Impossible de copier le code automatiquement (' + e.message + '). Il est dans le dossier relay/ du dépôt GitHub (worker.js).', { error: true, ms: 9000 }); }
+  };
+}

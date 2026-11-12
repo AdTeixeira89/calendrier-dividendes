@@ -7,6 +7,7 @@ const ALLOWED_ORIGINS = [
   'https://adteixeira89.github.io',
 ];
 
+const RELAY_VERSION = '3';      // l'application lit ce numéro : sans lui, elle signale un relais ancien (cours gardés 6 h en cache)
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 function cors(origin){
@@ -15,6 +16,8 @@ function cors(origin){
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
+    'Access-Control-Expose-Headers': 'X-Relay-Version',
+    'X-Relay-Version': RELAY_VERSION,
   };
 }
 
@@ -35,7 +38,7 @@ export default {
     if(request.method !== 'GET') return reply({ error: 'Méthode non autorisée' }, 405, origin);
 
     const url = new URL(request.url);
-    let target;
+    let target, ttl = 21600;           // durée de cache chez Cloudflare : 6 h pour les recherches (stables)
 
     if(url.pathname === '/translate'){
       // Traduction automatique en français des titres d'actualités (service public de traduction de Google, puis MyMemory en secours ; sans clé).
@@ -74,6 +77,7 @@ export default {
       const range = ['6mo', '5y', '10y', 'max'].includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '5y';
       const interval = ['1mo', '1wk', '1d'].includes(url.searchParams.get('interval')) ? url.searchParams.get('interval') : '1mo';
       target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&events=div,splits`;
+      ttl = 60;                         // cours : 1 minute seulement (avant : 6 h, d'où des prix en retard)
     }else if(url.pathname === '/search'){
       // Recherche d'un titre par ISIN ou par nom → symbole Yahoo.
       const q = (url.searchParams.get('q') || '').trim();
@@ -91,9 +95,9 @@ export default {
     // Cache de 6 h côté Cloudflare : ménage Yahoo et accélère les relances.
     const upstream = await fetch(target, {
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-      cf: { cacheTtl: 21600, cacheEverything: true },
+      cf: { cacheTtl: ttl, cacheEverything: true },
     });
     const text = await upstream.text();
-    return reply(text, upstream.status, origin, { 'Cache-Control': 'public, max-age=21600' });
+    return reply(text, upstream.status, origin, { 'Cache-Control': ttl <= 60 ? 'no-store' : 'public, max-age=' + ttl });
   },
 };

@@ -69,7 +69,7 @@ function chartSeries(y, interval) {
   return { timestamp: Array.from({ length: 25 }, (_, i) => ts(new Date(Date.UTC(2024, 10 + i, 1)).toISOString().slice(0, 10))), indicators: { quote: [{ close: Array.from({ length: 25 }, (_, i) => Math.round(y.price * (0.7 + i * 0.0125) * 100) / 100) }] } };
 }
 async function mockRelay(route) {
-  const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
+  const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: Object.assign({ 'access-control-allow-origin': '*', 'access-control-expose-headers': 'x-relay-version' }, RELAY.noVersion ? {} : { 'x-relay-version': '3' }), body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s0 = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null), ss = s0 ? [].concat(s0) : []; return j({ quotes: ss.map((s) => ({ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null })) }); }
   if (u.pathname === '/chart') { RELAY.chartCalls = (RELAY.chartCalls || 0) + 1; const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
   if (u.pathname === '/translate' && RELAY.trOld) return route.fulfill({ status: 404 });
@@ -1535,6 +1535,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     let s = await storeOf(p); eq(s.holdings[0].dividend.lastAmount, 1, 'rien modifié avant validation');
     await p.click('#anApply'); await p.waitForTimeout(500); s = await storeOf(p); eq([s.holdings[0].dividend.lastAmount, s.holdings[0].dividend.frequency], [0.8, 'semiannual'], 'changement appliqué après validation');
     await p.click('.toast button:has-text("Annuler")'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(700); s = await storeOf(p); eq(s.holdings[0].dividend.lastAmount, 1, 'annulable');
+  });
+  await test('relais ancien (cours gardés 6 h en cache) : détecté par l\'absence de numéro de version, alerte avec la marche à suivre ; relais à jour : aucune alerte', async () => {
+    RELAY.old = false; RELAY.noVersion = true;
+    try {
+      const seed = SEED(0); seed.holdings = [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 1, avgCost: 100, price: 190, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }];
+      const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(400);
+      await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].price > 0 && market.relayVersion() === null, null, { timeout: 12000 }); await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
+      const tx = await bellOpen(p); ok(/Relais de données à mettre à jour/.test(tx) && /6 heures/.test(tx), 'alerte « relais ancien » : ' + tx.slice(0, 200)); await p.click('[data-nt="relay:cache"] [data-nt-act=accept]'); await p.waitForSelector('#rlCopy'); ok(/Deploy/.test(await p.locator('.modal').innerText()), 'marche à suivre affichée');
+    } finally { RELAY.noVersion = false; }
+    const p2 = await device({ guest: true, seed: Object.assign(SEED(0), { holdings: [{ id: 'aapl', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 1, avgCost: 100, price: 190, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }] }), viewport: { width: 1000, height: 900 } }); await p2.open(); await p2.waitForTimeout(400);
+    await p2.evaluate(() => { refreshMarket(null, { silent: true }); }); await p2.waitForFunction(() => market.relayVersion() === '3', null, { timeout: 12000 }); await p2.evaluate(() => { collectGlobalNotices(); }); await p2.waitForTimeout(400);
+    eq(await p2.evaluate(() => Notify.pending().filter((n) => n.id === 'relay:cache').length), 0, 'relais à jour : aucune alerte');
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

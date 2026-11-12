@@ -225,6 +225,7 @@ async function refreshMarket(list, o) {
 /* Notifications d'actualisation, recalculées depuis l'ÉTAT des actifs (une correction les fait donc disparaître) :
    une par société probablement plus cotée (avec l'option « Marquer comme plus cotée »), une pour les autres échecs. */
 function updateMarketNotices(res) {
+  Notify.set('relay', market.relayVersion() === null ? [{ id: 'relay:cache', level: 'warn', title: 'Relais de données à mettre à jour : cours en retard possible', body: 'Votre relais Cloudflare garde les cours en mémoire <b>6 heures</b> : même après actualisation, un prix peut avoir plusieurs heures de retard (et la plus-value du jour s\'en écarte). La nouvelle version rafraîchit les cours toutes les minutes.', accept: { label: 'Comment faire ?', run: () => openRelayUpdateHelp(), ack: false } }] : []);
   const out = [], live = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');
   const nm = (h) => h.name || h.displayTicker || h.ticker;
   const susp = live.filter((h) => h.listingSuspect);

@@ -134,14 +134,16 @@
     const getRelay = opts.getRelay;
     const fetchFn = opts.fetch || function () { return globalThis.fetch.apply(globalThis, arguments); };
 
+    let relayVer;          // undefined : inconnue ; null : relais ancien (sans numéro de version) ; sinon numéro
     async function call(path) {
       const relay = (getRelay() || '').replace(/\/+$/, '');
       if (!relay) throw new Error("Aucune adresse de relais de données (Paramètres → Données de marché).");
       let r;
-      try { r = await fetchFn(relay + path); }
+      try { r = await fetchFn(relay + path, path.indexOf('/chart') === 0 ? { cache: 'no-store' } : undefined); }
       catch (e) { throw new Error('Relais de données injoignable (hors-ligne ou adresse incorrecte).'); }
       if (r.status === 403) throw Object.assign(new Error("Relais refusé (403) : l'adresse de ce site n'est pas autorisée dans le relais."), { fatal: true });
       if (r.status === 429) throw Object.assign(new Error('Yahoo limite temporairement les requêtes (429) — réessayez dans quelques minutes.'), { rate: true });
+      if (r.ok && r.headers && typeof r.headers.get === 'function') relayVer = r.headers.get('x-relay-version') || null;
       const data = await r.json().catch(() => null);
       if (!r.ok || !data) throw new Error('Réponse de données invalide (code ' + r.status + ').');
       return data;
@@ -268,7 +270,7 @@
       }));
     }
 
-    return { call, search, candidates, suggestSymbols, fetchAsset, fetchSplits, fetchDividends, fetchNews, translate, translateDirect };
+    return { relayVersion: () => relayVer, call, search, candidates, suggestSymbols, fetchAsset, fetchSplits, fetchDividends, fetchNews, translate, translateDirect };
   }
 
   /* Créneaux de versement (mois → montant) quand l'actif verse plusieurs fois par an des montants INÉGAUX

@@ -23,3 +23,8 @@ Pour en profiter : Cloudflare → votre worker → **Edit code** → remplacez l
 ## Mise à jour facultative (actualisations plus légères)
 
 La version actuelle de `worker.js` accepte aussi la période `6mo` (6 mois) pour la route `/chart`. L'application l'utilise pour actualiser les cours en ne téléchargeant que 6 mois de données par actif (au lieu de 5 ans). **Sans cette mise à jour du relais, tout continue de fonctionner** : l'application reçoit simplement plus de données qu'elle n'en a besoin. Pour la faire : coller le contenu de `worker.js` dans l'éditeur du Worker Cloudflare, puis « Déployer ».
+
+
+## Version 3 : cours à jour (important)
+
+L'ancienne version gardait **chaque réponse de Yahoo 6 heures** en mémoire chez Cloudflare : même en actualisant, un cours pouvait avoir plusieurs heures de retard. La version 3 de `worker.js` ne garde les **cours que 1 minute** (les recherches restent 6 h) et envoie son numéro de version, ce qui permet à l'application de vous prévenir si votre relais est ancien. Mise à jour : Cloudflare → votre worker → **Edit code** → remplacez tout le code par le contenu de `worker.js` → **Deploy**. L'application affiche une alerte avec ces étapes tant que le relais n'est pas à jour.
