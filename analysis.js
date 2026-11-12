@@ -50,11 +50,15 @@ function analyseInstrument(h, closed, props) {
   const a = Dividends.analyse(div.items, from, to, f.qtyBefore, today); res.a = a; res.from = from; res.to = to; res.cur = div.currency || h.currency || 'EUR';
   res.missing = props.proposals.filter((p) => p.holdingId === h.id); res.already = props.already.filter((p) => p.holdingId === h.id).length;
   if (!closed && h.listing !== 'delisted') {
-    const dv = h.dividend || {}, items = div.items, latest = items.length ? { ex: items[items.length - 1][0], amt: Number(items[items.length - 1][1]) } : null;
+    const dv = h.dividend || {}, items = div.items, hCur = h.currency || 'EUR', dCur = div.currency || hCur;
+    // les dividendes de l'historique sont dans la devise de la cotation interrogée (ex. HKD) : ramenés dans la devise de la position (ex. EUR) avant toute comparaison
+    const toH = (v) => { if (dCur === hCur) return v; const a = convert(v, dCur), b = convert(1, hCur); return a !== null && b ? a / b : null; };
+    const lastRaw = items.length ? Number(items[items.length - 1][1]) : null, lastConv = lastRaw === null ? null : toH(lastRaw);
+    const latest = lastConv !== null && lastConv > 0 ? { ex: items[items.length - 1][0], amt: Math.round(lastConv * 1e6) / 1e6 } : null;
     const freq = items.length >= 3 ? Market.detectFrequency(items.slice(-8).map((x) => x[0])) : null;
     if (a.pays && latest) {
       const dAmt = Number(dv.lastAmount) > 0 ? Math.abs(Number(dv.lastAmount) - latest.amt) / latest.amt : 1, freqDiff = freq && freq !== 'irregular' && dv.frequency !== freq;
-      if (dv.none || dAmt > 0.02 || freqDiff) res.diffs.push({ kind: 'forecast', id: h.id, label: name + ' : ' + (dv.none ? 'marquée « sans dividende » alors que la société en verse' : 'dividende enregistré ' + (Number(dv.lastAmount) > 0 ? fmtNum(dv.lastAmount, 4) : '—') + ' → dernier versement connu ' + fmtNum(latest.amt, 4) + ' (' + fmtDate(latest.ex) + ')') + (freqDiff ? ' · fréquence ' + (FREQ_LABEL[dv.frequency] || '—').toLowerCase() + ' → ' + (FREQ_LABEL[freq] || freq).toLowerCase() : ''),
+      if (dv.none || dAmt > 0.02 || freqDiff) res.diffs.push({ kind: 'forecast', id: h.id, label: name + ' : ' + (dv.none ? 'marquée « sans dividende » alors que la société en verse' : 'dividende enregistré ' + (Number(dv.lastAmount) > 0 ? fmtNum(dv.lastAmount, 4) : '—') + ' → dernier versement connu ' + fmtNum(latest.amt, 4) + ' ' + hCur + (dCur !== hCur ? ' (' + fmtNum(lastRaw, 4) + ' ' + dCur + ' convertis)' : '') + ' (' + fmtDate(latest.ex) + ')') + (freqDiff ? ' · fréquence ' + (FREQ_LABEL[dv.frequency] || '—').toLowerCase() + ' → ' + (FREQ_LABEL[freq] || freq).toLowerCase() : ''),
         apply: () => { const d2 = h.dividend = h.dividend || {}; d2.none = false; d2.lastAmount = latest.amt; if (freq && freq !== 'irregular') d2.frequency = freq; d2.slots = null; d2.updatedAt = today; } });
     }
     const qDiff = Number(h.quantity) > 0 && led.qty > 0 && Math.abs(led.qty - Number(h.quantity)) > 1e-6 * Math.max(1, Number(h.quantity));

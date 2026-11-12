@@ -164,7 +164,7 @@ function saveHoldingForm(m, ex) {
   if (lst === 'delisted') { if (d.listing !== 'delisted') d.delistedAt = null; d.listing = 'delisted'; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; delete d.listingSuspect; d.marketError = null; }
   else if (d.listing === 'delisted') { delete d.listing; delete d.delistedAt; d.fullAt = 1; }          // de nouveau cotée : actualisation complète
   const symChanged = ex && (String(ex.ticker || '').toUpperCase() !== t.toUpperCase());
-  if (symChanged) { d.marketError = null; delete d.listingSuspect; d.fullAt = 1; delete d.quickAt; }      // nouveau symbole : l'ancienne erreur ne vaut plus, actualisation complète
+  if (symChanged) { d.marketError = null; delete d.listingSuspect; d.fullAt = 1; delete d.quickAt; delete d.divHist; }      // nouveau symbole : l'historique de dividendes (et sa devise) est à relire      // nouveau symbole : l'ancienne erreur ne vaut plus, actualisation complète
   const i = state.holdings.findIndex((h) => h.id === d.id);
   if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
   if (!ex && buyDate) { d.addedAt = buyDate; if (d.avgCost > 0 && d.quantity > 0) Ledger.addPurchase(state, d.id, { date: buyDate, qty: d.quantity, price: d.avgCost, fees: 0 }, { uid, today: todayISO() }); }      // l'achat daté alimente l'historique (dividendes éligibles, plus-value)
