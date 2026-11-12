@@ -1001,9 +1001,18 @@ function openRelayUpdateHelp() {
   };
 }
 
-/* « Ne plus actualiser » : le cours de cette position n'est plus cherché chez Yahoo (aucune erreur) ; il se saisit à la main dans la fiche. */
+/* « Ne plus actualiser » : le cours de cette position n'est plus cherché chez Yahoo ; vous le saisissez (avec sa date) et il sert à la valeur et aux plus-values.
+   Un rappel dans la cloche signale un cours saisi depuis plus de 30 jours. */
 function setMarketOff(id) {
   const h = instrumentById(id); if (!h) return;
-  h.marketOff = true; h.marketError = null; delete h.listingSuspect; saveState(); afterInstrumentFix();
-  toast((h.name || h.ticker) + ' : cours non actualisé. Saisissez-le à la main dans la fiche si besoin.', { ms: 9000, action: { label: 'Annuler', fn: () => { delete h.marketOff; saveState(); afterInstrumentFix(); } } });
+  const held = state.holdings.some((x) => x.id === id), cur = h.currency || 'EUR';
+  if (!held) { h.marketOff = true; h.marketError = null; delete h.listingSuspect; saveState(); afterInstrumentFix(); toast((h.name || h.ticker) + ' : cours non cherché.', { ms: 6000 }); return; }
+  const m = openModal('<h2>Cours saisi à la main</h2><div class="sub"><b>' + esc(h.name || h.ticker) + '</b> : Yahoo ne fournit pas de cours pour ce titre. Saisissez le <b>dernier cours connu</b> (par exemple celui de votre courtier) : il sert à la valeur du portefeuille et aux plus-values. L\'application vous rappellera de le mettre à jour s\'il a plus de 30 jours.</div>' +
+    '<div class="row2">' + fld('Cours (' + esc(cur) + ')', '<input type="text" inputmode="decimal" id="moPrice" value="' + esc(h.price > 0 ? String(h.price).replace('.', ',') : '') + '">', '', 'moPrice') + fld('Date de ce cours', '<input type="date" id="moDate" value="' + esc(String(h.priceAt || todayISO()).slice(0, 10)) + '" max="' + todayISO() + '">', '', 'moDate') + '</div>' +
+    '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="moOk">Enregistrer</button></div>');
+  $('#moOk', m).onclick = () => {
+    const v = numOrNull($('#moPrice', m).value), dt = $('#moDate', m).value || todayISO(); if (!(v > 0)) { toast('Saisissez un cours valide.', { error: true }); return; }
+    h.marketOff = true; h.marketError = null; delete h.listingSuspect; h.price = v; h.priceAt = dt; saveState(); closeModal(); afterInstrumentFix(); renderPage();
+    toast((h.name || h.ticker) + ' : cours ' + fmtMoney(v, cur) + ' enregistré (non actualisé).', { ms: 9000, action: { label: 'Annuler', fn: () => { delete h.marketOff; saveState(); afterInstrumentFix(); renderPage(); } } });
+  };
 }

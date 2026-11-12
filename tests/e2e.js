@@ -1588,11 +1588,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(400);
     await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].marketError, null, { timeout: 12000 }); await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
     ok(/Ligne technique|ZZUNKNOWN/.test(await bellOpen(p)), 'anomalie présente'); await bellClose(p);
-    await p.evaluate(() => { openFailingHoldings(); }); await p.waitForSelector('[data-al3]'); await p.click('[data-al3]'); await p.waitForTimeout(500);
-    eq(await p.evaluate(() => [state.holdings[0].marketOff, state.holdings[0].marketError]), [true, null], 'position marquée « ne plus actualiser »');
+    await p.evaluate(() => { openFailingHoldings(); }); await p.waitForSelector('[data-al3]'); await p.click('[data-al3]'); await p.waitForSelector('#moPrice'); await p.fill('#moPrice', '12,5'); await p.click('#moOk'); await p.waitForTimeout(500);
+    eq(await p.evaluate(() => [state.holdings[0].marketOff, state.holdings[0].marketError, state.holdings[0].price]), [true, null, 12.5], 'position marquée « ne plus actualiser » avec le cours saisi à la main');
     const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { state.holdings.forEach((h) => { delete h.quickAt; }); refreshMarket(null, { silent: true }); }); await p.waitForTimeout(1500);
     eq((RELAY.chartCalls || 0) - c0, 1, 'plus aucune requête pour ce titre (seul Apple est interrogé)'); eq(await p.evaluate(() => state.holdings[0].marketError || null), null, 'aucune nouvelle erreur');
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const ids = await p.evaluate(() => Notify.pending().map((n) => n.id)); ok(!ids.some((x) => /^(market:fail|mkt:delist|home:missHist)/.test(x)), 'plus aucune anomalie de cours dans la cloche : ' + ids.join(', '));
+  });
+  await test('cours saisi à la main : rappel dans la cloche au bout de 30 jours, pas avant', async () => {
+    const seed = SEED(0); const old = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10), fresh = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    seed.holdings = ['a', 'b'].map((k, i) => ({ id: k, ticker: 'MAN' + k, displayTicker: 'MAN' + k, name: 'Manuel ' + k, type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 2, avgCost: 10, price: 11, priceAt: i ? fresh : old, marketOff: true, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }));
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(500);
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
+    const n = await p.evaluate(() => Notify.pending().filter((x) => x.id === 'mkt:manual').map((x) => x.title + ' | ' + x.body)); eq(n.length, 1, 'un rappel'); ok(/Manuel a/.test(n[0]) && !/Manuel b/.test(n[0]), 'seul le cours de plus de 30 jours est signalé : ' + n[0].slice(0, 160));
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
