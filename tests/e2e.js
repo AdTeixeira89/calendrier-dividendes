@@ -125,6 +125,7 @@ const H = (i, o) => Object.assign({ id: 'h' + i, ticker: 'T' + i, displayTicker:
   dividend: { lastAmount: 1, anchorMonth: (i % 12) + 1, frequency: 'quarterly', dateKind: 'ex', updatedAt: '2026-10-01' } }, o || {});
 const SEED = (n, extra) => Object.assign({ v: 2, meta: {}, holdings: Array.from({ length: n }, (_, i) => H(i)), payments: [], transactions: [], accounts: [{ id: 'main', name: 'Mon portefeuille' }], settings: { relayUrl: 'https://dividende-relais.adam-teixeira89.workers.dev', baseCurrency: 'EUR', incomeMode: 'gross', tickerAuto: false, autoRefresh: false, columns: {} }, sent: { days: {}, months: {} } }, extra || {});
 const bellOpen = async (p) => { await p.waitForTimeout(500); if (await p.locator('#bellPanel.hide').count()) await p.click('#bellBtn'); await p.waitForSelector('#bellPanel:not(.hide)'); return (await p.locator('#bellPanel').innerText()).replace(/\n/g, ' | '); };
+const eq0 = (n) => n === 0;
 const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
 const storeOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('dividendCalendarApp_v1')));
 const cloudState = (uid) => { const m = fsOps.get('suivi_dividendes/' + uid); if (!m.exists) return null; let s = ''; for (let i = 0; i < m.data.chunks; i++) s += fsOps.get('suivi_dividendes/' + uid + '/chunks/' + i).data.data; return JSON.parse(s); };
@@ -1580,6 +1581,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed: SEED(1) }); await p.context().route('**/forms.js', (r) => r.abort());
     let loads = 0; p.on('load', () => { loads++; }); await p.open(); await p.waitForFunction(() => /Mise à jour incomplète/.test(document.body.innerText), null, { timeout: 15000 });
     ok(/holdingByNameAny|openActionList/.test(await p.locator('body').innerText()), 'message : parties manquantes nommées'); ok(loads >= 1 && loads <= 4, 'pas de boucle de rechargement (' + loads + ' chargement(s))');
+  });
+  await test('titre inconnu de Yahoo (impossible à corriger) : « Ne plus actualiser » supprime l\'anomalie pour de bon (cloche, accueil, actualisations suivantes)', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'u', ticker: 'ZZUNKNOWN', displayTicker: 'ZZUNKNOWN', isin: 'XX0000000001', name: 'Ligne technique', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 3, avgCost: 10, price: 9, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: { none: true } }, { id: 'a', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Apple', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 1, avgCost: 100, price: 190, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: {} }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 900 } }); await p.open(); await p.waitForTimeout(400);
+    await p.evaluate(() => { refreshMarket(null, { silent: true }); }); await p.waitForFunction(() => state.holdings[0].marketError, null, { timeout: 12000 }); await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
+    ok(/Ligne technique|ZZUNKNOWN/.test(await bellOpen(p)), 'anomalie présente'); await bellClose(p);
+    await p.evaluate(() => { openFailingHoldings(); }); await p.waitForSelector('[data-al3]'); await p.click('[data-al3]'); await p.waitForTimeout(500);
+    eq(await p.evaluate(() => [state.holdings[0].marketOff, state.holdings[0].marketError]), [true, null], 'position marquée « ne plus actualiser »');
+    const c0 = RELAY.chartCalls || 0; await p.evaluate(() => { state.holdings.forEach((h) => { delete h.quickAt; }); refreshMarket(null, { silent: true }); }); await p.waitForTimeout(1500);
+    eq((RELAY.chartCalls || 0) - c0, 1, 'plus aucune requête pour ce titre (seul Apple est interrogé)'); eq(await p.evaluate(() => state.holdings[0].marketError || null), null, 'aucune nouvelle erreur');
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const ids = await p.evaluate(() => Notify.pending().map((n) => n.id)); ok(!ids.some((x) => /^(market:fail|mkt:delist|home:missHist)/.test(x)), 'plus aucune anomalie de cours dans la cloche : ' + ids.join(', '));
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

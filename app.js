@@ -206,7 +206,7 @@ async function refreshMarket(list, o) {
   // positions entièrement vendues : leurs cours passés servent à reconstituer la courbe de valeur
   let ares = null;
   if (!refreshCancel && !res.stopped && (list === state.holdings || list.length === visibleHoldings().length)) {
-    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && x.listing !== 'delisted' && (o.quick ? (!x.hist && !(x.listingSuspect && x.listingSuspect.at === nowISO)) : (!x.hist || x.marketAt !== nowISO)));      // légère : positions clôturées seulement si leur historique manque
+    const accs = new Set(list.map((h) => h.account)), arch = (state.archive || []).filter((x) => accs.has(x.account) && !x.statementOnly && x.listing !== 'delisted' && !x.marketOff && (o.quick ? (!x.hist && !(x.listingSuspect && x.listingSuspect.at === nowISO)) : (!x.hist || x.marketAt !== nowISO)));      // légère : positions clôturées seulement si leur historique manque
     if (arch.length) { const mm = modal && $('#rfMsg'); if (mm) mm.textContent = 'Positions clôturées (' + arch.length + ')…'; ares = await refreshArchive(arch, nowISO); }
   }
   refreshing = false;
@@ -227,7 +227,7 @@ async function refreshMarket(list, o) {
    une par société probablement plus cotée (avec l'option « Marquer comme plus cotée »), une pour les autres échecs. */
 function updateMarketNotices(res) {
   Notify.set('relay', market.relayVersion() === null ? [{ id: 'relay:cache', level: 'warn', title: 'Relais de données à mettre à jour : cours en retard possible', body: 'Votre relais Cloudflare garde les cours en mémoire <b>6 heures</b> : même après actualisation, un prix peut avoir plusieurs heures de retard (et la plus-value du jour s\'en écarte). La nouvelle version rafraîchit les cours toutes les minutes.', accept: { label: 'Comment faire ?', run: () => openRelayUpdateHelp(), ack: false } }] : []);
-  const out = [], live = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted');
+  const out = [], live = state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.listing !== 'delisted' && !h.marketOff);
   const nm = (h) => h.name || h.displayTicker || h.ticker;
   const susp = live.filter((h) => h.listingSuspect);
   if (susp.length > 5) {
@@ -241,7 +241,7 @@ function updateMarketNotices(res) {
       accept: { label: 'Marquer comme plus cotée', run: () => openDelistModal(h.id), ack: false }, more: [{ label: 'Corriger le symbole / l\'ISIN…', run: () => openInstrumentFix(h.id) }], edit: { label: 'Ouvrir la fiche', run: () => openInstrumentFix(h.id) } });
   });
   const other = live.filter((h) => h.marketError && !h.listingSuspect);
-  if (other.length) out.push({ id: 'market:fail', level: 'warn', title: 'Actualisation incomplète', body: other.length + ' actif(s) non actualisé(s) : ' + other.slice(0, 3).map((h) => esc(nm(h)) + ' (' + esc(h.marketError) + ')').join(' ; ') + (other.length > 3 ? ' …' : '') + '. Les dernières données connues sont conservées.',
+  if (other.length) out.push({ id: 'market:fail', level: 'warn', title: 'Actualisation incomplète', body: other.length + ' actif(s) non actualisé(s) : ' + other.slice(0, 3).map((h) => esc(nm(h)) + ' (' + esc(h.marketError) + ')').join(' ; ') + (other.length > 3 ? ' …' : '') + '. Les dernières données connues sont conservées. <b>Si ce titre n\'existe pas chez Yahoo</b> (fonds, ligne technique du courtier, petite valeur non cotée en continu), choisissez « Ne plus actualiser » : vous saisissez son cours à la main et l\'erreur disparaît.',
     accept: { label: 'Réessayer', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Corriger les actifs…', run: () => openFailingHoldings() } });
   Notify.set('market', out);
 }

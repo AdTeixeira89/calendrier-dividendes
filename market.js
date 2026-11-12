@@ -429,7 +429,7 @@
     const noteStart = (h, wasPayer, hadFetch) => { if (hadFetch && !wasPayer && pays(h)) { const last = h.dividend.history[h.dividend.history.length - 1]; res.started.push({ id: h.id, name: h.name || h.displayTicker || h.ticker, amount: last.amount, ex: last.exDate, currency: h.currency || 'EUR' }); } };
     const one = async (h) => {
       let pause = true; const wasPayer = pays(h), hadFetch = !!h.fullAt;
-      if (h.listing === 'delisted') { res.skipped++; return; }                       // société déclarée plus cotée : plus aucune requête
+      if (h.listing === 'delisted' || h.marketOff) { res.skipped++; return; }          // plus cotée, ou cours saisi à la main : aucune requête, aucune erreur                       // société déclarée plus cotée : plus aucune requête
       try {
         if (quick && !needsFull(h, now)) {
           if (h.quickAt && now - h.quickAt < QUICK_MIN_MS) { res.skipped++; pause = false; }            // tout juste actualisé

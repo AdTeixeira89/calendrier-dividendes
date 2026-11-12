@@ -41,6 +41,7 @@ function openHoldingModal(id) {
     '<div style="position:relative">' + fld('Nom, ticker ou ISIN', '<input type="text" id="hTicker" value="' + esc(d.ticker) + '" placeholder="ex : Air Liquide, AAPL, AI.PA, FR0000120073" autocomplete="off">',
       'Tapez un nom pour rechercher (Yahoo Finance), ou un ticker : Paris .PA · Amsterdam .AS · Allemagne .DE · Londres .L', 'hTicker') + '<div id="hSuggest" class="dd-panel hide" style="left:0;right:0"></div></div><div id="hSym" style="margin:-4px 0 10px"></div>' +
     (ex ? fld('Cotation', '<select id="hListing">' + opt('', 'Cotée en bourse', d.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', d.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur) et aucun dividende n\'est prévu ; vos versements déjà reçus sont conservés.', 'hListing') : '') +
+    (ex ? '<label class="chk" style="margin:-2px 0 10px"><input type="checkbox" id="hMarketOff"' + (d.marketOff ? ' checked' : '') + '><span>Ne pas actualiser le cours (Yahoo ne connaît pas ce titre : je saisis le cours à la main)</span></label>' : '') +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="hQty" min="0" step="any" inputmode="decimal" value="' + esc(d.quantity) + '">', '', 'hQty') +
     fld('Prix de revient unitaire (PRU)' + (ex ? '' : ' *'), '<input type="number" id="hCost" min="0" step="any" inputmode="decimal" value="' + esc(d.avgCost === null ? '' : d.avgCost) + '" placeholder="' + (ex ? 'facultatif' : 'obligatoire') + '">', 'Ce que vous avez payé par titre. Sans PRU, la position compte dans la valeur du portefeuille mais <b>pas</b> dans la plus-value.', 'hCost') + '</div>' +
     (ex ? '' : '<div class="row2">' + fld('Date d\'achat *', '<input type="date" id="hBuyDate" max="' + todayISO() + '">', 'Date de l\'achat (ou du premier achat).', 'hBuyDate') + '<div class="field"><label class="chk"><input type="checkbox" id="hNoPru"><span>Je ne connais pas mon PRU</span></label><label class="chk"><input type="checkbox" id="hNoDate"><span>Je ne connais pas la date d\'achat</span></label></div></div>') +
@@ -162,6 +163,7 @@ function saveHoldingForm(m, ex) {
   if (none) dv.taxRate = numOrNull($('#hTax', m).value);
   // une saisie manuelle du dividende prime sur les créneaux automatiques (recalculés à la prochaine actualisation)
   if (dvBefore !== JSON.stringify([dv.lastAmount, dv.frequency, dv.anchorMonth])) dv.slots = null;
+  { const off = !!($('#hMarketOff', m) && $('#hMarketOff', m).checked); if (off) { d.marketOff = true; d.marketError = null; delete d.listingSuspect; } else delete d.marketOff; }
   const lst = $('#hListing', m) ? $('#hListing', m).value : '';
   if (lst === 'delisted') { if (d.listing !== 'delisted') d.delistedAt = null; d.listing = 'delisted'; dv.none = true; dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; dv.slots = null; delete d.listingSuspect; d.marketError = null; }
   else if (d.listing === 'delisted') { delete d.listing; delete d.delistedAt; d.fullAt = 1; }          // de nouveau cotée : actualisation complète
@@ -171,7 +173,7 @@ function saveHoldingForm(m, ex) {
   if (i >= 0) state.holdings[i] = d; else state.holdings.push(d);
   if (!ex && buyDate) { d.addedAt = buyDate; if (d.avgCost > 0 && d.quantity > 0) Ledger.addPurchase(state, d.id, { date: buyDate, qty: d.quantity, price: d.avgCost, fees: 0 }, { uid, today: todayISO() }); }      // l'achat daté alimente l'historique (dividendes éligibles, plus-value)
   saveState(); closeModal(); toast('Actif enregistré.'); renderPage();
-  if ((symChanged || (ex && d.listing !== 'delisted' && ex.listing === 'delisted')) && state.settings.relayUrl) { toast('Vérification du symbole…', { ms: 2000 }); refreshMarket([d], { silent: true }).then(() => { const cur = holdingById(d.id); toast(cur && cur.marketError ? 'Toujours introuvable : ' + cur.marketError : 'Symbole vérifié : cours et dividendes à jour.', { error: !!(cur && cur.marketError), ms: 6000 }); afterInstrumentFix(); }); }
+  if ((symChanged || (ex && ex.marketError && !d.marketOff) || (ex && d.listing !== 'delisted' && ex.listing === 'delisted')) && !d.marketOff && state.settings.relayUrl) { toast('Vérification du symbole…', { ms: 2000 }); if (!symChanged) d.fullAt = 1; refreshMarket([d], { silent: true }).then(() => { const cur = holdingById(d.id); toast(cur && cur.marketError ? 'Toujours introuvable : ' + cur.marketError : 'Symbole vérifié : cours et dividendes à jour.', { error: !!(cur && cur.marketError), ms: cur && cur.marketError ? 14000 : 6000, action: cur && cur.marketError ? { label: 'Ne plus actualiser', fn: () => setMarketOff(d.id) } : undefined }); afterInstrumentFix(); }); }
   else afterInstrumentFix();
 }
 
@@ -714,16 +716,17 @@ function commitTransactions(p, o) {
    ================================================================== */
 /* Liste de lignes avec un bouton chacune : rows = [{ label, note, btn, run }]. */
 function openActionList(title, sub, rows, more) {
-  const m = openModal('<h2>' + esc(title) + '</h2><div class="sub">' + sub + '</div><div class="act-list">' + rows.map((r, i) => '<div class="diag-item lvl-warn"><div class="diag-h"><b>' + esc(r.label) + '</b></div>' + (r.note ? '<div class="diag-line muted">' + esc(r.note) + '</div>' : '') + '<div class="btn-row" style="margin-top:6px"><button class="btn sm primary" type="button" data-al="' + i + '">' + esc(r.btn || 'Corriger…') + '</button>' + (r.run2 ? '<button class="btn sm" type="button" data-al2="' + i + '">' + esc(r.btn2 || 'Autre…') + '</button>' : '') + '</div></div>').join('') + (more ? '<div class="hint">' + esc(more) + '</div>' : '') + '</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Fermer</button></div>');
+  const m = openModal('<h2>' + esc(title) + '</h2><div class="sub">' + sub + '</div><div class="act-list">' + rows.map((r, i) => '<div class="diag-item lvl-warn"><div class="diag-h"><b>' + esc(r.label) + '</b></div>' + (r.note ? '<div class="diag-line muted">' + esc(r.note) + '</div>' : '') + '<div class="btn-row" style="margin-top:6px"><button class="btn sm primary" type="button" data-al="' + i + '">' + esc(r.btn || 'Corriger…') + '</button>' + (r.run2 ? '<button class="btn sm" type="button" data-al2="' + i + '">' + esc(r.btn2 || 'Autre…') + '</button>' : '') + (r.run3 ? '<button class="btn sm" type="button" data-al3="' + i + '">' + esc(r.btn3 || 'Autre…') + '</button>' : '') + '</div></div>').join('') + (more ? '<div class="hint">' + esc(more) + '</div>' : '') + '</div><div class="modal-actions"><span></span><button class="btn" type="button" data-close>Fermer</button></div>');
   $$('[data-al]', m).forEach((b) => b.onclick = () => { const r = rows[Number(b.dataset.al)]; closeModal(); r.run(); });
   $$('[data-al2]', m).forEach((b) => b.onclick = () => { const r = rows[Number(b.dataset.al2)]; closeModal(); r.run2(); });
+  $$('[data-al3]', m).forEach((b) => b.onclick = () => { const r = rows[Number(b.dataset.al3)]; closeModal(); r.run3(); });
 }
 const holdingByNameAny = (name) => state.holdings.concat(state.archive || []).find((h) => (h.name || h.displayTicker || h.ticker) === name);
 /* Actifs dont l'actualisation échoue : corriger le symbole, la place de cotation ou le nom. */
 function openFailingHoldings(list) {
-  const hs = (list || state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.marketError)).filter((h) => h.listing !== 'delisted');
+  const hs = (list || state.holdings.concat((state.archive || []).filter((x) => !x.statementOnly)).filter((h) => h.marketError)).filter((h) => h.listing !== 'delisted' && !h.marketOff);
   if (!hs.length) { toast('Aucun actif en échec pour le moment.'); return; }
-  openActionList('Actifs à corriger', 'Pour chaque titre : corrigez le symbole (ex. « AI.PA » pour Air Liquide à Paris) <b>ou</b> indiquez qu\'il n\'est plus coté en bourse (radiation, liquidation, rachat) : l\'erreur ne reviendra plus.', hs.slice(0, 40).map((h) => ({ label: (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker || h.isin) + ')' + (instrumentIsArchived(h.id) ? ' · position clôturée' : ''), note: h.marketError || (h.isin ? h.isin : ''), btn: 'Corriger le symbole…', run: () => openInstrumentFix(h.id), btn2: 'Plus cotée en bourse…', run2: () => openDelistModal(h.id) })), hs.length > 40 ? (hs.length - 40) + ' autre(s) non affichés.' : '');
+  openActionList('Actifs à corriger', 'Pour chaque titre : corrigez le symbole (ex. « AI.PA » pour Air Liquide à Paris) <b>ou</b> indiquez qu\'il n\'est plus coté en bourse (radiation, liquidation, rachat), ou choisissez <b>« Ne plus actualiser »</b> si Yahoo ne connaît tout simplement pas ce titre : son cours est alors saisi à la main et l\'erreur ne revient plus.', hs.slice(0, 40).map((h) => ({ label: (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker || h.isin) + ')' + (instrumentIsArchived(h.id) ? ' · position clôturée' : ''), note: h.marketError || (h.isin ? h.isin : ''), btn: 'Corriger le symbole…', run: () => openInstrumentFix(h.id), btn2: 'Plus cotée en bourse…', run2: () => openDelistModal(h.id), btn3: 'Ne plus actualiser', run3: () => setMarketOff(h.id) })), hs.length > 40 ? (hs.length - 40) + ' autre(s) non affichés.' : '');
 }
 const instrumentIsArchived = (id) => !state.holdings.some((h) => h.id === id) && (state.archive || []).some((x) => x.id === id);
 /* Correction d'un actif : fiche complète pour une position détenue, petite fenêtre pour une position clôturée (qui n'a pas de fiche). */
@@ -732,12 +735,14 @@ function openInstrumentFix(id) {
   const a = (state.archive || []).find((x) => x.id === id); if (!a) { toast('Actif introuvable.', { error: true }); return; }
   const m = openModal('<h2>' + esc(a.name || a.ticker || a.isin) + ' <span class="muted" style="font-weight:400">· position clôturée</span></h2><div class="sub">Cette position n\'est plus détenue : son symbole sert seulement à valoriser le passé (courbe de valeur). Corrigez-le, ou indiquez que la société n\'est plus cotée.</div>' +
     fld('Symbole boursier ou ISIN', '<input type="text" id="afTicker" value="' + esc(a.ticker || a.isin || '') + '" autocomplete="off" autocapitalize="characters">', 'Ex. AI.PA (Paris), SAP.DE (Allemagne), ou l\'ISIN.', 'afTicker') + '<div id="afSym" style="margin:-4px 0 10px"></div>' +
+    '<label class="chk" style="margin:0 0 10px"><input type="checkbox" id="afOff"' + (a.marketOff ? ' checked' : '') + '><span>Ne plus chercher son cours (Yahoo ne connaît pas ce titre)</span></label>' +
     fld('Cotation', '<select id="afListing">' + opt('', 'Cotée en bourse', a.listing !== 'delisted') + opt('delisted', 'Plus cotée en bourse (radiée, liquidée, rachetée…)', a.listing === 'delisted') + '</select>', 'Une société déclarée « plus cotée » n\'est plus actualisée (plus d\'erreur).', 'afListing') +
     '<div class="modal-actions"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="afOk">Enregistrer</button></div>');
   if (a.marketError && Market.isISIN(a.isin || a.ticker)) showSymbolSuggestions($('#afSym', m), a.isin || a.ticker, a.name, (x) => { $('#afTicker', m).value = x.symbol; });
   $('#afOk', m).onclick = async () => {
     const t = $('#afTicker', m).value.trim(), lst = $('#afListing', m).value, before = JSON.stringify([a.ticker, a.listing]);
     if (lst !== 'delisted' && !t) { toast('Renseignez un symbole ou un ISIN.', { error: true }); return; }
+    if ($('#afOff', m).checked) { a.marketOff = true; a.marketError = null; delete a.listingSuspect; } else delete a.marketOff;
     if (t) { a.ticker = t; if (Market.isISIN(t)) a.isin = t.toUpperCase(); }
     if (lst === 'delisted') { if (a.listing !== 'delisted') a.delistedAt = null; a.listing = 'delisted'; a.marketError = null; delete a.listingSuspect; } else { delete a.listing; delete a.delistedAt; }
     const changed = before !== JSON.stringify([a.ticker, a.listing]);
@@ -994,4 +999,11 @@ function openRelayUpdateHelp() {
     try { const r = await fetch('relay/worker.js', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); const txt = await r.text(); try { await navigator.clipboard.writeText(txt); } catch (e) { const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } toast('Code copié (' + txt.length + ' caractères) : collez-le dans Cloudflare.', { ms: 8000 }); }
     catch (e) { toast('Impossible de copier le code automatiquement (' + e.message + '). Il est dans le dossier relay/ du dépôt GitHub (worker.js).', { error: true, ms: 9000 }); }
   };
+}
+
+/* « Ne plus actualiser » : le cours de cette position n'est plus cherché chez Yahoo (aucune erreur) ; il se saisit à la main dans la fiche. */
+function setMarketOff(id) {
+  const h = instrumentById(id); if (!h) return;
+  h.marketOff = true; h.marketError = null; delete h.listingSuspect; saveState(); afterInstrumentFix();
+  toast((h.name || h.ticker) + ' : cours non actualisé. Saisissez-le à la main dans la fiche si besoin.', { ms: 9000, action: { label: 'Annuler', fn: () => { delete h.marketOff; saveState(); afterInstrumentFix(); } } });
 }
