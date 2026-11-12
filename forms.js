@@ -71,7 +71,11 @@ function openHoldingModal(id) {
   $('#hType', m).onchange = sync; $('#hPays', m).onchange = sync; sync();
   $('#hFetch', m).onclick = () => fetchIntoHoldingForm(m);
   wireTickerSearch(m);
-  if (ex && (ex.marketError || !(ex.price > 0)) && Market.isISIN(ex.isin || ex.ticker)) showSymbolSuggestions($('#hSym', m), ex.isin || ex.ticker, ex.name, (x) => { $('#hTicker', m).value = x.symbol; fetchIntoHoldingForm(m); });
+  if (ex && Market.isISIN(ex.isin || ex.ticker)) {
+    const box = $('#hSym', m), pick = (x) => { $('#hTicker', m).value = x.symbol; fetchIntoHoldingForm(m); };
+    if (ex.marketError || !(ex.price > 0)) showSymbolSuggestions(box, ex.isin || ex.ticker, ex.name, pick);
+    else if (state.settings.relayUrl) { box.innerHTML = '<button type="button" class="btn sm ghost" id="hSymMore">Voir les autres cotations de cet ISIN (ex. en euros)</button>'; $('#hSymMore', m).onclick = () => showSymbolSuggestions(box, ex.isin || ex.ticker, ex.name, pick); }
+  }
   if (ex) $('#hDel', m).onclick = () => { closeModal(); confirmDeleteHoldings([ex.id]); };
   if (ex && $('#hAnalyze', m)) $('#hAnalyze', m).onclick = () => { closeModal(); runDividendAnalysis({ ids: new Set([ex.id]) }); };
   if (ex && $('#hBuys', m)) $('#hBuys', m).onclick = () => { closeModal(); openBuysModal(ex.id); };

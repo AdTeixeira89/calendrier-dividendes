@@ -154,7 +154,7 @@
       return (data.quotes || []).filter((x) => x && x.symbol);
     }
 
-    async function candidates(input, nameHint) {
+    async function candidates(input, nameHint, limit) {
       const t = String(input || '').trim();
       if (!isISIN(t)) return [t];
       const queries = [t.toUpperCase()];
@@ -162,7 +162,7 @@
       for (let i = 0; i < queries.length; i++) {
         const quotes = await search(queries[i]).catch((e) => { if (e.rate || e.fatal) throw e; return []; });
         const syms = rankSymbols(quotes, t);
-        if (syms.length) return syms.slice(0, 4);
+        if (syms.length) return syms.slice(0, limit || 4);
       }
       throw Object.assign(new Error('ISIN introuvable chez Yahoo Finance : la société n\'est peut-être plus cotée (radiation, liquidation, rachat), ou renseignez le symbole boursier (ex : AI.PA).'), { notFound: true });
     }
@@ -215,7 +215,7 @@
     /* Symboles possibles pour un ISIN, avec le dernier cours de chacun (à la demande de l'utilisateur, jamais appliqués automatiquement). */
     async function suggestSymbols(isin, nameHint) {
       const out = []; let cands = [];
-      try { cands = await candidates(isin, nameHint); } catch (e) { if (e.rate || e.fatal) throw e; return out; }
+      try { cands = await candidates(isin, nameHint, 8); } catch (e) { if (e.rate || e.fatal) throw e; return out; }
       for (let i = 0; i < cands.length; i++) {
         try { const r = await fetchChart(cands[i], isin, { range: '6mo' }); out.push({ symbol: cands[i], name: r.name, exchange: r.exchange, currency: r.currency, price: r.price, priceAt: r.priceAt }); }
         catch (e) { if (e.rate || e.fatal) throw e; out.push({ symbol: cands[i], name: null, exchange: null, currency: null, price: null, priceAt: null, error: e.message }); }

@@ -1548,6 +1548,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p2.evaluate(() => { refreshMarket(null, { silent: true }); }); await p2.waitForFunction(() => market.relayVersion() === '3', null, { timeout: 12000 }); await p2.evaluate(() => { collectGlobalNotices(); }); await p2.waitForTimeout(400);
     eq(await p2.evaluate(() => Notify.pending().filter((n) => n.id === 'relay:cache').length), 0, 'relais à jour : aucune alerte');
   });
+  await test('autre cotation d\'un même ISIN (ex. valeur de Hong Kong en dollars → cotation allemande en euros) : suggestions à la demande dans la fiche, un clic change symbole et devise', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'cl', ticker: 'LHYFE.PA', displayTicker: 'LHYFE.PA', isin: 'FR0014009YQ1', name: 'Lhyfe', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 60, avgCost: 64.46, price: 2, account: 'main', logo: null, source: 'degiro', addedAt: '2025-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForTimeout(400);
+    await p.evaluate(() => { openHoldingModal('cl'); }); await p.waitForSelector('#hSymMore'); await p.click('#hSymMore'); await p.waitForSelector('[data-sg]'); ok(/LHYFE\.PA/.test(await p.locator('#hSym').innerText()), 'cotations proposées pour l\'ISIN malgré un cours existant');
+    await p.click('[data-sg]:has-text("LHYFE.PA")'); await p.waitForFunction(() => document.querySelector('#hCur').value === 'EUR'); eq(await p.inputValue('#hTicker'), 'LHYFE.PA', 'symbole choisi'); eq(await p.inputValue('#hCur'), 'EUR', 'devise de la nouvelle cotation');
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {
