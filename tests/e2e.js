@@ -363,6 +363,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('#xGo'); await p.waitForTimeout(700); const s = await storeOf(p); eq(s.transactions.length, 1, 'aucune opération ajoutée une seconde fois'); eq(s.transactions[0].holdingId, 'dup', 'l\'opération reste où elle est (à déplacer avec « Déplacer des opérations… »)'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('fiche « Achats » : achats importés en EUR sur une position cotée en DKK affichés en EUR (pas « DKK »)', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'n', ticker: 'NOVO', displayTicker: 'NOVO', isin: '', name: 'Novo Nordisk A/S', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'DKK', quantity: 40, avgCost: 413, price: 300, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
+      transactions: [{ id: 't1', holdingId: 'n', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'a' }, { id: 't2', holdingId: 'n', date: '2025-04-07', type: 'buy', qty: 10, price: 56.94, fees: 1, currency: 'EUR', amountAcct: 570.4, acctCur: 'EUR', source: 'csv', extId: 'b' }] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1000 } }); await p.open();
+    await p.evaluate(() => { go('portfolio'); openBuysModal('n'); }); await p.waitForSelector('#byAdd');
+    const t = (await p.locator('.modal').innerText()).replace(/\s+/g, ' '); ok(/81,1100\s*€/.test(t) && /56,9400\s*€/.test(t), 'prix des achats en euros : ' + t.slice(0, 300)); ok(!/81,1100\s*DKK/.test(t), 'pas de libellé DKK sur les prix en euros');
+    ok(/75,\d+\s*€/.test(t.split('Prix de revient')[1] || ''), 'PRU indicatif en euros'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

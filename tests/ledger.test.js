@@ -490,4 +490,13 @@ t('déplacer des opérations : refus (introuvable, mélange de positions, même 
   assert.ok(L.moveTransactions(st, ['1'], 'b', { today: '2026-01-01' }, { allowMismatch: true }).ok); assert.strictEqual(st.transactions[0].holdingId, 'b');
 });
 
+t('fiche « Achats » : la devise des achats est celle des opérations (position en DKK, achats importés en EUR)', () => {
+  const T = (id, d, q, p, cur) => ({ id, holdingId: 'n', date: d, type: 'buy', qty: q, price: p, fees: 1, currency: cur, amountAcct: q * p + 1, acctCur: cur, source: 'csv' });
+  const h = { id: 'n', name: 'Novo', currency: 'DKK', costCurrency: 'DKK', quantity: 40, avgCost: 413 };
+  const sm = L.purchaseSummary({ holdings: [h], transactions: [T('1', '2025-01-30', 30, 81.11, 'EUR'), T('2', '2025-04-07', 10, 56.94, 'EUR')], archive: [] }, h);
+  assert.deepStrictEqual(sm.rows.map((r) => r.cur), ['EUR', 'EUR']); assert.strictEqual(sm.pruCur, 'EUR'); assert.ok(Math.abs(sm.pruCalc - (30 * 81.11 + 1 + 10 * 56.94 + 1) / 40) < 1e-9);
+  const mixed = L.purchaseSummary({ holdings: [h], transactions: [T('1', '2025-01-30', 30, 81.11, 'EUR'), T('2', '2025-04-07', 10, 424, 'DKK')], archive: [] }, h);
+  assert.strictEqual(mixed.pruCalc, null, 'devises mélangées : pas de PRU indicatif trompeur'); assert.strictEqual(mixed.pruCur, null);
+});
+
 console.log('\n' + n + ' tests réussis');

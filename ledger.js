@@ -684,11 +684,11 @@
      --------------------------------------------------------------- */
   function purchaseSummary(state, h) {
     const { entries, cur, txs } = entriesFor(state, h), led = run(entries), cq = Number(h.quantity) || 0;
-    const rows = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((t) => ({ id: t.id, date: t.date, type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), price: t.price == null || t.price === '' ? null : Number(t.price), fees: Number(t.fees || 0), source: t.source || 'manual', opening: !!t.opening, manual: (t.source || 'manual') === 'manual' || !!t.opening }));
+    const rows = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map((t) => ({ id: t.id, date: t.date, type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), price: t.price == null || t.price === '' ? null : Number(t.price), fees: Number(t.fees || 0), cur: t.currency || null, source: t.source || 'manual', opening: !!t.opening, manual: (t.source || 'manual') === 'manual' || !!t.opening }));
     const buys = rows.filter((r) => r.type === 'buy'), withPrice = buys.filter((r) => r.price > 0);
-    const pruCalc = withPrice.length === buys.length && buys.length ? buys.reduce((a, r) => a + r.qty * r.price + r.fees, 0) / buys.reduce((a, r) => a + r.qty, 0) : null;
+    const buyCurs = Array.from(new Set(buys.map((r) => r.cur || ''))), pruCur = buyCurs.length === 1 && buyCurs[0] ? buyCurs[0] : null, pruCalc = withPrice.length === buys.length && buys.length && buyCurs.length === 1 ? buys.reduce((a, r) => a + r.qty * r.price + r.fees, 0) / buys.reduce((a, r) => a + r.qty, 0) : null;
     const diff = r8(cq - led.qty);
-    return { rows, ledgerQty: led.qty, holdingQty: cq, diff, consistent: Math.abs(diff) <= 1e-6 * Math.max(1, cq) && !led.negative, negative: led.negative, pruCalc, costKnown: led.costUnknown === 0, cur };
+    return { rows, ledgerQty: led.qty, holdingQty: cq, diff, consistent: Math.abs(diff) <= 1e-6 * Math.max(1, cq) && !led.negative, negative: led.negative, pruCalc, pruCur, costKnown: led.costUnknown === 0, cur };
   }
   function addPurchase(state, id, p, deps) {
     const err = (error) => ({ ok: false, error });
