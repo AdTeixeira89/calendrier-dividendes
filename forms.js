@@ -663,8 +663,12 @@ function commitTransactions(p, o) {
   };
   const created = [], touched = new Set(), dupBy = {}; let dupTx = 0, noHolding = 0;
   const all = p.buys.map((x) => Object.assign(x, { kind: 'buy' })).concat(p.sells.map((x) => Object.assign(x, { kind: 'sell' })), p.dividends.map((x) => Object.assign(x, { kind: 'dividend' })));
+  const findArchived = (r) => {      // position déjà clôturée du même portefeuille : ses opérations et dividendes s'y rattachent (jamais de doublon)
+    const s = r.sym.toUpperCase(), nmn = norm(r.name);
+    return (state.archive || []).find((x) => !x.statementOnly && x.account === o.acc && ((s && (String(x.isin || '').toUpperCase() === s || String(x.ticker || '').toUpperCase() === s)) || (nmn && norm(x.name) === nmn)));
+  };
   const resolve = (r) => {
-    let h = findHolding(r) || created.find((c) => (r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name)));
+    let h = findHolding(r) || created.find((c) => (r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name))) || findArchived(r);
     if (!h && o.createNew) {
       const sym = r.sym || r.name;
       h = { id: uid(), ticker: sym, displayTicker: sym.toUpperCase(), isin: Market.isISIN(sym) ? sym.toUpperCase() : '', name: r.name || '', type: 'stock', quantity: 0, avgCost: null, currency: r.currency || baseCur(), account: o.acc, logo: null, source: 'import-tx', addedAt: r.date,
@@ -697,18 +701,30 @@ function commitTransactions(p, o) {
   Dividends.learnPayLags(state, Market, todayISO());
   Dividends.logImport(state, { id: impId, kind: 'transactions', name: lastImportName, account: o.acc, report: Object.assign({ newTx: newTx.length, dupTx }, dv) });
   // quantité et prix de revient : actifs créés (toujours) ; existants (si demandé)
+  const reopened = [];
   touched.forEach((h) => {
+    if (!state.holdings.includes(h)) {       // position clôturée recevant de nouvelles opérations : date de clôture mise à jour ; rouverte seulement si le grand livre indique à nouveau des titres
+      const led = Ledger.run(Ledger.entriesFor(state, h).entries);
+      if (led.qty > 1e-8) { if (Ledger.promote(state, h.id, { uid, today: todayISO() }).ok) reopened.push(h.name || h.displayTicker || h.ticker); } else if (led.last) h.closedAt = led.last;
+      return;
+    }
     if (!(created.indexOf(h) >= 0 || o.updateExisting)) return;
     const pos = Engine.positionFor(state, h);                      // même moteur que l'import d'historique (grand livre) : splits validés, ordre des opérations, PRU inconnu si un montant manque
     h.quantity = pos.quantity; h.avgCost = pos.avgCost;
     if (pos.avgCost != null) h.costCurrency = pos.costCurrency;      // devise du PRU = devise des montants du relevé (et non celle de la cotation Yahoo, qui peut différer)
   });
+  // position créée par ce fichier et entièrement vendue (achat et vente dans le même relevé) : elle va directement dans « Clôturées » avec ses opérations et ses dividendes
+  const closedNow = created.filter((h) => !(Number(h.quantity) > 1e-8) && state.transactions.some((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell')));
+  closedNow.forEach((h) => Ledger.archiveKept(state, h.id, { uid, today: todayISO() }));
   saveState(); closeModal(); renderPage();
   const msg = [newTx.length + ' opération(s)', 'dividendes : ' + dv.fresh + ' nouveau(x), ' + (dv.known + dv.adopted) + ' déjà connu(s), ' + dv.updated + ' mis à jour, ' + dv.ignored + ' ignoré(s)'];
-  if (created.length) msg.push(created.length + ' actif(s) créé(s)');
+  if (created.length - closedNow.length) msg.push((created.length - closedNow.length) + ' actif(s) créé(s)');
+  if (closedNow.length) msg.push(closedNow.length + ' position(s) soldée(s) rangée(s) dans « Clôturées »');
+  if (reopened.length) msg.push(reopened.length + ' position(s) clôturée(s) rouverte(s) : ' + reopened.join(', '));
   if (dupTx) { msg.push(dupTx + ' opération(s) déjà connue(s)'); notifyDuplicates(lastImportName, Object.keys(dupBy).map((k) => ({ name: k, n: dupBy[k] }))); } if (noHolding) msg.push(noHolding + ' sans actif correspondant');
   toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
-  (created.length && state.settings.relayUrl ? refreshMarket(created) : Promise.resolve()).then(() => runDividendAnalysis({ auto: true, ids: null })).catch((e) => console.error(e));
+  const openNew = created.filter((h) => closedNow.indexOf(h) < 0), closedArch = closedNow.map((h) => (state.archive || []).find((x) => x.id === h.id)).filter(Boolean);
+  (state.settings.relayUrl ? Promise.resolve().then(() => (openNew.length ? refreshMarket(openNew) : null)).then(() => (closedArch.length ? refreshArchive(closedArch, todayISO()).then(() => saveState()) : null)) : Promise.resolve()).then(() => runDividendAnalysis({ auto: true, ids: null })).catch((e) => console.error(e));
 }
 
 

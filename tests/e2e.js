@@ -296,6 +296,35 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import Trade Republic : position achetée puis vendue dans le fichier → « Clôturées » avec opérations et dividendes ; position existante (rattachée par le nom) : opérations ajoutées, quantité et PRU enregistrés INCHANGÉS ; réimport sans doublon', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 's', ticker: 'SAP', displayTicker: 'SAP', isin: '', name: 'SAP SE', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 12, avgCost: 252.94, price: 160, account: 'pea', logo: null, source: 'manual', addedAt: '2025-01-30', dividend: { none: true } }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const H = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n';
+    const csv = H + '2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,10,265.7,-2657,-1,,EUR,,,,,sap-1\n' +
+      '2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,TotalEnergies,FR0000120271,40,55.88,-2235.2,-1,-6.71,EUR,,,,,tot-1\n' +
+      '2025-04-01T09:00:00Z,2025-04-01,PEA,CASH,DIVIDEND,STOCK,TotalEnergies,FR0000120271,40,,31.6,,,EUR,,,,Cash Dividend for ISIN FR0000120271,tot-d1\n' +
+      '2026-04-08T09:00:00Z,2026-04-08,PEA,TRADING,SELL,STOCK,TotalEnergies,FR0000120271,-40,73.63,2945.2,-1,,EUR,,,,,tot-2\n';
+    const importIt = async () => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xGo'); await p.selectOption('#xacc', 'pea'); await p.click('#xGo'); await p.waitForTimeout(900); };
+    await importIt(); let s = await storeOf(p);
+    eq(s.holdings.map((h) => h.name), ['SAP SE'], 'aucune position à 0 titre dans le portefeuille actuel'); eq([s.holdings[0].quantity, s.holdings[0].avgCost], [12, 252.94], 'position existante : quantité et PRU enregistrés INCHANGÉS');
+    eq(s.transactions.filter((t) => t.holdingId === 's').length, 1, 'achat SAP rattaché à la position existante (par le nom)');
+    eq((s.archive || []).length, 1, 'TotalEnergies rangée dans « Clôturées »'); const a = s.archive[0]; eq([a.name, a.isin], ['TotalEnergies', 'FR0000120271'], 'identité conservée');
+    eq(s.transactions.filter((t) => t.holdingId === a.id).map((t) => t.type).sort(), ['buy', 'sell'], 'opérations d\'achat et de vente conservées'); eq(s.payments.map((x) => x.holdingId), [a.id], 'dividende rattaché à la position clôturée');
+    ok(await p.evaluate(() => Dividends.summary(state, {}).count === 1), 'le dividende de la position clôturée est compté dans les dividendes perçus');
+    await p.evaluate(() => go('history')); await importIt(); s = await storeOf(p);
+    eq([s.transactions.length, s.payments.length, s.archive.length, s.holdings.length], [3, 1, 1, 1], 'réimport : aucun doublon'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('import Trade Republic : une position clôturée qui reçoit un nouvel achat est rouverte (quantité et PRU du grand livre), sans doublon', async () => {
+    const T = (id, d, type, qty, price) => ({ id, holdingId: 'z', date: d, type, qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'csv', extId: 'x-' + id });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [], archive: [{ id: 'z', ticker: 'FR0000120271', displayTicker: 'FR0000120271', isin: 'FR0000120271', name: 'TotalEnergies', currency: 'EUR', account: 'pea', source: 'import-tx', closedAt: '2026-04-08' }], transactions: [T('1', '2025-01-30', 'buy', 40, 55), T('2', '2026-04-08', 'sell', 40, 73)] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2026-09-01T09:00:00Z,2026-09-01,PEA,TRADING,BUY,STOCK,TotalEnergies,FR0000120271,10,60,-600,0,,EUR,,,,,new-1\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xGo'); await p.selectOption('#xacc', 'pea'); await p.click('#xGo'); await p.waitForTimeout(900);
+    const s = await storeOf(p); eq(s.holdings.length, 1, 'position rouverte'); eq([s.holdings[0].isin, s.holdings[0].quantity, s.holdings[0].id], ['FR0000120271', 10, 'z'], 'quantité du grand livre (40 − 40 + 10), même identifiant'); eq(s.archive.length, 0, 'plus dans « Clôturées »'); eq(s.transactions.length, 3, 'historique conservé + nouvel achat');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
