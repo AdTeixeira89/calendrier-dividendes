@@ -325,6 +325,22 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import Trade Republic : type de compte du fichier (PEA / DEFAULT) → portefeuille correspondant ; alerte si l\'actif existe déjà dans un autre portefeuille ; annulation de l\'import', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'cto', name: 'CTO Trade Republic' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 's', ticker: 'SAP', displayTicker: 'SAP', isin: '', name: 'SAP SE', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 12, avgCost: 252.94, price: 160, account: 'pea', logo: null, source: 'manual', addedAt: '2025-01-30', dividend: { none: true } }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const H = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n';
+    const csv = H + '2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,10,265.7,-2657,-1,,EUR,,,,,sap-1\n2025-02-03T09:00:00Z,2025-02-03,DEFAULT,TRADING,BUY,ETF,Core MSCI World,IE00B4L5Y983,2,90,-180,-1,,EUR,,,,,etf-1\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('[data-av="PEA"]');
+    eq([await p.locator('[data-av="PEA"]').inputValue(), await p.locator('[data-av="DEFAULT"]').inputValue()], ['pea', 'cto'], 'PEA → portefeuille PEA, DEFAULT → portefeuille CTO (devinés par leur nom)');
+    ok(!(await p.locator('#xAccMap .notice.warn').count()), 'aucune alerte quand les portefeuilles sont les bons');
+    await p.selectOption('[data-av="PEA"]', 'cto'); ok(/AUTRE portefeuille/.test(await p.locator('#xAccMap .notice.warn').innerText()) && /SAP SE/.test(await p.locator('#xAccMap .notice.warn').innerText()), 'alerte : SAP SE existe déjà dans un autre portefeuille'); await p.selectOption('[data-av="PEA"]', 'pea');
+    await p.click('#xGo'); await p.waitForTimeout(900); let s = await storeOf(p);
+    eq(s.holdings.length, 2, 'une position créée (ETF), aucune dupliquée'); eq(s.holdings.find((h) => h.isin === 'IE00B4L5Y983').account, 'cto', 'ETF rangé dans le CTO'); eq(s.transactions.find((t) => t.extId === 'sap-1').holdingId, 's', 'achat SAP rattaché à la position existante du PEA');
+    eq([s.holdings.find((h) => h.id === 's').quantity, s.holdings.find((h) => h.id === 's').avgCost], [12, 252.94], 'quantité et PRU enregistrés inchangés');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p);
+    eq([s.transactions.length, s.holdings.length], [0, 1], 'annulation : état d\'avant l\'import restauré'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

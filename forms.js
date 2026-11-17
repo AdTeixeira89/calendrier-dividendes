@@ -604,7 +604,7 @@ function txFromRows(rows, hIdx, cols, opts) {
     const fee = Math.abs(parseNum(g(r, 'fee'))) || 0, tax = cols.tax >= 0 && String(g(r, 'tax')).trim() !== '' ? Math.abs(parseNum(g(r, 'tax'))) : null;
     const ext = String(g(r, 'id') || '').trim();
     if (!date || (!sym && !name)) { out.bad++; return; }
-    const base = { date, sym, name, currency: /^[A-Z]{3}$/.test(cur) ? cur : null, ext, line: hIdx + ri + 2 };
+    const base = { date, sym, name, currency: /^[A-Z]{3}$/.test(cur) ? cur : null, ext, line: hIdx + ri + 2, acct: String(g(r, 'acct') || '').trim().toUpperCase() };
     if (kind === 'dividend') {
       if (isNaN(amount) || !amount) { out.bad++; return; }
       let gross, net, taxv = tax && !isNaN(tax) ? tax : null;
@@ -626,7 +626,7 @@ function renderTxMapping(rows, hIdx, prev) {
   const G = (k, kws) => prev[k] !== undefined ? prev[k] : guessCol(head, kws);
   const sel = { date: G('date', ['datetime', 'date', 'time']), type: G('type', ['type', 'operation', 'transaction', 'description']), cat: G('cat', ['category', 'categorie']), sym: G('sym', ['symbol', 'symbole', 'isin', 'ticker']), name: G('name', ['name', 'nom', 'produit', 'libelle']),
     shares: G('shares', ['shares', 'quantite', 'quantity', 'nombre', 'qty']), price: G('price', ['price', 'prix', 'cours']), amount: G('amount', ['amount', 'montant', 'total', 'valeur']), fee: G('fee', ['fee', 'frais', 'commission']), tax: G('tax', ['tax', 'impot', 'retenue', 'taxe']),
-    cur: G('cur', ['currency', 'devise']), id: G('id', ['transaction id', 'transaction_id', 'id']) };
+    cur: G('cur', ['currency', 'devise']), id: G('id', ['transaction id', 'transaction_id', 'id']), acct: G('acct', ['account_type', 'account type', 'type de compte']) };
   const isTR = head.map(norm).includes('transaction_id') || head.map(norm).includes('asset_class');
   const divMode = prev.divMode || 'gross';
   const m = openModal('<h2>Importer des transactions</h2><div class="sub">' + (isTR ? 'Format <b>Trade Republic</b> reconnu. ' : '') + 'Vérifiez les colonnes, puis contrôlez le résultat avant d\'importer.</div>' +
@@ -638,14 +638,32 @@ function renderTxMapping(rows, hIdx, prev) {
     '<div class="row2">' + fld('Frais', colSelect('xfee', head, sel.fee), '', 'xfee') + fld('Retenue / impôt', colSelect('xtax', head, sel.tax), '', 'xtax') + '</div>' +
     '<div class="row2">' + fld('Devise', colSelect('xcur', head, sel.cur), '', 'xcur') + fld('Identifiant de transaction (anti-doublon)', colSelect('xid', head, sel.id), '', 'xid') + '</div>' +
     fld('Le montant d\'un dividende est…', '<select id="xmode">' + opt('gross', 'le brut (avant retenue) — cas Trade Republic', divMode === 'gross') + opt('net', 'le net reçu (après retenue)', divMode === 'net') + '</select>', 'Détermine le calcul du brut et du net enregistrés.', 'xmode') +
+    fld('Type de compte (facultatif)', colSelect('xacct', head, sel.acct), 'Ex. « PEA » ou « DEFAULT » (CTO) chez Trade Republic : chaque type est rangé dans le portefeuille choisi.', 'xacct') + '<div id="xAccMap"></div>' +
     fld('Portefeuille pour les nouveaux actifs', '<select id="xacc">' + state.accounts.map((a) => opt(a.id, a.name, (view.account !== 'all' ? view.account : state.accounts[0].id) === a.id)).join('') + '</select>', '', 'xacc') +
     '<div id="xSummary" class="notice info" style="margin-top:6px"></div><div id="xPrev"></div>' +
     '<label class="chk"><input type="checkbox" id="xNew" checked><span>Créer les actifs qui ne sont pas encore dans le portefeuille (quantité et prix de revient calculés)</span></label>' +
     '<label class="chk"><input type="checkbox" id="xUpd"><span>Mettre aussi à jour la quantité et le prix de revient des actifs existants (seulement si le fichier couvre tout l\'historique)</span></label>' +
     '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="xGo">Importer</button></div></div>', { wide: true });
-  const cols = () => { const c = {}; ['date', 'type', 'cat', 'sym', 'name', 'shares', 'price', 'amount', 'fee', 'tax', 'cur', 'id'].forEach((k) => { c[k] = Number($('#x' + k, m).value); }); return c; };
+  const cols = () => { const c = {}; ['date', 'type', 'cat', 'sym', 'name', 'shares', 'price', 'amount', 'fee', 'tax', 'cur', 'id', 'acct'].forEach((k) => { c[k] = Number($('#x' + k, m).value); }); return c; };
+  const accMap = Object.assign({}, prev.accMap || {});
+  const guessAcct = (v) => {
+    const pea = state.accounts.find((a) => /\bpea\b/i.test(a.name)), cto = state.accounts.find((a) => !/\bpea\b/i.test(a.name) && /cto|compte.?titres|trade/i.test(a.name));
+    if (v === 'PEA' && pea) return pea.id; if ((v === 'DEFAULT' || v === 'CTO') && cto) return cto.id; return null;
+  };
   const refresh = () => {
     const parsed = txFromRows(rows, hIdx, cols(), { divMode: $('#xmode', m).value });
+    {
+      const all = [].concat(parsed.buys, parsed.sells, parsed.dividends), vals = Array.from(new Set(all.map((r) => r.acct).filter(Boolean))), box = $('#xAccMap', m), defAcc = $('#xacc', m).value;
+      vals.forEach((v) => { if (!accMap[v] || !state.accounts.some((a) => a.id === accMap[v])) accMap[v] = guessAcct(v) || defAcc; });
+      const elsewhere = new Map();
+      all.forEach((r) => {
+        const acc = (r.acct && accMap[r.acct]) || defAcc; if (holdingMatching(r, acc, true)) return;
+        const other = holdingMatching(r, acc, false); if (other) elsewhere.set(String(r.sym || norm(r.name)).toUpperCase(), (r.name || r.sym) + ' (dans « ' + accountName(other.account) + ' »)');
+      });
+      box.innerHTML = (vals.length ? '<div class="notice info" style="margin:6px 0"><span>Le fichier distingue plusieurs types de compte : chacun est rangé dans le portefeuille choisi ci-dessous.</span></div>' + vals.map((v) => '<div class="field"><label>Type « ' + esc(v) + ' » → portefeuille</label><select data-av="' + esc(v) + '">' + state.accounts.map((a) => opt(a.id, a.name, accMap[v] === a.id)).join('') + '</select></div>').join('') : '') +
+        (elsewhere.size ? '<div class="notice warn" style="margin:6px 0"><span><b>' + elsewhere.size + ' actif(s) du fichier existent déjà dans un AUTRE portefeuille</b> : ' + esc(Array.from(elsewhere.values()).slice(0, 6).join(' ; ')) + (elsewhere.size > 6 ? '…' : '') + '. Si leurs achats doivent rejoindre ces positions, choisissez ce portefeuille ; sinon des doublons seront créés.</span></div>' : '');
+      $$('[data-av]', box).forEach((sl) => { sl.onchange = () => { accMap[sl.dataset.av] = sl.value; refresh(); }; });
+    }
     $('#xSummary', m).innerHTML = '<span><b>' + parsed.buys.length + '</b> achat(s) · <b>' + parsed.sells.length + '</b> vente(s) · <b>' + parsed.dividends.length + '</b> dividende(s) détecté(s)' + (parsed.skipped ? ' · ' + parsed.skipped + ' autre(s) opération(s) ignorée(s) (dépôts, intérêts, cartes…)' : '') + (parsed.bad ? ' · ' + parsed.bad + ' ligne(s) illisible(s)' : '') + '</span>';
     const sample = parsed.dividends.slice(0, 4).map((d) => '<tr><td>' + esc(d.date) + '</td><td>' + esc(d.name || d.sym) + '</td><td class="r">' + fmtMoney(d.gross, d.currency || 'EUR') + '</td><td class="r">' + (d.tax === null ? '—' : fmtMoney(d.tax, d.currency || 'EUR')) + '</td><td class="r">' + (d.net === null ? '—' : fmtMoney(d.net, d.currency || 'EUR')) + '</td></tr>').join('');
     $('#xPrev', m).innerHTML = sample ? '<div class="sec">Dividendes — aperçu (brut / retenue / net)</div><div class="tbl-wrap"><table class="tbl"><tbody>' + sample + '</tbody></table></div>' : '';
@@ -653,25 +671,32 @@ function renderTxMapping(rows, hIdx, prev) {
   };
   $$('select', m).forEach((s) => s.addEventListener('change', (e) => { if (e.target.id === 'xH') renderTxMapping(rows, Number(e.target.value), {}); else refresh(); }));
   refresh();
-  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
+  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, accMap: accMap, createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
+}
+/* Position détenue qui correspond à une ligne de fichier (même ISIN, même ticker ou même nom). same = true : dans le portefeuille acc ; false : dans un autre portefeuille. */
+function holdingMatching(r, acc, same) {
+  const s = String(r.sym || '').toUpperCase(), nmn = norm(r.name);
+  return state.holdings.find((h) => (same ? h.account === acc : h.account !== acc) && ((s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn)));
 }
 function commitTransactions(p, o) {
   if (!p.buys.length && !p.sells.length && !p.dividends.length) { toast('Aucune opération exploitable : vérifiez les colonnes choisies.', { error: true }); return; }
+  const accOf = (r) => (r.acct && o.accMap && o.accMap[r.acct]) || o.acc;       // portefeuille de la ligne : celui du type de compte (PEA, CTO…) du fichier, sinon le portefeuille choisi
   const findHolding = (r) => {
     const s = r.sym.toUpperCase(), nmn = norm(r.name);
-    return state.holdings.find((h) => h.account === o.acc && ((s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn)));   // les comptes restent indépendants : jamais de rattachement à la position d'un autre compte
+    return state.holdings.find((h) => h.account === accOf(r) && ((s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn)));   // les comptes restent indépendants : jamais de rattachement à la position d'un autre compte
   };
+  snapshotForUndo('import de transactions');                // l'import peut être annulé (bouton « Annuler l'import » du message)
   const created = [], touched = new Set(), dupBy = {}; let dupTx = 0, noHolding = 0;
   const all = p.buys.map((x) => Object.assign(x, { kind: 'buy' })).concat(p.sells.map((x) => Object.assign(x, { kind: 'sell' })), p.dividends.map((x) => Object.assign(x, { kind: 'dividend' })));
   const findArchived = (r) => {      // position déjà clôturée du même portefeuille : ses opérations et dividendes s'y rattachent (jamais de doublon)
     const s = r.sym.toUpperCase(), nmn = norm(r.name);
-    return (state.archive || []).find((x) => !x.statementOnly && x.account === o.acc && ((s && (String(x.isin || '').toUpperCase() === s || String(x.ticker || '').toUpperCase() === s)) || (nmn && norm(x.name) === nmn)));
+    return (state.archive || []).find((x) => !x.statementOnly && x.account === accOf(r) && ((s && (String(x.isin || '').toUpperCase() === s || String(x.ticker || '').toUpperCase() === s)) || (nmn && norm(x.name) === nmn)));
   };
   const resolve = (r) => {
-    let h = findHolding(r) || created.find((c) => (r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name))) || findArchived(r);
+    let h = findHolding(r) || created.find((c) => c.account === accOf(r) && ((r.sym && (c.isin === r.sym.toUpperCase() || c.ticker.toUpperCase() === r.sym.toUpperCase())) || (r.name && norm(c.name) === norm(r.name)))) || findArchived(r);
     if (!h && o.createNew) {
       const sym = r.sym || r.name;
-      h = { id: uid(), ticker: sym, displayTicker: sym.toUpperCase(), isin: Market.isISIN(sym) ? sym.toUpperCase() : '', name: r.name || '', type: 'stock', quantity: 0, avgCost: null, currency: r.currency || baseCur(), account: o.acc, logo: null, source: 'import-tx', addedAt: r.date,
+      h = { id: uid(), ticker: sym, displayTicker: sym.toUpperCase(), isin: Market.isISIN(sym) ? sym.toUpperCase() : '', name: r.name || '', type: 'stock', quantity: 0, avgCost: null, currency: r.currency || baseCur(), account: accOf(r), logo: null, source: 'import-tx', addedAt: r.date,
         dividend: { lastAmount: null, anchorMonth: null, frequency: 'quarterly', dateKind: 'pay', none: false } };
       created.push(h);
     }
@@ -722,7 +747,7 @@ function commitTransactions(p, o) {
   if (closedNow.length) msg.push(closedNow.length + ' position(s) soldée(s) rangée(s) dans « Clôturées »');
   if (reopened.length) msg.push(reopened.length + ' position(s) clôturée(s) rouverte(s) : ' + reopened.join(', '));
   if (dupTx) { msg.push(dupTx + ' opération(s) déjà connue(s)'); notifyDuplicates(lastImportName, Object.keys(dupBy).map((k) => ({ name: k, n: dupBy[k] }))); } if (noHolding) msg.push(noHolding + ' sans actif correspondant');
-  toast('Import : ' + msg.join(' · ') + '.', { ms: 7000 });
+  toast('Import : ' + msg.join(' · ') + '.', { ms: 14000, action: { label: 'Annuler l\'import', fn: undoLastImport } });
   const openNew = created.filter((h) => closedNow.indexOf(h) < 0), closedArch = closedNow.map((h) => (state.archive || []).find((x) => x.id === h.id)).filter(Boolean);
   (state.settings.relayUrl ? Promise.resolve().then(() => (openNew.length ? refreshMarket(openNew) : null)).then(() => (closedArch.length ? refreshArchive(closedArch, todayISO()).then(() => saveState()) : null)) : Promise.resolve()).then(() => runDividendAnalysis({ auto: true, ids: null })).catch((e) => console.error(e));
 }
