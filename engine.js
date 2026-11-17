@@ -81,21 +81,22 @@
     return Math.max(0, txs.filter((t) => t.date <= dateISO).reduce((s, t) => s + signed(t), 0));
   }
 
-  /* Position et prix de revient moyen pondéré à partir d'opérations. */
+  /* Position et prix de revient moyen pondéré : UN SEUL moteur de coût moyen, le grand livre (Ledger.run), pour tous les chemins d'import.
+     Ordre : date, heure, puis achat avant vente ; frais d'achat dans le coût, frais de vente dans le résultat ; splits validés, livraisons gratuites et retraits gérés ;
+     un montant inconnu rend le PRU INCONNU (null), jamais un PRU inventé ; une vente supérieure à la détention est plafonnée et signalée (negative).
+     - positionFromEntries(led) : résumé d'un résultat Ledger.run ;
+     - positionFromTransactions(txs) : à partir d'une liste d'opérations seule (sans opérations sur titres) ;
+     - positionFor(state, h) : à partir des opérations enregistrées de la position h ET des opérations sur titres validées (state.corp). */
+  function positionFromEntries(led, cur) {
+    return { quantity: led.qty, avgCost: led.pru, cost: led.cost, costCurrency: cur || null, negative: led.negative, costUnknown: led.costUnknown, realized: led.realized, realizedKnown: led.realizedKnown };
+  }
   function positionFromTransactions(txs) {
-    const sorted = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    let qty = 0, cost = 0;
-    sorted.forEach((t) => {
-      const q = num(t.qty);
-      if (t.type === 'buy') { cost += q * num(t.price) + num(t.fees); qty += q; }
-      else if (t.type === 'sell') {
-        const avg = qty > 0 ? cost / qty : 0;
-        const sold = Math.min(q, qty);
-        cost -= avg * sold; qty -= sold;
-      }
-    });
-    qty = Math.round(qty * 1e8) / 1e8;
-    return { quantity: qty, avgCost: qty > 0 ? cost / qty : null };
+    const st = { transactions: (txs || []).map((t) => Object.assign({}, t, { holdingId: '_' })) }, e = Ledger.entriesFor(st, { id: '_' });
+    return positionFromEntries(Ledger.run(e.entries), e.cur);
+  }
+  function positionFor(state, h) {
+    const e = Ledger.entriesFor(state, h);
+    return positionFromEntries(Ledger.run(e.entries), e.cur);
   }
 
   /* ---------- événements ---------- */
@@ -789,7 +790,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, positionFor, positionFromEntries, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };

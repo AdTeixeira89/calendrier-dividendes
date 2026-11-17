@@ -252,11 +252,26 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok((await p.locator('.modal').innerText()).includes('Trade Republic'), 'format reconnu');
     await p.click('#xGo'); await p.waitForTimeout(1500);
     let s = await storeOf(p); eq(s.transactions.length, 3, '3 opérations'); eq(s.payments.length, 1, '1 dividende');
-    const h = s.holdings[0]; eq(h.quantity, 15, 'quantité = 10 + 10 − 5'); ok(Math.abs(h.avgCost - ((1501 + 1701) / 20)) < 1e-6, 'PRU moyen pondéré = ' + h.avgCost);
+    const h = s.holdings[0]; eq(h.quantity, 15, 'quantité = 10 + 10 − 5'); ok(Math.abs(h.avgCost - ((1501 + 1701) / 20)) < 1e-6, 'PRU moyen pondéré = ' + h.avgCost); eq(h.costCurrency, 'EUR', 'devise du PRU = devise des montants du relevé');
     const pay = s.payments[0]; eq([pay.net, pay.tax, pay.gross], [20.4, 15.3, 35.7], 'montant de l\'export Trade Republic = brut 35,70 ; retenue 15,30 ; net 20,40'); eq(pay.payDate, '2026-05-20', 'date de paiement');
     await importIt(); await p.click('#xGo'); await p.waitForTimeout(800); s = await storeOf(p);
     eq([s.transactions.length, s.payments.length, s.holdings.length], [3, 1, 1], 'réimport : aucun doublon');
     await p.evaluate(() => go('history')); await p.waitForTimeout(200); ok(/35,70/.test(await p.locator('tbody').innerText()), 'dividende affiché dans l\'historique');
+  });
+
+  await test('phase 1 — import générique : même moteur que le grand livre (split validé pris en compte lors de la mise à jour, PRU en devise du relevé), existants intacts sans la case', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'tr', name: 'Trade Republic' }], corp: [{ id: 'c1', isin: 'US0000000001', date: '2024-06-10', kind: 'split', ratio: 10, validated: true }],
+      holdings: [{ id: 'n', ticker: 'NVDA', displayTicker: 'NVDA', isin: 'US0000000001', name: 'NVIDIA', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', quantity: 11, avgCost: 54.5, price: 150, account: 'tr', logo: null, source: 'import-tx', addedAt: '2023-03-16', dividend: { none: true } }],
+      transactions: [{ id: 'old1', holdingId: 'n', date: '2023-03-16', type: 'buy', qty: 1, price: 400, fees: 0, currency: 'EUR', source: 'csv', extId: 'old-1' }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n' +
+      '2025-01-10T09:00:00Z,2025-01-10,DEFAULT,TRADING,BUY,STOCK,NVIDIA,US0000000001,2,100,-200,0,0,EUR,,,,Buy,n-new1\n';
+    const importIt = async (upd) => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xGo'); await p.selectOption('#xacc', 'tr'); if (upd) await p.check('#xUpd'); await p.click('#xGo'); await p.waitForTimeout(900); };
+    await importIt(false); let s = await storeOf(p); let h = s.holdings[0];
+    eq(s.transactions.length, 2, 'nouvel achat ajouté à l\'historique'); eq([h.quantity, h.avgCost], [11, 54.5], 'sans la case : quantité et PRU stockés INCHANGÉS');
+    await p.evaluate(() => go('history')); await importIt(true); s = await storeOf(p); h = s.holdings[0];
+    eq(s.transactions.length, 2, 'réimport : aucun doublon'); eq(h.quantity, 12, 'avec la case : 1 × 10 (split validé) + 2 = 12 titres (l\'ancien calcul ignorait le split)'); ok(Math.abs(h.avgCost - 50) < 1e-9, 'PRU = 600 / 12 = ' + h.avgCost); eq(h.costCurrency, 'EUR', 'devise du PRU = EUR (devise du relevé), pas la devise de cotation USD');
+    eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {

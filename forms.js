@@ -699,8 +699,9 @@ function commitTransactions(p, o) {
   // quantité et prix de revient : actifs créés (toujours) ; existants (si demandé)
   touched.forEach((h) => {
     if (!(created.indexOf(h) >= 0 || o.updateExisting)) return;
-    const pos = Engine.positionFromTransactions(state.transactions.filter((t) => t.holdingId === h.id));
+    const pos = Engine.positionFor(state, h);                      // même moteur que l'import d'historique (grand livre) : splits validés, ordre des opérations, PRU inconnu si un montant manque
     h.quantity = pos.quantity; h.avgCost = pos.avgCost;
+    if (pos.avgCost != null) h.costCurrency = pos.costCurrency;      // devise du PRU = devise des montants du relevé (et non celle de la cotation Yahoo, qui peut différer)
   });
   saveState(); closeModal(); renderPage();
   const msg = [newTx.length + ' opération(s)', 'dividendes : ' + dv.fresh + ' nouveau(x), ' + (dv.known + dv.adopted) + ' déjà connu(s), ' + dv.updated + ' mis à jour, ' + dv.ignored + ' ignoré(s)'];

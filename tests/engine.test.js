@@ -59,6 +59,45 @@ t('position & weighted average cost from transactions', () => {
   const r = E.positionFromTransactions([{ type: 'buy', qty: 10, price: 10, fees: 0, date: '2025-01-01' }, { type: 'buy', qty: 10, price: 20, fees: 0, date: '2025-02-01' }, { type: 'sell', qty: 5, price: 30, date: '2025-03-01' }]);
   assert.strictEqual(r.quantity, 15); assert.strictEqual(r.avgCost, 15);
 });
+/* ---- PHASE 1 : un seul moteur de coût moyen (Ledger.run). L'ancien calcul est conservé ici UNIQUEMENT pour comparer. ---- */
+const legacyPosition = (txs) => {                       // ancien Engine.positionFromTransactions (tri par date seule, montant inconnu = 0, vente excédentaire plafonnée sans signal)
+  const sorted = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)); let qty = 0, cost = 0;
+  sorted.forEach((x) => { const q = Number(x.qty) || 0; if (x.type === 'buy') { cost += q * (Number(x.price) || 0) + (Number(x.fees) || 0); qty += q; } else { const avg = qty > 0 ? cost / qty : 0, sold = Math.min(q, qty); cost -= avg * sold; qty -= sold; } });
+  qty = Math.round(qty * 1e8) / 1e8; return { quantity: qty, avgCost: qty > 0 ? cost / qty : null };
+};
+t('phase 1 : parité avec l\'ancien calcul sur des historiques simples (dates distinctes, prix connus) — 300 séries pseudo-aléatoires', () => {
+  let seed = 12345; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let k = 0; k < 300; k++) {
+    const n = 1 + Math.floor(rnd() * 12), txs = []; let held = 0;
+    for (let i = 0; i < n; i++) {
+      const date = '2024-' + String(1 + (i % 12)).padStart(2, '0') + '-' + String(1 + i).padStart(2, '0') + '', sell = held > 0.5 && rnd() < 0.35, q = sell ? Math.round(rnd() * held * 1e4) / 1e4 || 0.0001 : Math.round((0.1 + rnd() * 20) * 1e4) / 1e4;
+      txs.push({ type: sell ? 'sell' : 'buy', qty: q, price: Math.round((5 + rnd() * 300) * 1e3) / 1e3, fees: rnd() < 0.5 ? 0 : Math.round(rnd() * 500) / 100, date, currency: 'EUR' }); held += sell ? -q : q;
+    }
+    const a = E.positionFromTransactions(txs), b = legacyPosition(txs);
+    assert.ok(Math.abs(a.quantity - b.quantity) < 1e-7, 'quantité série ' + k + ' : ' + a.quantity + ' ≠ ' + b.quantity);
+    if (b.avgCost === null) assert.strictEqual(a.avgCost, null); else assert.ok(Math.abs(a.avgCost - b.avgCost) < 1e-6 * Math.max(1, b.avgCost), 'PRU série ' + k + ' : ' + a.avgCost + ' ≠ ' + b.avgCost);
+  }
+});
+t('phase 1 : différences voulues — ordre indépendant de la saisie un même jour, split, montant inconnu, vente excédentaire, livraison gratuite', () => {
+  // même jour : achat avant vente, quel que soit l'ordre des lignes (l'ancien calcul dépendait de l'ordre d'arrivée)
+  const buy = { type: 'buy', qty: 15, price: 35.468, fees: 0, date: '2021-04-27', currency: 'EUR' }, sell = { type: 'sell', qty: 3, price: 177.34, fees: 0, date: '2021-04-27', currency: 'EUR' }, first = { type: 'buy', qty: 3, price: 165, fees: 4.2, date: '2020-12-07', currency: 'EUR' };
+  const x = E.positionFromTransactions([first, buy, sell]), y = E.positionFromTransactions([first, sell, buy]);
+  assert.deepStrictEqual([x.quantity, x.avgCost], [y.quantity, y.avgCost], 'même résultat quel que soit l\'ordre des lignes'); assert.strictEqual(x.quantity, 15);
+  const lo = legacyPosition([first, sell, buy]), lo2 = legacyPosition([first, buy, sell]); assert.notStrictEqual(lo.avgCost, lo2.avgCost, 'l\'ancien calcul dépendait de l\'ordre des lignes');
+  // montant inconnu : PRU inconnu (l'ancien calcul comptait 0)
+  const u = E.positionFromTransactions([{ type: 'buy', qty: 10, price: 10, fees: 0, date: '2025-01-01' }, { type: 'buy', qty: 5, price: null, fees: 0, date: '2025-02-01' }]); assert.strictEqual(u.quantity, 15); assert.strictEqual(u.avgCost, null); assert.strictEqual(u.costUnknown, 1);
+  // vente supérieure à la détention : signalée
+  const n = E.positionFromTransactions([{ type: 'buy', qty: 5, price: 100, fees: 0, date: '2025-01-01' }, { type: 'sell', qty: 8, price: 120, fees: 0, date: '2025-02-01' }]); assert.strictEqual(n.negative, true); assert.strictEqual(n.quantity, 0);
+  // livraison gratuite (mouvement sans montant) : quantité +, coût inchangé
+  const g = E.positionFromTransactions([{ type: 'buy', qty: 15, price: 100, fees: 0, date: '2025-01-01' }, { type: 'buy', qty: 1, price: 0, fees: 0, date: '2025-06-08', corp: true }]); assert.strictEqual(g.quantity, 16); assert.ok(Math.abs(g.avgCost - 1500 / 16) < 1e-9);
+});
+t('phase 1 : positionFor tient compte des splits VALIDÉS (state.corp) et donne la devise du PRU', () => {
+  const h = { id: 'n', isin: 'US0000000001', currency: 'USD', account: 'tr' };
+  const tx = [{ id: 'a', holdingId: 'n', date: '2023-03-16', type: 'buy', qty: 1, price: 400, fees: 0, currency: 'EUR' }, { id: 'b', holdingId: 'n', date: '2025-01-10', type: 'buy', qty: 2, price: 100, fees: 0, currency: 'EUR' }];
+  const sans = E.positionFor({ transactions: tx, corp: [] }, h), avec = E.positionFor({ transactions: tx, corp: [{ id: 'c', isin: 'US0000000001', date: '2024-06-10', kind: 'split', ratio: 10, validated: true }] }, h);
+  assert.strictEqual(sans.quantity, 3); assert.strictEqual(avec.quantity, 12); assert.ok(Math.abs(avec.avgCost - 50) < 1e-9, 'PRU = 600 / 12'); assert.strictEqual(avec.costCurrency, 'EUR', 'devise des montants du relevé, pas celle de la cotation (USD)');
+  assert.strictEqual(E.positionFor({ transactions: [], corp: [] }, h).avgCost, null);
+});
 t('monthly series splits received / upcoming / unrecorded', () => {
   const p = { id: 'p', holdingId: 'h', ticker: 'T', payDate: '2026-02-15', qty: 10, gross: 10, net: 10, currency: 'EUR' };
   const m = E.monthlySeries(st([mk({})], [p]), 2026, 'gross', conv, today);
