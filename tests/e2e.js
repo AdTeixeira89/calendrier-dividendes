@@ -353,6 +353,16 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq([s.archive.length, s.transactions.length, s.payments.length], [2, 3, 2], 'annulation : tout est restauré'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import : opérations déjà présentes dans une AUTRE position (doublon créé par un ancien import) → l\'aperçu dit où elles sont ; elles ne sont pas ajoutées une seconde fois', async () => {
+    const mk = (id, acc) => ({ id, ticker: 'NOVO', displayTicker: 'NOVO', isin: '', name: 'Novo Nordisk A/S', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'DKK', quantity: id === 'novo' ? 90 : 0, avgCost: id === 'novo' ? 413.32 : null, price: 300, account: acc, logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'cto', name: 'CTO Trade Republic' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [mk('novo', 'pea'), mk('dup', 'cto')], transactions: [{ id: 't1', holdingId: 'dup', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'novo-1' }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,Novo Nordisk A/S,DK0062498333,30,81.11,-2433.3,-1,,EUR,,,,,novo-1\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xAccMap .notice');
+    const t = (await p.locator('#xAccMap').innerText()).replace(/\s+/g, ' '); ok(/déjà dans l'application/.test(t) && /CTO Trade Republic/.test(t) && /AUTRE position/.test(t), 'aperçu : ' + t.slice(0, 260));
+    await p.click('#xGo'); await p.waitForTimeout(700); const s = await storeOf(p); eq(s.transactions.length, 1, 'aucune opération ajoutée une seconde fois'); eq(s.transactions[0].holdingId, 'dup', 'l\'opération reste où elle est (à déplacer avec « Déplacer des opérations… »)'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

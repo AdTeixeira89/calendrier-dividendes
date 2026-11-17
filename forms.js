@@ -671,7 +671,16 @@ function renderTxMapping(rows, hIdx, prev) {
         const acc = (r.acct && accMap[r.acct]) || defAcc; if (holdingMatching(r, acc, true)) return;
         const other = holdingMatching(r, acc, false); if (other) elsewhere.set(String(r.sym || norm(r.name)).toUpperCase(), (r.name || r.sym) + ' (dans « ' + accountName(other.account) + ' »)');
       });
-      box.innerHTML = (vals.length ? '<div class="notice info" style="margin:6px 0"><span>Le fichier distingue plusieurs types de compte : chacun est rangé dans le portefeuille choisi ci-dessous.</span></div>' + vals.map((v) => '<div class="field"><label>Type « ' + esc(v) + ' » → portefeuille</label><select data-av="' + esc(v) + '">' + state.accounts.map((a) => opt(a.id, a.name, accMap[v] === a.id)).join('') + '</select></div>').join('') : '') +
+      // opérations du fichier DÉJÀ présentes (même identifiant) : où se trouvent-elles ? (elles ne seront pas ajoutées une seconde fois)
+      const byExt = new Map(state.transactions.filter((t) => t.extId).map((t) => [t.extId, t])), known = new Map();
+      [].concat(parsed.buys, parsed.sells).forEach((r) => {
+        const t = r.ext && byExt.get(r.ext); if (!t) return;
+        const have = instrumentById(t.holdingId), acc = (r.acct && accMap[r.acct]) || defAcc, tgt = holdingMatching(r, acc, true);
+        const e = known.get(t.holdingId) || { n: 0, name: have ? (have.name || have.displayTicker || have.ticker) : 'position supprimée', where: have ? accountName(have.account) : '—', other: !!(tgt && tgt.id !== t.holdingId) };
+        e.n++; known.set(t.holdingId, e);
+      });
+      const knownHtml = known.size ? '<div class="notice ' + (Array.from(known.values()).some((e) => e.other) ? 'warn' : 'info') + '" style="margin:6px 0"><span><b>' + Array.from(known.values()).reduce((x, e) => x + e.n, 0) + ' opération(s) du fichier sont déjà dans l\'application</b> (même identifiant, elles ne seront pas ajoutées une seconde fois) : ' + esc(Array.from(known.values()).map((e) => e.n + ' dans « ' + e.name + ' » (' + e.where + ')').join(' ; ')) + '.' + (Array.from(known.values()).some((e) => e.other) ? ' <b>Certaines sont rattachées à une AUTRE position que celle du portefeuille choisi</b> : après l\'import, utilisez « Déplacer des opérations… » (onglet Opérations) pour les rattacher à la bonne position.' : '') + '</span></div>' : '';
+      box.innerHTML = knownHtml + (vals.length ? '<div class="notice info" style="margin:6px 0"><span>Le fichier distingue plusieurs types de compte : chacun est rangé dans le portefeuille choisi ci-dessous.</span></div>' + vals.map((v) => '<div class="field"><label>Type « ' + esc(v) + ' » → portefeuille</label><select data-av="' + esc(v) + '">' + state.accounts.map((a) => opt(a.id, a.name, accMap[v] === a.id)).join('') + '</select></div>').join('') : '') +
         (elsewhere.size ? '<div class="notice warn" style="margin:6px 0"><span><b>' + elsewhere.size + ' actif(s) du fichier existent déjà dans un AUTRE portefeuille</b> : ' + esc(Array.from(elsewhere.values()).slice(0, 6).join(' ; ')) + (elsewhere.size > 6 ? '…' : '') + '. Si leurs achats doivent rejoindre ces positions, choisissez ce portefeuille ; sinon des doublons seront créés.</span></div>' : '');
       $$('[data-av]', box).forEach((sl) => { sl.onchange = () => { accMap[sl.dataset.av] = sl.value; refresh(); }; });
     }
