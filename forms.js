@@ -279,6 +279,17 @@ async function confirmDeleteHoldings(ids) {
   saveState(); renderPage();
   toast(hs.length + ' position' + (hs.length > 1 ? 's supprimées' : ' supprimée') + '.', { action: { label: 'Annuler', fn: () => { state.holdings = snap.holdings; state.payments = snap.payments; state.transactions = snap.transactions; state.archive = snap.archive; saveState(); renderPage(); toast('Suppression annulée.'); } } });
 }
+/* Supprime DÉFINITIVEMENT une position clôturée, ses opérations et ses versements (ex. position créée en double par un import dans le mauvais portefeuille). Confirmation explicite, annulable. */
+async function confirmDeleteArchived(id) {
+  const a = (state.archive || []).find((x) => x.id === id); if (!a) return;
+  const nTx = state.transactions.filter((t) => t.holdingId === id).length, nPay = state.payments.filter((p) => p.holdingId === id).length;
+  const c = await confirmDialog({ title: 'Supprimer définitivement cette position clôturée ?', body: '<b>' + esc(a.name || a.displayTicker || a.ticker) + '</b> (' + esc(accountName(a.account)) + ')<br><br>Seront effacés : <b>' + nTx + '</b> opération(s) et <b>' + nPay + '</b> versement(s) de dividende rattachés à cette position. À utiliser pour une position créée en double par erreur ; vous pourrez annuler juste après.', confirmLabel: 'Supprimer définitivement', danger: true });
+  if (!c.ok) return;
+  snapshotForUndo('suppression d\'une position clôturée');
+  state.archive = state.archive.filter((x) => x.id !== id); state.transactions = state.transactions.filter((t) => t.holdingId !== id); state.payments = state.payments.filter((p) => p.holdingId !== id);
+  saveState(); renderPage();
+  toast('Position clôturée supprimée (' + nTx + ' opération(s), ' + nPay + ' versement(s)).', { ms: 14000, action: { label: 'Annuler', fn: undoLastImport } });
+}
 async function confirmDeletePayments(ids) {
   const c = await confirmDialog({ title: 'Supprimer ' + ids.length + ' versement' + (ids.length > 1 ? 's' : '') + ' ?', body: 'Ces versements disparaîtront de l\'historique et des totaux « reçus ». Vos positions ne sont pas modifiées.', confirmLabel: 'Supprimer', danger: true });
   if (!c.ok) return;

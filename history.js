@@ -425,12 +425,13 @@ function renderClosed(host) {
       '<td>' + esc(fmtDate(x.led.first)) + ' → ' + esc(fmtDate(x.led.last)) + '</td><td class="r">' + fmtMoney(buys, x.led.cur) + '</td><td class="r">' + fmtMoney(sells, x.led.cur) + '</td>' +
       '<td class="r">' + (dv.count ? money(dv.gross) + (dv.netUnknown ? '*' : '') : '—') + '</td>' +
       '<td class="r">' + (x.led.qty > 1e-8 ? '<span class="badge warn" title="L\'historique montre encore ' + esc(fmtNum(x.led.qty)) + ' titre(s) : la vente ou la liquidation n\'est pas enregistrée.">Non liquidée</span>' : x.led.realizedKnown ? '<b class="' + (x.led.realized >= 0 ? 'pos' : 'neg') + '">' + (x.led.realized >= 0 ? '+' : '') + fmtMoney(x.led.realized, x.led.cur) + '</b>' + (pct != null ? ' <small class="muted">' + fmtPct(pct, 1, true) + '</small>' : '') : '—') + '</td>' +
-      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + '</td></tr>';
+      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + ' <button class="btn sm" type="button" data-delarch="' + esc(x.a.id) + '">Supprimer…</button></td></tr>';
   }).join('') + '</tbody></table></div>' : '<div class="card empty"><h3>Aucune position clôturée</h3><p>Les actifs entièrement vendus apparaissent ici (ils ne figurent plus dans les positions actuelles).</p></div>';
   host.innerHTML = pageHead('Mon portefeuille', rows.length + ' position(s) entièrement vendue(s)', '<button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>') +
     '<div class="toolbar">' + portTabsHtml() + '<span class="grow"></span></div>' + body + '<p class="hint" style="margin-top:8px">Ces positions restent dans l\'historique (calcul des résultats réalisés et reconstitution de l\'évolution passée du portefeuille). « Actualiser » récupère leurs cours passés.</p>';
   wirePortTabs(host); wireDo(host);
   $$('[data-liq]', host).forEach((b) => b.onclick = () => openLiquidationModal(b.dataset.liq));
+  $$('[data-delarch]', host).forEach((b) => b.onclick = () => confirmDeleteArchived(b.dataset.delarch));
   $$('[data-opsof]', host).forEach((b) => b.onclick = () => { view.port.tab = 'ops'; view.ops.asset = b.dataset.opsof; renderPortfolio(host); });
 }
 

@@ -341,6 +341,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq([s.transactions.length, s.holdings.length], [0, 1], 'annulation : état d\'avant l\'import restauré'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('position clôturée créée en double : suppression définitive (confirmation, opérations et versements rattachés, annulable) sans toucher aux autres', async () => {
+    const T = (id, hid) => ({ id, holdingId: hid, date: '2025-01-30', type: 'buy', qty: 1, price: 10, fees: 0, currency: 'EUR', amountAcct: 10, acctCur: 'EUR', source: 'csv', extId: 'e-' + id });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [], archive: [{ id: 'bad', ticker: 'FR0000120271', displayTicker: 'FR0000120271', isin: 'FR0000120271', name: 'TotalEnergies', currency: 'EUR', account: 'dg', closedAt: '2026-04-08' }, { id: 'ok', ticker: 'X', displayTicker: 'X', isin: 'FR0000000001', name: 'Autre', currency: 'EUR', account: 'pea', closedAt: '2026-04-08' }],
+      transactions: [T('1', 'bad'), T('2', 'bad'), T('3', 'ok')], payments: [{ id: 'p1', holdingId: 'bad', payDate: '2025-04-01', gross: 31.6, currency: 'EUR', source: 'csv', verified: true, extId: 'd1' }, { id: 'p2', holdingId: 'ok', payDate: '2025-04-01', gross: 5, currency: 'EUR', source: 'csv', verified: true, extId: 'd2' }] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 900 } }); await p.open();
+    await p.evaluate(() => { view.port.tab = 'closed'; go('portfolio'); renderPage(); }); await p.waitForSelector('[data-delarch="bad"]'); await p.click('[data-delarch="bad"]'); await p.waitForSelector('#cdYes');
+    ok(/2<\/b> opération|2 opération/.test(await p.locator('.modal').innerHTML()) || /2/.test(await p.locator('.modal').innerText()), 'confirmation avec le nombre d\'opérations'); await p.click('#cdYes'); await p.waitForTimeout(500);
+    let s = await storeOf(p); eq([s.archive.map((a) => a.id), s.transactions.map((t) => t.id), s.payments.map((x) => x.id)], [['ok'], ['3'], ['p2']], 'seule la position en double est supprimée, avec ses opérations et versements');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p);
+    eq([s.archive.length, s.transactions.length, s.payments.length], [2, 3, 2], 'annulation : tout est restauré'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
