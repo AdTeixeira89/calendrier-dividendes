@@ -92,7 +92,7 @@
       if (mktOnly.length) {
         const wm = Ledger.run(entries.concat(mktOnly.map((x) => ({ date: x.date, time: '', type: 'split', qty: 0, ratio: x.ratio, amt: null }))));
         rec.marketSplits = { list: mktOnly.map((x) => ({ date: x.date, ratio: x.ratio })), qty: wm.qty, pru: wm.pru };
-        if (Ledger.qtyEq(wm.qty, storedQty)) rec.hints.push('L\'écart disparaît en appliquant ' + (mktOnly.length > 1 ? 'les splits de marché' : 'le split de marché') + ' ' + mktOnly.map((x) => '×' + x.ratio + ' (' + x.date + ')').join(', ') + ' : split non validé dans l\'application.');
+        if (Ledger.qtyEq(wm.qty, storedQty) || Math.abs(wm.qty - storedQty) <= 0.005) rec.hints.push('L\'écart disparaît' + (Ledger.qtyEq(wm.qty, storedQty) ? '' : ' (à l\'arrondi près : quantité enregistrée à 2 décimales)') + ' en appliquant ' + (mktOnly.length > 1 ? 'les splits de marché' : 'le split de marché') + ' ' + mktOnly.map((x) => '×' + x.ratio + ' (' + x.date + ')').join(', ') + ' : split non validé dans l\'application.');
         else rec.hints.push('Splits de marché connus mais non validés : ' + mktOnly.map((x) => '×' + x.ratio + ' (' + x.date + ')').join(', ') + ' (ils ne suffisent pas à expliquer l\'écart).');
       }
       if (ref && ref.rec) {

@@ -274,6 +274,28 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('déplacer des opérations (iShares) : aperçu avant / après, rattachement seul, ISIN renseigné, quantité et PRU enregistrés INCHANGÉS, trace conservée, annulable', async () => {
+    const T = (id, d, qty, price, src) => ({ id, holdingId: 'dg', date: d, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: src, extId: 'e-' + id });
+    const mkH = (id, o) => Object.assign({ id, ticker: id.toUpperCase(), displayTicker: id.toUpperCase(), type: 'etf_acc', instrumentType: 'ETF', currency: 'EUR', costCurrency: 'EUR', logo: null, source: 'manual', addedAt: '2023-01-01', price: 100, dividend: { none: true } }, o);
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'tr', name: 'CTO Trade Republic' }], holdings: [mkH('dg', { name: 'iShares DEGIRO', isin: 'IE00B4L5Y983', account: 'dg', quantity: 32, avgCost: 82.65 }), mkH('tr', { name: 'iShares TR', isin: '', account: 'tr', quantity: 9.4, avgCost: 94.57 })],
+      transactions: [T('a', '2023-01-10', 30, 80, 'degiro'), T('b', '2023-02-10', 2, 100, 'degiro'), T('c', '2023-03-02', 5, 90, 'csv'), T('d', '2023-04-02', 4.4, 100, 'csv')] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1100 } }); await p.open();
+    await p.evaluate(() => { view.port.tab = 'ops'; view.ops.asset = 'dg'; go('portfolio'); renderPage(); }); await p.waitForSelector('#opMove'); await p.click('#opMove'); await p.waitForSelector('#mvTo');
+    ok(/Rien n'est créé ni supprimé/i.test(await p.locator('.modal').innerText()), 'bandeau explicatif');
+    await p.check('[data-mvsrc="csv"]'); await p.selectOption('#mvTo', 'tr'); await p.waitForSelector('#mvIsin');
+    const pv = (await p.locator('#mvPrev').innerText()).replace(/\s+/g, ' ');
+    ok(/9,4/.test(pv) && /41,4/.test(pv) && /32/.test(pv), 'aperçu avant / après : ' + pv.slice(0, 300)); ok(await p.locator('#mvIsin').isChecked(), 'ISIN à renseigner coché par défaut');
+    await p.click('#mvGo'); await p.waitForTimeout(600);
+    let s = await storeOf(p); const moved = s.transactions.filter((t) => t.holdingId === 'tr').map((t) => t.id).sort();
+    eq(moved, ['c', 'd'], 'les 2 opérations CSV sont rattachées à la position de destination'); eq(s.transactions.length, 4, 'aucune opération créée ni supprimée');
+    eq(s.holdings.find((h) => h.id === 'tr').isin, 'IE00B4L5Y983', 'ISIN renseigné sur la destination'); eq(s.transactions.find((t) => t.id === 'c').movedFrom.holdingId, 'dg', 'trace conservée');
+    eq([s.holdings[0].quantity, s.holdings[0].avgCost, s.holdings[1].quantity, s.holdings[1].avgCost], [32, 82.65, 9.4, 94.57], 'quantités et PRU enregistrés INCHANGÉS');
+    eq(s.transactions.find((t) => t.id === 'c').extId, 'e-c', 'identifiant anti-doublon inchangé');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p);
+    eq(s.transactions.filter((t) => t.holdingId === 'dg').length, 4, 'annulation : opérations revenues'); eq(s.holdings.find((h) => h.id === 'tr').isin, '', 'annulation : ISIN d\'origine restauré'); ok(!s.transactions.some((t) => t.movedFrom), 'annulation : plus de trace de déplacement');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

@@ -466,4 +466,28 @@ t('52. Position conservée pour toujours : vente à 0 (société liquidée) = mo
   st = mk(); L.archiveKept(st, 'h', deps); assert.strictEqual(L.liquidateArchived(st, 'h', { date: '2024-06-01', proceeds: 250 }, deps).realized, -750, 'produit de liquidation partiel');
 });
 
+/* ---- Déplacement d'opérations vers une autre position (opérations rangées au mauvais endroit) ---- */
+t('déplacer des opérations : rattachement seul, trace conservée, quantité et PRU STOCKÉS jamais recalculés, aperçu avant / après', () => {
+  const T = (id, hid, date, type, qty, price, src) => ({ id, holdingId: hid, date, type, qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: src, extId: 'x-' + id });
+  const mk = () => ({ holdings: [{ id: 'dg', isin: 'IE00B4L5Y983', name: 'iShares DEGIRO', currency: 'USD', costCurrency: 'EUR', account: 'a', quantity: 32, avgCost: 82.65 }, { id: 'tr', isin: '', name: 'iShares TR', currency: 'EUR', costCurrency: 'EUR', account: 'b', quantity: 9.4, avgCost: 94.57 }], archive: [], corp: [],
+    transactions: [T('1', 'dg', '2023-01-10', 'buy', 30, 80, 'degiro'), T('2', 'dg', '2023-02-10', 'buy', 2, 100, 'degiro'), T('3', 'dg', '2023-03-02', 'buy', 5, 90, 'csv'), T('4', 'dg', '2023-04-02', 'buy', 4.4, 100, 'csv')] });
+  const st = mk(), before = JSON.stringify(st.holdings), pv = L.previewMove(st, ['3', '4'], 'tr');
+  assert.ok(pv.ok); assert.strictEqual(pv.count, 2); assert.strictEqual(pv.netQty, 9.4); assert.strictEqual(pv.before.from.qty, 41.4); assert.strictEqual(pv.after.from.qty, 32); assert.strictEqual(pv.after.to.qty, 9.4);
+  assert.ok(Math.abs(pv.after.to.pru - (450 + 440) / 9.4) < 1e-9); assert.strictEqual(pv.canSetIsin, true); assert.strictEqual(pv.fromIsin, 'IE00B4L5Y983'); assert.strictEqual(JSON.stringify(st.holdings), before, 'l\'aperçu ne modifie rien');
+  const r = L.moveTransactions(st, ['3', '4'], 'tr', { today: '2026-11-17' }, { setIsin: true });
+  assert.ok(r.ok && r.moved === 2 && r.isinSet); assert.strictEqual(st.holdings[1].isin, 'IE00B4L5Y983', 'ISIN renseigné sur la destination (sinon les imports suivants créeraient un doublon)');
+  assert.deepStrictEqual(st.transactions.filter((x) => x.holdingId === 'tr').map((x) => x.id), ['3', '4']); assert.strictEqual(st.transactions.length, 4, 'aucune opération créée ni supprimée');
+  const m = st.transactions.find((x) => x.id === '3'); assert.deepStrictEqual([m.movedFrom.holdingId, m.movedFrom.at, m.qty, m.price, m.amountAcct, m.extId], ['dg', '2026-11-17', 5, 90, 450, 'x-3'], 'trace + montants et identifiant inchangés');
+  assert.deepStrictEqual([st.holdings[0].quantity, st.holdings[0].avgCost, st.holdings[1].quantity, st.holdings[1].avgCost], [32, 82.65, 9.4, 94.57], 'positions stockées jamais recalculées');
+});
+t('déplacer des opérations : refus (introuvable, mélange de positions, même position, ventes/achats seulement, ISIN différents sans confirmation)', () => {
+  const T = (id, hid, type) => ({ id, holdingId: hid, date: '2024-01-01', type, qty: 1, price: 10, fees: 0, currency: 'EUR', amountAcct: 10, acctCur: 'EUR' });
+  const st = { holdings: [{ id: 'a', isin: 'FR0000000001', name: 'A' }, { id: 'b', isin: 'FR0000000002', name: 'B' }, { id: 'c', isin: '', name: 'C' }], archive: [], corp: [], transactions: [T('1', 'a', 'buy'), T('2', 'b', 'buy'), { id: '3', holdingId: 'a', date: '2024-01-01', type: 'dividend', qty: 0 }] };
+  assert.strictEqual(L.previewMove(st, [], 'b').ok, false); assert.strictEqual(L.previewMove(st, ['zz'], 'b').ok, false); assert.strictEqual(L.previewMove(st, ['1', '2'], 'c').ok, false, 'deux positions d\'origine');
+  assert.strictEqual(L.previewMove(st, ['1'], 'a').ok, false, 'même position'); assert.strictEqual(L.previewMove(st, ['3'], 'b').ok, false, 'type non déplaçable'); assert.strictEqual(L.previewMove(st, ['1'], 'nope').ok, false);
+  const pv = L.previewMove(st, ['1'], 'b'); assert.ok(pv.ok && pv.isinMismatch);
+  const r = L.moveTransactions(st, ['1'], 'b', { today: '2026-01-01' }); assert.strictEqual(r.ok, false); assert.strictEqual(st.transactions[0].holdingId, 'a', 'rien déplacé sans confirmation');
+  assert.ok(L.moveTransactions(st, ['1'], 'b', { today: '2026-01-01' }, { allowMismatch: true }).ok); assert.strictEqual(st.transactions[0].holdingId, 'b');
+});
+
 console.log('\n' + n + ' tests réussis');

@@ -407,11 +407,12 @@ function renderOperations(host) {
     '<select id="opAsset" aria-label="Actif" style="width:auto;max-width:200px"><option value="all">Tous les actifs</option>' + insts.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || x.displayTicker || x.ticker) + (closedIds.has(x.id) ? ' (clôturée)' : '') + '</option>').join('') + '</select>' +
     '<select id="opType" aria-label="Type" style="width:auto"><option value="all">Tous les types</option><option value="buy">Achats</option><option value="sell">Ventes</option><option value="other">Autres mouvements</option></select>' +
     '<label class="inline-f">Du <input type="date" id="opFrom" value="' + esc(o.from) + '"></label><label class="inline-f">au <input type="date" id="opTo" value="' + esc(o.to) + '"></label>' +
-    '<span class="grow"></span>' + Tbl.menuHtml(cfg) + '</div>' + detail + '<div id="tblHost"></div>' +
+    '<span class="grow"></span>' + (o.asset !== 'all' ? '<button class="btn" type="button" id="opMove">Déplacer des opérations…</button>' : '') + Tbl.menuHtml(cfg) + '</div>' + detail + '<div id="tblHost"></div>' +
     '<p class="hint" style="margin-top:8px">Coût moyen pondéré, frais d\'achat inclus. Les montants sont dans la devise du compte (EUR pour DEGIRO) ; le prix unitaire reste dans la devise de cotation d\'origine.</p>';
   $('#opAsset', host).value = o.asset; $('#opType', host).value = o.type;
   [['opAsset', 'asset'], ['opType', 'type'], ['opFrom', 'from'], ['opTo', 'to']].forEach((x) => { $('#' + x[0], host).onchange = (e) => { o[x[1]] = e.target.value; renderOperations(host); }; });
   wirePortTabs(host); Tbl.render($('#tblHost'), cfg); wireDo(host);
+  const mv = $('#opMove', host); if (mv) mv.onclick = () => openMoveOps(o.asset);
 }
 
 function renderClosed(host) {
@@ -431,4 +432,56 @@ function renderClosed(host) {
   wirePortTabs(host); wireDo(host);
   $$('[data-liq]', host).forEach((b) => b.onclick = () => openLiquidationModal(b.dataset.liq));
   $$('[data-opsof]', host).forEach((b) => b.onclick = () => { view.port.tab = 'ops'; view.ops.asset = b.dataset.opsof; renderPortfolio(host); });
+}
+
+
+/* ---------------------------------------------------------------
+   DÉPLACER DES OPÉRATIONS vers une autre position (opérations rangées au mauvais endroit)
+   Aucune opération créée ni supprimée, montants inchangés : seul le rattachement change (trace conservée). La quantité et le PRU STOCKÉS des deux positions
+   ne sont pas recalculés. Aperçu avant / après, confirmation explicite, annulable (instantané).
+   --------------------------------------------------------------- */
+function openMoveOps(fromId) {
+  const inst = instrumentById(fromId); if (!inst) return;
+  const txs = state.transactions.filter((t) => t.holdingId === inst.id && (t.type === 'buy' || t.type === 'sell')).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : 0));
+  if (!txs.length) { toast('Aucune opération à déplacer pour cet actif.'); return; }
+  const SRC = { degiro: 'Import DEGIRO', csv: 'Import CSV (Trade Republic…)', manual: 'Saisie manuelle' }, srcOf = (t) => t.source || 'manual', sources = Array.from(new Set(txs.map(srcOf)));
+  const sel = new Set(), fi = Ledger.holdingIsin(inst), alias = state.isinAlias || {};
+  const targets = state.holdings.concat((state.archive || []).filter((a) => !a.statementOnly)).filter((x) => x.id !== inst.id);
+  const compat = (x) => { const ti = Ledger.holdingIsin(x); return !ti || !fi || Ledger.canon(alias, ti) === Ledger.canon(alias, fi); };
+  const optT = (x) => '<option value="' + esc(x.id) + '">' + esc((x.name || x.displayTicker || x.ticker || '—') + ' · ' + accountName(x.account) + ' · ' + (Ledger.holdingIsin(x) || 'sans ISIN') + (state.holdings.includes(x) ? ' · ' + fmtNum(x.quantity, 6) + ' titre(s)' : ' · clôturée')) + '</option>';
+  const nm = inst.name || inst.displayTicker || inst.ticker;
+  const m = openModal('<h2>Déplacer des opérations</h2><div class="sub">Opérations actuellement rattachées à <b>' + esc(nm) + '</b> (' + esc(accountName(inst.account)) + (fi ? ', ' + esc(fi) : '') + '). Cochez celles qui appartiennent à une autre position.</div>' +
+    '<div class="notice info"><span>Rien n\'est créé ni supprimé et aucun montant ne change : seul le rattachement change, avec une trace. <b>La quantité et le PRU enregistrés des deux positions ne sont pas modifiés</b> ; vous voyez ci-dessous ce que dirait le grand livre avant et après. Annulable.</span></div>' +
+    '<div class="lbl-s" style="margin:10px 0 4px">Sélection rapide par origine</div><div class="btn-row" id="mvGroups">' + sources.map((k) => '<label class="chk"><input type="checkbox" data-mvsrc="' + esc(k) + '"><span>' + esc(SRC[k] || k) + ' (' + txs.filter((t) => srcOf(t) === k).length + ')</span></label>').join('') + '</div>' +
+    '<div class="tbl-wrap" style="max-height:240px;margin-top:8px"><table class="tbl"><thead><tr><th class="chk-col"></th><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th class="r">Montant</th><th>Origine</th></tr></thead><tbody>' +
+    txs.map((t) => '<tr><td class="chk-col"><input type="checkbox" data-mvtx="' + esc(t.id) + '" aria-label="Déplacer"></td><td>' + esc(fmtDate(t.date)) + '</td><td>' + (t.type === 'buy' ? 'Achat' : 'Vente') + '</td><td class="r">' + fmtNum(t.qty, 6) + '</td><td class="r">' + (t.price == null || t.price === '' ? '—' : fmtNum(Number(t.price), 4)) + '</td><td class="r">' + (t.amountAcct == null ? '—' : fmtNum(Number(t.amountAcct), 2) + ' ' + esc(t.acctCur || t.currency || '')) + '</td><td>' + esc(SRC[srcOf(t)] || srcOf(t)) + (t.movedFrom ? ' <small class="muted">(déjà déplacée)</small>' : '') + '</td></tr>').join('') + '</tbody></table></div>' +
+    fld('Déplacer vers la position', '<select id="mvTo"><option value="">— choisir —</option>' + (targets.filter(compat).length ? '<optgroup label="Même ISIN ou ISIN non renseigné">' + targets.filter(compat).map(optT).join('') + '</optgroup>' : '') + (targets.filter((x) => !compat(x)).length ? '<optgroup label="ISIN différent">' + targets.filter((x) => !compat(x)).map(optT).join('') + '</optgroup>' : '') + '</select>', '', 'mvTo') +
+    '<div id="mvPrev"></div><div id="mvOpts"></div><div id="mvErr" class="notice err hide"></div>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="mvGo" disabled>Déplacer</button></div></div>', { wide: true });
+  const q = (x) => (x === null || x === undefined ? '—' : fmtNum(x, 6)), pr = (x, c) => (x === null || x === undefined ? '—' : fmtMoney(x, c, { d: 4 }));
+  const card = (b, a, label) => '<div class="card" style="padding:10px"><b>' + esc(label) + '</b><div class="dg-note">' + esc(a.name) + (a.isin ? ' · ' + esc(a.isin) : ' · sans ISIN') + '</div><table class="tbl" style="margin-top:6px"><thead><tr><th></th><th class="r">Avant</th><th class="r">Après</th></tr></thead><tbody>' +
+    '<tr><td>Quantité (grand livre)</td><td class="r">' + q(b.qty) + '</td><td class="r"><b>' + q(a.qty) + '</b></td></tr><tr><td>PRU (grand livre)</td><td class="r">' + pr(b.pru, b.cur) + '</td><td class="r"><b>' + pr(a.pru, a.cur) + '</b></td></tr><tr><td>Opérations</td><td class="r">' + b.ops + '</td><td class="r"><b>' + a.ops + '</b></td></tr>' +
+    '<tr><td>Enregistré dans la position (inchangé)</td><td class="r" colspan="2">' + (b.holding ? q(b.storedQty) + ' titre(s) · PRU ' + pr(b.storedPru, b.storedCostCur) : '—') + '</td></tr></tbody></table>' + (a.negative ? '<div class="warn-t" style="margin-top:4px">Solde négatif après déplacement.</div>' : '') + '</div>';
+  const ok2 = { ok: false };
+  const refresh = () => {
+    const ids = Array.from(sel), to = $('#mvTo', m).value, go = $('#mvGo', m), prev = $('#mvPrev', m), opts = $('#mvOpts', m); go.disabled = true; ok2.ok = false; opts.innerHTML = '';
+    if (!ids.length || !to) { prev.innerHTML = '<div class="muted" style="margin-top:8px">' + (!ids.length ? 'Cochez au moins une opération.' : 'Choisissez la position de destination.') + '</div>'; return; }
+    const pv = Ledger.previewMove(state, ids, to); if (!pv.ok) { prev.innerHTML = '<div class="notice err">' + esc(pv.error) + '</div>'; return; }
+    prev.innerHTML = '<div class="lbl-s" style="margin:10px 0 4px">' + pv.count + ' opération(s) · ' + fmtNum(pv.netQty, 6) + ' titre(s) net(s)</div><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px">' + card(pv.before.from, pv.after.from, 'Position d\'origine') + card(pv.before.to, pv.after.to, 'Position de destination') + '</div>';
+    opts.innerHTML = (pv.canSetIsin ? '<label class="chk" style="margin-top:8px"><input type="checkbox" id="mvIsin" checked><span>Renseigner l\'ISIN <b>' + esc(pv.fromIsin) + '</b> sur la position de destination (sans ISIN, les imports suivants créeraient un doublon)</span></label>' : '') +
+      (pv.isinMismatch ? '<div class="notice warn" style="margin-top:8px"><span>Les deux positions ont des ISIN <b>différents</b> (' + esc(pv.fromIsin) + ' / ' + esc(pv.toIsin) + ').</span></div><label class="chk"><input type="checkbox" id="mvMis"><span>Je confirme qu\'il s\'agit du même titre</span></label>' : '') +
+      (!pv.sameAccount ? '<div class="hint" style="margin-top:6px">La destination est dans un autre portefeuille (' + esc(accountName(pv.to.account)) + ').</div>' : '');
+    const mis = $('#mvMis', m), upd = () => { go.disabled = !!(mis && !mis.checked); }; if (mis) mis.onchange = upd; upd(); ok2.ok = true;
+  };
+  $$('[data-mvtx]', m).forEach((c) => c.onchange = () => { if (c.checked) sel.add(c.dataset.mvtx); else sel.delete(c.dataset.mvtx); refresh(); });
+  $$('[data-mvsrc]', m).forEach((c) => c.onchange = () => { txs.filter((t) => srcOf(t) === c.dataset.mvsrc).forEach((t) => { if (c.checked) sel.add(t.id); else sel.delete(t.id); const b = $('[data-mvtx="' + CSS.escape(t.id) + '"]', m); if (b) b.checked = c.checked; }); refresh(); });
+  $('#mvTo', m).onchange = refresh; refresh();
+  $('#mvGo', m).onclick = () => {
+    if (!ok2.ok) return; const ids = Array.from(sel), to = $('#mvTo', m).value, err = $('#mvErr', m);
+    const prevUndo = state.undo; snapshotForUndo('déplacement d\'opérations');
+    const r = Ledger.moveTransactions(state, ids, to, { today: todayISO() }, { setIsin: !!($('#mvIsin', m) && $('#mvIsin', m).checked), allowMismatch: !!($('#mvMis', m) && $('#mvMis', m).checked) });
+    if (!r.ok) { state.undo = prevUndo; err.textContent = r.error; err.classList.remove('hide'); return; }
+    saveState(); closeModal(); view.ops.asset = to; renderPage();
+    toast(r.moved + ' opération(s) déplacée(s) vers « ' + (r.to.name || '') + ' »' + (r.isinSet ? ' · ISIN renseigné' : '') + '. Quantité et PRU enregistrés inchangés.', { ms: 14000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
 }

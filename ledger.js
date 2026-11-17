@@ -921,7 +921,43 @@
     return n;
   }
 
+  /* ---------------------------------------------------------------
+     DÉPLACER DES OPÉRATIONS vers une autre position (opérations rangées dans la mauvaise position).
+     Aucune opération n'est créée, supprimée, ni modifiée dans ses montants : seul le rattachement (holdingId) change, avec une trace (movedFrom).
+     Ni la quantité ni le PRU STOCKÉS des deux positions ne sont recalculés ici ; le résultat du grand livre avant / après est calculé pour information.
+     --------------------------------------------------------------- */
+  const instById = (state, id) => (state.holdings || []).find((x) => x.id === id) || (state.archive || []).find((x) => x.id === id) || null;
+  function moveSummary(state, inst) {
+    const e = entriesFor(state, inst), led = run(e.entries), isHolding = (state.holdings || []).some((x) => x.id === inst.id);
+    return { id: inst.id, name: inst.name || inst.displayTicker || inst.ticker || holdingIsin(inst) || '—', isin: holdingIsin(inst), account: inst.account || null, holding: isHolding, qty: led.qty, pru: led.pru, cost: led.cost, cur: e.cur, ops: e.txs.length, negative: led.negative, costUnknown: led.costUnknown,
+      storedQty: isHolding ? Number(inst.quantity) || 0 : null, storedPru: isHolding && Number(inst.avgCost) > 0 ? Number(inst.avgCost) : null, storedCostCur: inst.costCurrency || inst.currency || 'EUR' };
+  }
+  function previewMove(state, txIds, toId) {
+    const err = (error) => ({ ok: false, error }), ids = new Set(txIds || []);
+    if (!ids.size) return err('Aucune opération sélectionnée.');
+    const txs = (state.transactions || []).filter((t) => ids.has(t.id));
+    if (txs.length !== ids.size) return err('Opération introuvable.');
+    if (txs.some((t) => t.type !== 'buy' && t.type !== 'sell')) return err('Seuls les achats et les ventes peuvent être déplacés.');
+    if (new Set(txs.map((t) => t.holdingId)).size !== 1) return err('Les opérations doivent venir d\'une seule position.');
+    const from = instById(state, txs[0].holdingId), to = instById(state, toId);
+    if (!from) return err('Position d\'origine introuvable.'); if (!to) return err('Position de destination introuvable.'); if (from.id === to.id) return err('La destination est la position d\'origine.');
+    const moved = Object.assign({}, state, { transactions: state.transactions.map((t) => (ids.has(t.id) ? Object.assign({}, t, { holdingId: to.id }) : t)) });
+    const fi = holdingIsin(from), ti = holdingIsin(to), alias = state.isinAlias || {};
+    return { ok: true, from, to, count: txs.length, netQty: r8(txs.reduce((a, t) => a + (t.type === 'buy' ? 1 : -1) * (Number(t.qty) || 0), 0)),
+      before: { from: moveSummary(state, from), to: moveSummary(state, to) }, after: { from: moveSummary(moved, from), to: moveSummary(moved, to) },
+      fromIsin: fi, toIsin: ti, isinMismatch: !!(fi && ti && canon(alias, fi) !== canon(alias, ti)), canSetIsin: !ti && !!fi, sameAccount: (from.account || null) === (to.account || null) };
+  }
+  /* o : { setIsin (renseigne l'ISIN de la destination s'il manque), allowMismatch (ISIN différents : l'utilisateur confirme que c'est le même titre) }. */
+  function moveTransactions(state, txIds, toId, deps, o) {
+    o = o || {}; const pv = previewMove(state, txIds, toId); if (!pv.ok) return pv;
+    if (pv.isinMismatch && !o.allowMismatch) return { ok: false, error: 'Les deux positions ont des ISIN différents (' + pv.fromIsin + ' / ' + pv.toIsin + ') : confirmez qu\'il s\'agit du même titre.' };
+    const ids = new Set(txIds);
+    state.transactions.forEach((t) => { if (!ids.has(t.id)) return; t.movedFrom = { holdingId: pv.from.id, name: pv.from.name || pv.from.displayTicker || pv.from.ticker || '', at: deps.today }; t.holdingId = pv.to.id; });
+    let isinSet = false; if (o.setIsin && pv.canSetIsin) { pv.to.isin = pv.fromIsin; isinSet = true; }
+    return { ok: true, moved: ids.size, isinSet, from: moveSummary(state, pv.from), to: moveSummary(state, pv.to) };
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);
