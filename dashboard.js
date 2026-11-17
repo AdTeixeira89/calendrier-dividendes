@@ -113,7 +113,7 @@ function renderHome(host) {
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
 
   const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count || cash.included > 0 ? money(totalShown, 0) : '—') + '</div>' +
-    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + (cash.amount > 0 ? sens(' · ' + (cash.included > 0 ? 'dont ' + money(cash.included, 0) + ' de cash' : 'hors ' + money(cash.amount, 0) + ' de cash')) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
+    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + (cash.amount > 0 ? sens(' · ' + (cash.included > 0 ? 'dont ' + money(cash.included, 0) + ' de liquidités' : 'hors ' + money(cash.amount, 0) + ' de liquidités')) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
     '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
     '<div class="chart-wrap">' + chart + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
 
