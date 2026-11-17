@@ -283,6 +283,12 @@ console.log(n + ' tests passed');
     assert.ok(ev.length && ev.every((x) => x.currency === 'HKD'), 'événements prévus dans la devise du dividende');
     assert.strictEqual(E.divCur(hh({ currency: 'EUR' })), 'EUR', 'sans devise choisie : celle de la cotation');
   });
+  t('liquidités : par portefeuille, comptées dans la valeur seulement si la case est cochée ; versement mensuel cumulé ; jamais dans la plus-value', () => {
+    const st = { holdings: [hh({ id: 'a', quantity: 10, price: 100, avgCost: 80 })], accounts: [{ id: 'p1', name: 'PEA', cash: { amount: 1500, monthly: 200, include: true } }, { id: 'p2', name: 'CTO', cash: { amount: 500, monthly: 0, include: false } }, { id: 'p3', name: 'Vide' }] };
+    const all = E.cashTotals(st, 'all'); assert.deepStrictEqual([all.amount, all.included, all.monthly, all.count], [2000, 1500, 200, 2]);
+    assert.deepStrictEqual([E.cashTotals(st, 'p2').amount, E.cashTotals(st, 'p2').included], [500, 0], 'case non cochée : hors valeur'); assert.deepStrictEqual(E.cashTotals(st, 'p3'), { amount: 0, included: 0, monthly: 0, count: 0 });
+    assert.strictEqual(E.unrealized(st, (x) => x, null).gain, 200, 'plus-value inchangée : les liquidités n\'y comptent jamais');
+  });
   t('TRI (XIRR) : rendement annualisé pondéré par les flux ; « données insuffisantes » sans historique d\'un an, avec positions rétrospectives ou cours manquants', () => {
     const mkHist = (flows, last, partial, allTx) => ({ empty: false, allTx: allTx !== false, flows, points: [{ date: '2024-01-01', value: 0, partial: false }, { date: '2026-01-01', value: last, partial: !!partial }], coverage: { retro: [] } });
     const ref = new Date(2026, 0, 1);

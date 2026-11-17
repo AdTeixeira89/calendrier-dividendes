@@ -1605,6 +1605,16 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400);
     const n = await p.evaluate(() => Notify.pending().filter((x) => x.id === 'mkt:manual').map((x) => x.title + ' | ' + x.body)); eq(n.length, 1, 'un rappel'); ok(/Manuel a/.test(n[0]) && !/Manuel b/.test(n[0]), 'seul le cours de plus de 30 jours est signalé : ' + n[0].slice(0, 160));
   });
+  await test('liquidités par portefeuille : saisie discrète dans les réglages, versement mensuel, case « compter dans la valeur » → valeur de l\'accueil avec ou sans liquidités', async () => {
+    const seed = SEED(0); seed.holdings = [{ id: 'k', ticker: 'KO', displayTicker: 'KO', name: 'Coca', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, price: 100, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1100 } }); await p.open(); await p.waitForTimeout(400);
+    const hero = async () => (await p.locator('.hero-val').innerText()).replace(/[\s\u202f\u00a0]/g, ''); ok(/^1000/.test(await hero()), 'valeur sans liquidités : ' + await hero());
+    await p.evaluate(() => go('settings')); await p.waitForSelector('.cash-det'); await p.click('.cash-det summary'); await p.fill('.cash-row .cs-amt', '1500'); await p.fill('.cash-row .cs-mo', '200'); await p.dispatchEvent('.cash-row .cs-mo', 'change'); await p.waitForTimeout(500);
+    let s = await storeOf(p); const c = s.accounts[0].cash; eq([c.amount, c.monthly, c.include], [1500, 200, false], 'liquidités et versement mensuel enregistrés, case non cochée par défaut');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(300); ok(/^1000/.test(await hero()) && /hors/.test(await p.locator('.hero-sub').innerText()), 'case non cochée : valeur inchangée, liquidités signalées à part');
+    await p.evaluate(() => go('settings')); await p.waitForSelector('.cash-row .cs-inc'); await p.check('.cash-row .cs-inc'); await p.evaluate(() => go('home')); await p.waitForTimeout(300);
+    ok(/^2500/.test(await hero()) && /dont/.test(await p.locator('.hero-sub').innerText()), 'case cochée : 1 000 + 1 500 = 2 500 € : ' + await hero());
+  });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
     const r = await p.evaluate(() => {

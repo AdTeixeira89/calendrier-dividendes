@@ -32,10 +32,15 @@ function renderSettings(host) {
   const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Importer une sauvegarde</button></div>' +
     '<div class="hint" style="margin-top:8px">Le fichier exporté n\'est pas chiffré (il contient vos positions et versements) : gardez-le en lieu sûr.<br>Stockage durable sur cet appareil : ' + (Vault.isPersisted() ? 'activé ✓' : 'non garanti — installez l\'app sur l\'écran d\'accueil') + '.</div>';
   const security = '<p class="muted" style="margin:0 0 10px">' + (Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'application sur cet appareil (données locales chiffrées).' : '🔓 Aucun code de verrouillage sur cet appareil.') + '</p><button class="btn" type="button" id="sPin">Code de verrouillage…</button>';
+  const bc = baseCur();
+  const cashRows = state.accounts.map((a) => { const c = a.cash || {}; return '<div class="cash-row" data-acc="' + esc(a.id) + '" style="margin:0 0 14px"><div class="lbl-s" style="margin-bottom:6px"><b>' + esc(a.name) + '</b></div>' +
+    '<div class="row2">' + fld('Liquidités (' + esc(bc) + ')', '<input type="text" inputmode="decimal" class="cs-amt" value="' + esc(c.amount > 0 ? String(c.amount).replace('.', ',') : '') + '" placeholder="0">', c.asOf ? 'saisi le ' + esc(fmtDate(c.asOf)) : '', '') + fld('Versement automatique par mois (' + esc(bc) + ')', '<input type="text" inputmode="decimal" class="cs-mo" value="' + esc(c.monthly > 0 ? String(c.monthly).replace('.', ',') : '') + '" placeholder="0">', c.monthly > 0 ? '= ' + esc(fmtMoney(c.monthly * 12, bc, { d: 0 })) + ' par an' : '', '') + '</div>' +
+    '<label class="chk"><input type="checkbox" class="cs-inc"' + (c.include === true ? ' checked' : '') + '><span>Compter ces liquidités dans la valeur du portefeuille</span></label></div>'; }).join('');
+  const cash = '<details class="cash-det"' + (state.accounts.some((a) => a.cash && (a.cash.amount > 0 || a.cash.monthly > 0)) ? ' open' : '') + '><summary class="muted" style="cursor:pointer">Liquidités et versements mensuels (facultatif)</summary><div style="margin-top:10px"><div class="hint" style="margin-bottom:10px">Indiquez le cash disponible sur chaque portefeuille et, si vous en avez un, le versement automatique mensuel. Les liquidités ne comptent <b>jamais</b> dans la plus-value ni dans la performance ; seulement, si la case est cochée, dans la valeur du portefeuille affichée sur l\'accueil.</div>' + cashRows + '</div></details>';
   const notif = '<p class="muted" style="margin:0 0 10px" id="nStatus">' + esc(notifStatusText()) + '</p><div class="btn-row"><button class="btn" type="button" id="nEnable">Activer les rappels</button><button class="btn" type="button" id="nIcs">Ajouter à l\'agenda (.ics)</button></div>';
   host.innerHTML = pageHead('Paramètres', 'Compte, préférences d\'affichage et gestion des données') +
     (account ? sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) : '') + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
-    (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Rappels de versement', '', notif) +
+    (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Liquidités', '', cash) + sec('Rappels de versement', '', notif) +
     '<p class="hint" style="text-align:center;margin-top:18px">StockPilot · build ' + APP_BUILD + ' · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
   wireDo(host);
   const on = (id, fn) => { const e = $('#' + id, host); if (e) e.onclick = fn; };
@@ -62,6 +67,15 @@ function renderSettings(host) {
   on('sExport', exportData);
   on('sImport', async () => { const f = await pickFile('application/json,.json'); if (f) importBackup(f); });
   on('sPin', openSecurityModal);
+  $$('.cash-row', host).forEach((row) => {
+    const a = state.accounts.find((x) => x.id === row.dataset.acc); if (!a) return;
+    const save = () => {
+      const amt = numOrNull($('.cs-amt', row).value), mo = numOrNull($('.cs-mo', row).value), inc = $('.cs-inc', row).checked;
+      const prev = a.cash || {}; a.cash = { amount: amt > 0 ? amt : null, monthly: mo > 0 ? mo : null, include: inc, asOf: (amt > 0 ? (prev.amount === amt && prev.asOf ? prev.asOf : todayISO()) : null) };
+      if (!(a.cash.amount > 0) && !(a.cash.monthly > 0)) delete a.cash; saveState();      // pas de réaffichage de la page : la saisie du champ suivant continue sans interruption
+    };
+    $$('input', row).forEach((i) => i.addEventListener('change', save));
+  });
   on('nEnable', async () => { await enableNotifications(); const st = $('#nStatus', host); if (st) st.textContent = notifStatusText(); });
   on('nIcs', downloadICS);
 }

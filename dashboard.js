@@ -69,7 +69,7 @@ function renderHome(host) {
   const nowYM = Engine.ymOf(today), cvAt = (a_, c_, y_) => (y_ === nowYM ? convert(a_, c_) : convertAt(a_, c_, y_));      // mois en cours : taux du jour (comme la valeur affichée en haut)
   const cache = {}, histFor = (m_) => cache[m_] || (cache[m_] = Engine.portfolioHistory(state, cvAt, { months: m_, today, ids }));
   const pv = Engine.portfolioValue(state, convert, ids), un = Engine.unrealized(state, convert, ids), daily = Engine.dailyChange(state, convert, ids, todayS, dailyFxOpts());
-  const hist = histFor(view.home.period), hs = visibleHoldings();
+  const hist = histFor(view.home.period), hs = visibleHoldings(), cash = Engine.cashTotals(state, view.account), totalShown = pv.total + cash.included;
   const lbl = (dt, per) => fmtDate(dt, { day: 'numeric', month: 'short', year: per === 0 || per >= 12 ? '2-digit' : undefined });
   const dn = (iso_) => Math.round(Date.UTC(+iso_.slice(0, 4), +iso_.slice(5, 7) - 1, +iso_.slice(8, 10)) / 86400000), tLabel = (per) => (n_) => lbl(new Date(n_ * 86400000).toISOString().slice(0, 10), per);
   const signed = (v, d_) => (v >= 0 ? '+' : '') + money(v, d_ === undefined ? 0 : d_);
@@ -112,8 +112,8 @@ function renderHome(host) {
   const perBtn = (q) => { const rf = q[0] > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - q[0], today.getDate())) : null; const short = !!(rf && availFrom && Date.parse(availFrom) - Date.parse(rf) > 35 * 86400000);
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
 
-  const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count ? money(pv.total, 0) : '—') + '</div>' +
-    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
+  const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count || cash.included > 0 ? money(totalShown, 0) : '—') + '</div>' +
+    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + (cash.amount > 0 ? sens(' · ' + (cash.included > 0 ? 'dont ' + money(cash.included, 0) + ' de liquidités' : 'hors ' + money(cash.amount, 0) + ' de liquidités')) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
     '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
     '<div class="chart-wrap">' + chart + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
 

@@ -569,6 +569,16 @@
     return 'unknown';
   }
 
+  /* ---------- liquidités (cash) par portefeuille ----------
+     compte.cash = { amount (liquidités, devise de base), monthly (versement automatique mensuel), include (compter dans la valeur du portefeuille), asOf (date de saisie) }.
+     Les liquidités ne comptent JAMAIS dans la plus-value ni dans la performance (ce n'est pas un gain) ; seulement, si la case est cochée, dans la valeur affichée. */
+  function cashTotals(state, accountId) {
+    const accs = (state.accounts || []).filter((a) => !accountId || accountId === 'all' || a.id === accountId);
+    let amount = 0, included = 0, monthly = 0, n = 0;
+    accs.forEach((a) => { const c = a.cash || {}, v = num(c.amount), mo = num(c.monthly); if (!(v > 0) && !(mo > 0)) return; n++; amount += v; monthly += mo; if (c.include === true) included += v; });
+    return { amount, included, monthly, count: n };
+  }
+
   /* ---------- variation journalière : mouvement de marché de la dernière séance sur les quantités détenues à la clôture précédente
      (un achat ou une vente du jour, un dépôt ou un retrait n'y comptent pas) ---------- */
   function dailyChange(state, convert, ids, todayISO, opts) {
@@ -779,7 +789,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };
