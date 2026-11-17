@@ -1235,6 +1235,39 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('audit des positions (phase 0) : rapport en lecture seule — trois catégories, détail du grand livre, AUCUNE écriture locale ni Firebase, aucune synchronisation', async () => {
+    const p = await device({ firebase: true, viewport: { width: 1100, height: 1000 } }); await p.open(1500);
+    await signUpUI(p, 'audit@test.fr', 'motdepasse1'); await p.waitForSelector('.sync-chip.ok');
+    await p.evaluate(() => {
+      const H = (id, o) => Object.assign({ id, ticker: id.toUpperCase(), displayTicker: id.toUpperCase(), name: 'Titre ' + id, isin: 'FR00000000' + id.slice(-2), type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', account: 'main', logo: null, source: 'degiro', addedAt: '2024-01-01', price: 100, dividend: { none: true } }, o);
+      const T = (id, hid, date, type, qty, price) => ({ id, holdingId: hid, date, type, qty, price, fees: 0, currency: 'EUR', amountAcct: type === 'buy' ? qty * price : qty * price, acctCur: 'EUR', source: 'degiro', extId: 'dg:' + id });
+      state.settings.autoRefresh = false; state.settings.relayUrl = '';
+      state.holdings = [H('c01', { quantity: 10, avgCost: 100 }), H('m02', { quantity: 7, avgCost: 20, source: 'manual' }), H('d03', { quantity: 1000, avgCost: 1 }), H('d04', { quantity: 10, avgCost: 120 })];
+      state.transactions = [T('t1', 'c01', '2024-01-10', 'buy', 10, 100), T('t3', 'd03', '2023-01-10', 'buy', 100, 10), T('t4', 'd04', '2024-01-10', 'buy', 10, 100)];
+      saveState();
+    });
+    await p.waitForFunction(() => !state.meta.dirty, null, { timeout: 12000 }); await p.waitForTimeout(3500);
+    const key = 'dividendCalendarApp_v1', snap = async () => ({ ls: await p.evaluate((k) => localStorage.getItem(k), key), meta: await p.evaluate(() => JSON.stringify({ d: state.meta.dirty, l: state.meta.localAt, r: state.meta.remoteBase })), cloud: JSON.stringify(Array.from(store.entries())) });
+    let commits = 0; const orig = fsOps.commit; fsOps.commit = (ops) => { commits++; return orig(ops); };
+    const before = await snap();
+    try {
+      await p.evaluate(() => go('settings')); await p.waitForSelector('#sAudit'); await p.click('#sAudit'); await p.waitForSelector('.stat-chip');
+      const txt = (await p.locator('.modal').innerText()).replace(/\s+/g, ' ');
+      ok(/Rapport en lecture seule/i.test(txt) && /Rien n'est modifié/i.test(txt), 'bandeau de lecture seule');
+      const chips = await p.locator('.stat-chip b').allInnerTexts(); eq(chips.slice(0, 4), ['4', '1', '1', '2'], 'positions 4 / cohérentes 1 / sans opérations 1 / divergentes 2');
+      const all = (await p.locator('.modal').textContent()).replace(/\s+/g, ' '); ok(/Titre d03/.test(txt) && /Titre d04/.test(txt) && /Titre m02/.test(all) && /Titre c01/.test(all), 'positions présentes dans leurs catégories');
+      await p.locator('details.diag-item summary').first().click();
+      const det = (await p.locator('details.diag-item[open]').innerText()).replace(/\s+/g, ' ');
+      ok(/détail du grand livre/i.test(det) && /achat/i.test(det) && /quantité/i.test(det) && /pistes/i.test(det), 'détail du grand livre et pistes d\'une divergente');
+      const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#audCsv')]); const csv = fs.readFileSync(await dl.path(), 'utf8');
+      ok(/Divergente/.test(csv) && /Cohérente/.test(csv) && /Sans opérations/.test(csv), 'export CSV de la synthèse');
+      await p.waitForTimeout(4000);                                   // laisse passer le délai de synchronisation automatique
+      const after = await snap();
+      eq(after.ls, before.ls, 'stockage local strictement identique (aucune écriture)'); eq(after.meta, before.meta, 'état de synchronisation inchangé (ni modifié, ni envoyé)'); eq(after.cloud, before.cloud, 'base cloud strictement identique');
+      eq(commits, 0, 'aucune écriture Firebase'); eq(p.errors, [], 'aucune erreur JS');
+    } finally { fsOps.commit = orig; }
+  });
+
   await test('compte : second appareil — connexion avec le même compte, données retrouvées, modifications propagées dans les deux sens', async () => {
     const d2 = await device({ firebase: true }); await d2.open(1500); await signInUI(d2, A.email, A.pwd);
     eq(await tickers(d2), ['AAPL'], 'appareil 2 retrouve les données');

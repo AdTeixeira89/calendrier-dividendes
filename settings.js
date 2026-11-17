@@ -29,7 +29,7 @@ function renderSettings(host) {
     '<label class="chk"><input type="checkbox" id="sLogos" ' + (s.autoLogos !== false ? 'checked' : '') + '><span>Afficher les logos des sociétés (services publics Parqet et FMP Images : seuls le ticker ou l\'ISIN sont transmis, jamais vos quantités)</span></label>' +
     '<label class="chk"><input type="checkbox" id="sTicker" ' + (s.tickerAuto ? 'checked' : '') + '><span>Défilement automatique du bandeau des prochains versements</span></label>' +
     '<div class="btn-row" style="margin-top:10px"><button class="btn" type="button" id="sAcc">Gérer les portefeuilles</button><button class="btn" type="button" id="sCols">Réinitialiser les colonnes des tableaux</button></div>';
-  const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Importer une sauvegarde</button></div>' +
+  const backup = '<div class="btn-row"><button class="btn" type="button" id="sExport">' + icon('download') + 'Exporter une sauvegarde (JSON)</button><button class="btn" type="button" id="sImport">' + icon('upload') + 'Importer une sauvegarde</button><button class="btn" type="button" id="sAudit">Audit des positions (lecture seule)</button></div>' +
     '<div class="hint" style="margin-top:8px">Le fichier exporté n\'est pas chiffré (il contient vos positions et versements) : gardez-le en lieu sûr.<br>Stockage durable sur cet appareil : ' + (Vault.isPersisted() ? 'activé ✓' : 'non garanti — installez l\'app sur l\'écran d\'accueil') + '.</div>';
   const security = '<p class="muted" style="margin:0 0 10px">' + (Vault.hasPin() ? '🔒 Un code protège l\'ouverture de l\'application sur cet appareil (données locales chiffrées).' : '🔓 Aucun code de verrouillage sur cet appareil.') + '</p><button class="btn" type="button" id="sPin">Code de verrouillage…</button>';
   const bc = baseCur();
@@ -65,6 +65,7 @@ function renderSettings(host) {
   on('sAcc', openAccountsModal);
   on('sCols', () => { state.settings.columns = {}; saveState(); toast('Colonnes réinitialisées.'); });
   on('sExport', exportData);
+  on('sAudit', openPositionsAudit);
   on('sImport', async () => { const f = await pickFile('application/json,.json'); if (f) importBackup(f); });
   on('sPin', openSecurityModal);
   $$('.cash-row', host).forEach((row) => {
