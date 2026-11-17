@@ -57,6 +57,10 @@ t('quantité enregistrée arrondie à 2 décimales : le split de marché est rec
   const s = { accounts: [{ id: 'a', name: 'TR' }], holdings: [H('h9', { quantity: 12.51, avgCost: 83.94, splits: [{ date: '2024-06-10', ratio: 10 }] })], transactions: [tx('n1', 'h9', '2023-03-16', 'buy', 0.735903, 441.63), tx('n2', 'h9', '2025-01-10', 'buy', 5.149386, 140.79)], payments: [], corp: [] };
   const p = A.positions(s).divergent[0]; assert.ok(p.hints.some((x) => /à l'arrondi près/.test(x) && /×10/.test(x)), p.hints.join(' | '));
 });
+t('un split de marché antérieur au premier achat n\'explique rien et n\'est pas proposé comme explication', () => {
+  const s = { accounts: [{ id: 'a', name: 'TR' }], holdings: [H('h9', { quantity: 12.51, avgCost: 83.94, splits: [{ date: '2021-07-20', ratio: 4 }] })], transactions: [tx('n1', 'h9', '2023-03-16', 'buy', 0.735903, 441.63), tx('n2', 'h9', '2025-01-10', 'buy', 5.149386, 140.79)], payments: [], corp: [{ id: 'c', isin: 'FR0000000009', date: '2024-06-10', kind: 'split', ratio: 10, validated: true }] };
+  s.holdings[0].isin = 'FR0000000009'; const p = A.positions(s).divergent[0]; assert.ok(p, 'divergente'); assert.ok(!p.hints.some((x) => /×4/.test(x)), p.hints.join(' | '));
+});
 t('divergente par PRU (quantités identiques)', () => { const p = find(A.positions(mk()), 'h4'); assert.deepStrictEqual(p.reasons, ['pru']); assert.strictEqual(p.qtyDiff, 0); assert.strictEqual(p.ledgerPru, 100); assert.strictEqual(p.pruDiff, 20); assert.ok(Math.abs(p.pruDiffPct - 0.2) < 1e-9); });
 t('PRU absent mais calculable ; devise du coût différente ; solde négatif ; achat sans montant', () => {
   const r = A.positions(mk());

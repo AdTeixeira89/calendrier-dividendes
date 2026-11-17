@@ -87,7 +87,7 @@
       if (rec.qtyDiff > 0) rec.hints.push('La position stockée compte ' + rec.qtyDiff + ' titre(s) de plus que l\'historique : achat, livraison ou transfert entrant absent de l\'historique, ou split non validé.');
       else rec.hints.push('La position stockée compte ' + Math.abs(rec.qtyDiff) + ' titre(s) de moins que l\'historique : vente ou sortie présente dans l\'historique mais pas reportée sur la position (position modifiée à la main ?).');
       const rh = ratioHint(storedQty, led.qty); if (rh) rec.hints.push('Le rapport stocké / historique vaut ' + (rh >= 1 ? '×' + rh : '÷' + Math.round(1 / rh)) + ' : ressemble à un split ou un regroupement non validé.');
-      const mkt = (h.splits || []).filter((x) => x && x.date && x.ratio > 0), corpSplits = entries.filter((e) => e.type === 'split');
+      const mkt = (h.splits || []).filter((x) => x && x.date && x.ratio > 0 && (!led.first || x.date >= led.first)), corpSplits = entries.filter((e) => e.type === 'split');
       const mktOnly = mkt.filter((x) => !corpSplits.some((c) => near(c.date, x.date)));
       if (mktOnly.length) {
         const wm = Ledger.run(entries.concat(mktOnly.map((x) => ({ date: x.date, time: '', type: 'split', qty: 0, ratio: x.ratio, amt: null }))));
