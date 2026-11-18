@@ -656,7 +656,7 @@ function renderTxMapping(rows, hIdx, prev) {
     '<label class="chk"><input type="checkbox" id="xUpd"><span>Mettre aussi à jour la quantité et le prix de revient des actifs existants (seulement si le fichier couvre tout l\'historique)</span></label>' +
     '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="xGo">Importer</button></div></div>', { wide: true });
   const cols = () => { const c = {}; ['date', 'type', 'cat', 'sym', 'name', 'shares', 'price', 'amount', 'fee', 'tax', 'cur', 'id', 'acct'].forEach((k) => { c[k] = Number($('#x' + k, m).value); }); return c; };
-  const accMap = Object.assign({}, prev.accMap || {});
+  const accMap = Object.assign({}, prev.accMap || {}); let relinkOn = prev.relink !== false;
   const guessAcct = (v) => {
     const pea = state.accounts.find((a) => /\bpea\b/i.test(a.name)), cto = state.accounts.find((a) => !/\bpea\b/i.test(a.name) && /cto|compte.?titres|trade/i.test(a.name));
     if (v === 'PEA' && pea) return pea.id; if ((v === 'DEFAULT' || v === 'CTO') && cto) return cto.id; return null;
@@ -679,9 +679,10 @@ function renderTxMapping(rows, hIdx, prev) {
         const e = known.get(t.holdingId) || { n: 0, name: have ? (have.name || have.displayTicker || have.ticker) : 'position supprimée', where: have ? accountName(have.account) : '—', other: !!(tgt && tgt.id !== t.holdingId) };
         e.n++; known.set(t.holdingId, e);
       });
-      const knownHtml = known.size ? '<div class="notice ' + (Array.from(known.values()).some((e) => e.other) ? 'warn' : 'info') + '" style="margin:6px 0"><span><b>' + Array.from(known.values()).reduce((x, e) => x + e.n, 0) + ' opération(s) du fichier sont déjà dans l\'application</b> (même identifiant, elles ne seront pas ajoutées une seconde fois) : ' + esc(Array.from(known.values()).map((e) => e.n + ' dans « ' + e.name + ' » (' + e.where + ')').join(' ; ')) + '.' + (Array.from(known.values()).some((e) => e.other) ? ' <b>Certaines sont rattachées à une AUTRE position que celle du portefeuille choisi</b> : après l\'import, utilisez « Déplacer des opérations… » (onglet Opérations) pour les rattacher à la bonne position.' : '') + '</span></div>' : '';
+      const knownHtml = known.size ? '<div class="notice ' + (Array.from(known.values()).some((e) => e.other) ? 'warn' : 'info') + '" style="margin:6px 0"><span><b>' + Array.from(known.values()).reduce((x, e) => x + e.n, 0) + ' opération(s) du fichier sont déjà dans l\'application</b> (même identifiant, elles ne seront pas ajoutées une seconde fois) : ' + esc(Array.from(known.values()).map((e) => e.n + ' dans « ' + e.name + ' » (' + e.where + ')').join(' ; ')) + '.' + (Array.from(known.values()).some((e) => e.other) ? ' <b>Certaines sont rattachées à une AUTRE position que celle du portefeuille choisi</b> : elles peuvent être rattachées à la bonne position pendant l\'import.' : '') + '</span></div>' + (Array.from(known.values()).some((e) => e.other) ? '<label class="chk"><input type="checkbox" id="xRelink"' + (relinkOn ? ' checked' : '') + '><span>Rattacher ces opérations à la position du portefeuille choisi (rien n\'est créé ni supprimé ; annulable)</span></label>' : '') : '';
       box.innerHTML = knownHtml + (vals.length ? '<div class="notice info" style="margin:6px 0"><span>Le fichier distingue plusieurs types de compte : chacun est rangé dans le portefeuille choisi ci-dessous.</span></div>' + vals.map((v) => '<div class="field"><label>Type « ' + esc(v) + ' » → portefeuille</label><select data-av="' + esc(v) + '">' + state.accounts.map((a) => opt(a.id, a.name, accMap[v] === a.id)).join('') + '</select></div>').join('') : '') +
         (elsewhere.size ? '<div class="notice warn" style="margin:6px 0"><span><b>' + elsewhere.size + ' actif(s) du fichier existent déjà dans un AUTRE portefeuille</b> : ' + esc(Array.from(elsewhere.values()).slice(0, 6).join(' ; ')) + (elsewhere.size > 6 ? '…' : '') + '. Si leurs achats doivent rejoindre ces positions, choisissez ce portefeuille ; sinon des doublons seront créés.</span></div>' : '');
+      { const rl = $('#xRelink', box); if (rl) rl.onchange = () => { relinkOn = rl.checked; }; }
       $$('[data-av]', box).forEach((sl) => { sl.onchange = () => { accMap[sl.dataset.av] = sl.value; refresh(); }; });
     }
     $('#xSummary', m).innerHTML = '<span><b>' + parsed.buys.length + '</b> achat(s) · <b>' + parsed.sells.length + '</b> vente(s) · <b>' + parsed.dividends.length + '</b> dividende(s) détecté(s)' + (parsed.skipped ? ' · ' + parsed.skipped + ' autre(s) opération(s) ignorée(s) (dépôts, intérêts, cartes…)' : '') + (parsed.bad ? ' · ' + parsed.bad + ' ligne(s) illisible(s)' : '') + '</span>';
@@ -691,7 +692,7 @@ function renderTxMapping(rows, hIdx, prev) {
   };
   $$('select', m).forEach((s) => s.addEventListener('change', (e) => { if (e.target.id === 'xH') renderTxMapping(rows, Number(e.target.value), {}); else refresh(); }));
   refresh();
-  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, accMap: accMap, createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
+  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, accMap: accMap, relink: !!($('#xRelink', m) && $('#xRelink', m).checked), createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
 }
 /* Position détenue qui correspond à une ligne de fichier (même ISIN, même ticker ou même nom). same = true : dans le portefeuille acc ; false : dans un autre portefeuille. */
 function holdingMatching(r, acc, same) {
@@ -722,7 +723,7 @@ function commitTransactions(p, o) {
     }
     return h;
   };
-  const txKeys = new Set(state.transactions.map((t) => t.extId || [t.type, t.date, t.holdingId, t.qty, t.price].join('|')));
+  const txKeys = new Set(state.transactions.map((t) => t.extId || [t.type, t.date, t.holdingId, t.qty, t.price].join('|'))), byExtId = new Map(state.transactions.filter((t) => t.extId).map((t) => [t.extId, t])); let relinked = 0;
   const newTx = [], incoming = [];
   all.forEach((r) => {
     const h = resolve(r); if (!h) { noHolding++; return; }
@@ -734,6 +735,10 @@ function commitTransactions(p, o) {
     } else {
       const tx = { id: uid(), holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || r.name, date: r.date, type: r.kind, qty: r.qty, price: r.price, fees: r.fees || 0, currency: r.currency || h.currency, source: 'csv', extId: r.ext || undefined };
       const key = r.ext || [tx.type, tx.date, tx.holdingId, tx.qty, tx.price].join('|');
+      const ex = r.ext && byExtId.get(r.ext);           // même identifiant du courtier : c'est la même opération
+      if (txKeys.has(key) && o.relink && ex && ex.holdingId !== h.id && !ex.movedFrom) {      // déjà présente mais rattachée à une AUTRE position (doublon d'un ancien import) : rattachée à la bonne ; jamais si l'utilisateur l'a déplacée lui-même
+        const from = instrumentById(ex.holdingId); ex.movedFrom = { holdingId: ex.holdingId, name: from ? (from.name || from.displayTicker || from.ticker || '') : '', at: todayISO() }; ex.holdingId = h.id; relinked++; return;
+      }
       if (txKeys.has(key)) { dupTx++; const nm = h.name || h.displayTicker || h.ticker; dupBy[nm] = (dupBy[nm] || 0) + 1; return; }
       txKeys.add(key); newTx.push(tx);
     }
@@ -766,6 +771,7 @@ function commitTransactions(p, o) {
   if (created.length - closedNow.length) msg.push((created.length - closedNow.length) + ' actif(s) créé(s)');
   if (closedNow.length) msg.push(closedNow.length + ' position(s) soldée(s) rangée(s) dans « Clôturées »');
   if (reopened.length) msg.push(reopened.length + ' position(s) clôturée(s) rouverte(s) : ' + reopened.join(', '));
+  if (relinked) msg.push(relinked + ' opération(s) déjà présente(s) rattachée(s) à la bonne position');
   if (dupTx) { msg.push(dupTx + ' opération(s) déjà connue(s)'); notifyDuplicates(lastImportName, Object.keys(dupBy).map((k) => ({ name: k, n: dupBy[k] }))); } if (noHolding) msg.push(noHolding + ' sans actif correspondant');
   toast('Import : ' + msg.join(' · ') + '.', { ms: 14000, action: { label: 'Annuler l\'import', fn: undoLastImport } });
   const openNew = created.filter((h) => closedNow.indexOf(h) < 0), closedArch = closedNow.map((h) => (state.archive || []).find((x) => x.id === h.id)).filter(Boolean);
