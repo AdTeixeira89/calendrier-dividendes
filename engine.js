@@ -30,16 +30,26 @@
   function isAccumulating(h) { return h.type === 'etf_acc'; }
 
   /* Un actif génère-t-il des prévisions ? (jamais inventer de dividende) */
-  function isPayer(h) {
+  function isPayer(h, todayISO) {
     const d = h.dividend || {};
-    return !isAccumulating(h) && !d.none && num(d.lastAmount) > 0 && !!d.anchorMonth && P.freqMonths(d.frequency) > 0;
+    return !isAccumulating(h) && !d.none && num(d.lastAmount) > 0 && !!d.anchorMonth && P.freqMonths(d.frequency) > 0 && !dividendStopped(h, todayISO);
+  }
+  /* Dividende ARRÊTÉ : les données de marché enregistrées sur l'actif (historique des détachements) montrent que le dernier dividende date de plus de 18 mois (même règle que l'actualisation :
+     « verse un dividende s'il en a versé un dans les 18 derniers mois »). Protège contre un réglage resté périmé (ex. société qui a suspendu son dividende). Jamais si la société a annoncé un
+     versement (dividend.confirmed) ; sans historique de marché, aucun jugement. */
+  function dividendStopped(h, todayISO) {
+    const d = h.dividend || {}, hist = Array.isArray(d.history) ? d.history : [];
+    if (!hist.length || (Array.isArray(d.confirmed) && d.confirmed.length)) return false;
+    const last = hist.reduce((m, x) => (x && x.exDate && x.exDate > m ? x.exDate : m), ''); if (!last) return false;
+    const t = String(todayISO || toISO(new Date())), y = Number(t.slice(0, 4)), mo = Number(t.slice(5, 7)) - 1 - 18, yy = y + Math.floor(mo / 12), mm = ((mo % 12) + 12) % 12 + 1;
+    return last < yy + '-' + pad2(mm) + '-' + t.slice(8, 10);
   }
 
   /* Statut de la donnée de dividende d'un actif (pour filtres et badges). */
   function dividendStatus(h) {
     const d = h.dividend || {};
     if (isAccumulating(h)) return 'accumulating';
-    if (d.none) return 'none';
+    if (d.none || dividendStopped(h)) return 'none';
     if (isPayer(h)) return 'payer';
     if (num(d.lastAmount) > 0 && d.frequency === 'irregular') return 'irregular';
     return 'missing';
@@ -136,7 +146,7 @@
     });
 
     holdings.forEach((h) => {
-      if (!keep(h.id) || !isPayer(h) && !((h.dividend || {}).confirmed || []).length) return;
+      if (!keep(h.id) || !isPayer(h, todayISO) && !((h.dividend || {}).confirmed || []).length) return;
       const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker, name: h.name || '', logo: h.logo, isin: h.isin, currency: h.currency || 'EUR', account: h.account };
       const rate = taxRate(h);
       // Dividendes DÉJÀ DÉTACHÉS (date de détachement passée, données de marché) mais pas encore reçus : paiement attendu à « détachement + délai » (délai appris de vos versements réels).
@@ -164,7 +174,7 @@
           if (conf) {
             const amt = num(conf.amount) || num((h.dividend || {}).lastAmount);
             p = { date: conf.payDate, amount: amt, confirmed: true };
-          } else if (isPayer(h)) {
+          } else if (isPayer(h, todayISO)) {
             const q = P.payoutInMonth(h, y, m);
             if (q) p = { date: q.date, amount: q.amount, confirmed: false };
           }
@@ -804,7 +814,7 @@
   }
 
   root.Engine = {
-    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, dcaDue, positionFor, positionFromEntries, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, dcaDue, dividendStopped, positionFor, positionFromEntries, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };

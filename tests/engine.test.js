@@ -118,6 +118,17 @@ t('rappel du plan d\'épargne : dernière date du plan passée sans import ni ac
   assert.strictEqual(E.dcaDue(st({}), '2027-01-01').due, '2026-12-16', 'changement d\'année'); assert.strictEqual(E.dcaDue({ settings: {}, transactions: [] }, '2026-11-18'), null, 'désactivé par défaut');
   assert.strictEqual(E.dcaDue(st({ settings: { dca: { on: true, days: [] } } }), '2026-11-18'), null, 'aucun jour');
 });
+t('dividende arrêté (Intel : dernier détachement août 2024) : plus de versement prévu, même si le réglage de l\'actif est resté « verse un dividende » ; jamais si annoncé ; sans historique de marché : aucun jugement', () => {
+  const base = mk, mkI = (dv) => base({ id: 'i', ticker: 'INTC', displayTicker: 'INTC', name: 'INTEL', currency: 'USD', quantity: 70, avgCost: 30, price: 55, dividend: Object.assign({ lastAmount: 0.125, frequency: 'quarterly', anchorMonth: 2, dateKind: 'pay', none: false }, dv) });
+  const hist = (...d) => d.map((x) => ({ exDate: x, amount: 0.125 })), today = new Date(2026, 10, 18);
+  const intel = mkI({ history: hist('2024-02-06', '2024-05-06', '2024-08-07') });
+  assert.strictEqual(E.dividendStopped(intel, '2026-11-18'), true); assert.strictEqual(E.isPayer(intel, '2026-11-18'), false); assert.strictEqual(E.dividendStatus(intel), 'none');
+  const ev = E.buildEvents({ holdings: [intel], payments: [], transactions: [] }, new Date(2026, 10, 1), new Date(2027, 11, 31), today, null); assert.strictEqual(ev.length, 0, 'aucun versement prévu');
+  const live = mkI({ history: hist('2025-12-04', '2026-03-05', '2026-06-04', '2026-09-03') }); assert.strictEqual(E.isPayer(live, '2026-11-18'), true, 'dernier détachement récent : verse');
+  assert.strictEqual(E.isPayer(mkI({ history: hist('2024-08-07'), confirmed: [{ payDate: '2027-02-01', amount: 0.15 }] }), '2026-11-18'), true, 'versement annoncé par la société : jamais écarté');
+  assert.strictEqual(E.isPayer(mkI({}), '2026-11-18'), true, 'sans historique de marché : aucun jugement');
+  assert.strictEqual(E.dividendStopped(mkI({ history: hist('2025-05-20') }), '2026-11-18'), false, 'exactement dans les 18 mois');
+});
 t('monthly series splits received / upcoming / unrecorded', () => {
   const p = { id: 'p', holdingId: 'h', ticker: 'T', payDate: '2026-02-15', qty: 10, gross: 10, net: 10, currency: 'EUR' };
   const m = E.monthlySeries(st([mk({})], [p]), 2026, 'gross', conv, today);
