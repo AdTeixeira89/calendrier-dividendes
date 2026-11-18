@@ -69,6 +69,11 @@ t('marge d\'erreur : PRU à 2,7 % (frais) cohérent par défaut, divergent au-de
   assert.strictEqual(A.positions(mkS(100, 9)).divergent.length, 1, 'un titre entier manquant : toujours signalé'); assert.strictEqual(A.positions(mkS(100, 10.005)).coherent.length, 1, '0,005 titre : arrondi toléré');
   assert.strictEqual(A.positions(mkS(104, 10, { pru: 0.05 })).coherent.length, 1, 'marge PRU portée à 5 %'); assert.strictEqual(A.positions(mkS(102.7, 10, { pru: 0, qty: 0 })).divergent.length, 1, 'marge 0 : comportement strict');
 });
+t('devise du PRU différente : chiffres très différents = non comparable (information, cohérente) ; mêmes chiffres = libellé suspect (divergente)', () => {
+  const mkS = (avg, cur) => ({ accounts: [{ id: 'a', name: 'DEGIRO' }], holdings: [H('h9', { quantity: 10, avgCost: avg, costCurrency: cur })], transactions: [tx('c1', 'h9', '2024-01-10', 'buy', 10, 100, 0)], payments: [], corp: [] });
+  const usd = A.positions(mkS(108, 'USD')); assert.strictEqual(usd.coherent.length, 1, 'PRU en USD 108 contre 100 EUR : non comparable'); assert.ok(usd.coherent[0].anomalies.some((x) => /non comparable/.test(x)), 'signalé comme information');
+  const same = A.positions(mkS(100.3, 'USD')); assert.strictEqual(same.divergent.length, 1, 'mêmes chiffres (0,3 %) avec une autre devise : suspect'); assert.deepStrictEqual(same.divergent[0].reasons, ['cost_currency']);
+});
 t('divergente par PRU (quantités identiques)', () => { const p = find(A.positions(mk()), 'h4'); assert.deepStrictEqual(p.reasons, ['pru']); assert.strictEqual(p.qtyDiff, 0); assert.strictEqual(p.ledgerPru, 100); assert.strictEqual(p.pruDiff, 20); assert.ok(Math.abs(p.pruDiffPct - 0.2) < 1e-9); });
 t('PRU absent mais calculable ; devise du coût différente ; solde négatif ; achat sans montant', () => {
   const r = A.positions(mk());

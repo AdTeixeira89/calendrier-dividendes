@@ -19,7 +19,7 @@
     pru: 'PRU stocké ≠ PRU du grand livre',
     pru_missing_stored: 'PRU absent de la position, calculable par l\'historique',
     pru_uncomputable: 'PRU non vérifiable : montants manquants dans l\'historique (achat sans prix ou en autre devise)',
-    cost_currency: 'Devise du PRU stocké ≠ devise du grand livre (comparaison impossible sans conversion)'
+    cost_currency: 'Mêmes chiffres mais devise du PRU différente de celle du grand livre : libellé de devise suspect'
   };
   const near = (d1, d2) => Math.abs(Date.parse(d1) - Date.parse(d2)) < 5 * 86400000;
   /* Rapport simple entier proche de 1/ratio ou ratio (split ou regroupement probable) */
@@ -76,7 +76,11 @@
     if (led.costUnknown > 0) { if (storedPru !== null) rec.reasons.push('pru_uncomputable'); }
     else if (led.pru === null) { /* quantité nulle dans le grand livre : pas de PRU à comparer */ }
     else if (storedPru === null) rec.reasons.push('pru_missing_stored');
-    else if (!sameCur) rec.reasons.push('cost_currency');
+    else if (!sameCur) {
+      // devises différentes : sans taux de change historique la comparaison est impossible. Mêmes chiffres à 0,5 % près = libellé de devise suspect (divergence) ; sinon : information, pas une divergence.
+      const rel = led.pru > 0 ? Math.abs(storedPru - led.pru) / led.pru : 1;
+      if (rel <= 0.005) rec.reasons.push('cost_currency'); else rec.anomalies.push('PRU enregistré en ' + storedCostCur + ', grand livre en ' + cur + ' : non comparable sans taux de change historique (les quantités sont cohérentes)');
+    }
     else {
       rec.pruComparable = true; rec.pruDiff = storedPru - led.pru; rec.pruDiffPct = led.pru > 0 ? rec.pruDiff / led.pru : null;
       if (!Ledger.pruNear(storedPru, led.pru, state)) rec.reasons.push('pru');          // marge d'erreur réglable (Paramètres) : 3 % par défaut
