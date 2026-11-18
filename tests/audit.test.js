@@ -65,7 +65,7 @@ t('un split de marché antérieur au premier achat n\'explique rien et n\'est pa
 });
 t('marge d\'erreur : PRU à 2,7 % (frais) cohérent par défaut, divergent au-delà ; un titre entier manquant n\'est jamais toléré ; marge réglable', () => {
   const mkS = (avg, qty, margin) => ({ settings: margin ? { margin } : {}, accounts: [{ id: 'a', name: 'DEGIRO' }], holdings: [H('h9', { quantity: qty, avgCost: avg })], transactions: [tx('m1', 'h9', '2024-01-10', 'buy', 10, 100, 0)], payments: [], corp: [] });
-  assert.strictEqual(A.positions(mkS(102.7, 10)).coherent.length, 1, 'PRU +2,7 % : dans la marge de 3 %'); assert.strictEqual(A.positions(mkS(104, 10)).divergent.length, 1, 'PRU +4 % : hors marge');
+  assert.strictEqual(A.positions(mkS(104.7, 10)).coherent.length, 1, 'PRU +4,7 % : dans la marge de 5 %'); assert.strictEqual(A.positions(mkS(106, 10)).divergent.length, 1, 'PRU +6 % : hors marge');
   assert.strictEqual(A.positions(mkS(100, 9)).divergent.length, 1, 'un titre entier manquant : toujours signalé'); assert.strictEqual(A.positions(mkS(100, 10.005)).coherent.length, 1, '0,005 titre : arrondi toléré');
   assert.strictEqual(A.positions(mkS(104, 10, { pru: 0.05 })).coherent.length, 1, 'marge PRU portée à 5 %'); assert.strictEqual(A.positions(mkS(102.7, 10, { pru: 0, qty: 0 })).divergent.length, 1, 'marge 0 : comportement strict');
 });

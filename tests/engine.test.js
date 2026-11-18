@@ -266,14 +266,31 @@ console.log(n + ' tests passed');
     const s3 = { holdings: [D], archive: [], payments: [], transactions: [tx('1', 'd', '2026-01-10', 'buy', 10, 100), tx('2', 'd', '2026-06-10', 'buy', 10, 100)] };
     const h3 = E.portfolioHistory(s3, cvAt, { months: 0, today: td }); assert.ok(h3.perf.pct > 0.09 && h3.perf.pct < 0.111, 'environ +10 % : ' + h3.perf.pct);
   });
-  t('historique : cours manquant = point partiel signalé, jamais de cours inventé ni de valeur « au prix d\'achat »', () => {
+  t('historique : sans cours de marché, valorisation au dernier prix d\'opération, signalée comme estimation (jamais silencieuse)', () => {
     const X = hh('x', { quantity: 5, price: 20, hist: monthly('2026-06', [10, 11, 12, 13, 14]) });        // cours seulement depuis juin 2026
     const s2 = { holdings: [X], archive: [], payments: [], transactions: [tx('1', 'x', '2026-02-01', 'buy', 5, 9)] };
     const h = E.portfolioHistory(s2, cvAt, { months: 0, today: td }), p = h.points.find((q) => q.date === '2026-03-31');
-    assert.strictEqual(p.partial, true); assert.strictEqual(p.value, 0); assert.deepStrictEqual(p.missing, ['X']); assert.strictEqual(h.coverage.missing[0].name, 'X');
-    assert.strictEqual(h.points.find((q) => q.date === '2026-07-31').partial, false); assert.strictEqual(h.perf.from >= '2026-06-30', true, 'performance seulement sur la partie entièrement valorisée');
-    const noHist = hh('n', { quantity: 5, price: 20, hist: null }); const h2 = E.portfolioHistory({ holdings: [noHist], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td });
-    assert.ok(h2.points.every((q) => q.partial || q.value === 100)); assert.ok(h2.coverage.missing.length === 1);
+    assert.strictEqual(p.partial, false, 'plus de pointillé'); assert.strictEqual(p.estimated, true); assert.strictEqual(p.value, 45, '5 titres au prix de l\'achat (9)'); assert.deepStrictEqual(p.estNames, ['X']);
+    assert.strictEqual(h.coverage.estimated[0].name, 'X'); assert.strictEqual(h.coverage.missing.length, 0);
+    assert.strictEqual(h.points.find((q) => q.date === '2026-07-31').estimated, false, 'dès qu\'un cours existe, il est utilisé'); assert.strictEqual(h.points.find((q) => q.date === '2026-07-31').partial, false);
+    assert.ok(h.perf.from <= '2026-02-28', 'performance calculée dès le début');
+    // position soldée sans aucun cours (société radiée) : achat à 10, vente à 15 → valeur au dernier prix d'opération connu
+    const D = hh('d', { hist: null }); const s3 = { holdings: [], archive: [D], payments: [], transactions: [tx('1', 'd', '2026-01-10', 'buy', 10, 10), tx('2', 'd', '2026-03-10', 'sell', 4, 15), tx('3', 'd', '2026-05-10', 'sell', 6, 20)] };
+    const h3 = E.portfolioHistory(s3, cvAt, { months: 0, today: td }), at = (d) => h3.points.find((q) => q.date === d);
+    assert.strictEqual(at('2026-02-28').value, 100); assert.strictEqual(at('2026-04-30').value, 6 * 15, 'après la 1re vente : 6 titres au dernier prix (15)'); assert.strictEqual(at('2026-05-31').value, 0);
+    assert.ok(h3.points.every((q) => !q.partial)); assert.strictEqual(h3.coverage.estimated[0].reason, 'aucun cours historique');
+    // fractionnement depuis le dernier prix : 2 pour 1 → quantité doublée, prix divisé par 2
+    const SP = hh('sp', { quantity: 20, price: 5, hist: null, splits: [{ date: '2026-04-15', ratio: 2 }] });
+    const s4 = { holdings: [SP], archive: [], payments: [], transactions: [tx('1', 'sp', '2026-01-10', 'buy', 10, 10)] };
+    const h4 = E.portfolioHistory(s4, cvAt, { months: 0, today: td }), at4 = (d) => h4.points.find((q) => q.date === d);
+    assert.strictEqual(at4('2026-03-31').value, 100); assert.strictEqual(at4('2026-05-31').value, 100, 'split 2:1 : 20 titres × 5 = 100 (pas 200)');
+    // aujourd\'hui, une position détenue sans cours reste « partielle » (le total actuel ne l\'inclut pas non plus)
+    const noHist = hh('n', { quantity: 5, price: 0, hist: null }); const h2 = E.portfolioHistory({ holdings: [noHist], archive: [], payments: [], transactions: [] }, cvAt, { months: 12, today: td });
+    assert.ok(h2.points.every((q) => q.partial)); assert.ok(h2.coverage.missing.length === 1);
+    // taux de change introuvable : reste partiel (rien n'est inventé)
+    const J = hh('j', { currency: 'JPY', quantity: 5, price: 20, hist: monthly('2026-01', [10, 10, 10, 10, 10, 10, 10, 10, 10, 10]) });
+    const h5 = E.portfolioHistory({ holdings: [J], archive: [], payments: [], transactions: [tx('1', 'j', '2026-01-10', 'buy', 5, 10)] }, cvAt, { months: 0, today: td });
+    assert.ok(h5.points.some((q) => q.partial)); assert.strictEqual(h5.coverage.missing[0].reason, 'taux de change indisponible');
   });
   t('historique : devises converties au taux de la date (jamais au taux du jour pour le passé)', () => {
     const U = hh('u', { currency: 'USD', quantity: 10, price: 125, hist: monthly('2026-01', [100, 100, 100, 100, 100, 100, 100, 100, 100, 125]) });

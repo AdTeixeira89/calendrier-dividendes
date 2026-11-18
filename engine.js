@@ -452,7 +452,7 @@
     const byInst = {}; txAll.forEach((t) => { (byInst[t.holdingId] = byInst[t.holdingId] || []).push(t); });
     const sortTx = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0);
 
-    const list = []; const coverage = { total: 0, missing: [], retro: [], unknownCost: [], noDaily: false };
+    const list = []; const coverage = { total: 0, missing: [], estimated: [], retro: [], unknownCost: [], noDaily: false };
     insts.forEach((it) => {
       const h = it.h, txs = (byInst[h.id] || []).slice().sort(sortTx), isin = Ledger ? Ledger.holdingIsin(h) : '';
       const sign = (t) => (t.type === 'buy' ? 1 : -1);
@@ -511,23 +511,47 @@
     const ptr = list.map(() => 0);
     const qtyAt = (x, i, d) => { if (!x.txMode) return x.q0; while (ptr[i] < x.cumul.length && x.cumul[ptr[i]].date <= d) ptr[i]++; return ptr[i] ? Math.max(0, x.cumul[ptr[i] - 1].q) : 0; };
     const costAt = (x, d) => { if (!x.txMode || !x.rowsAt) return null; let c = 0; for (let k = 0; k < x.rowsAt.length; k++) { if (x.rowsAt[k].date <= d) c = x.rowsAt[k].costAfter; else break; } return c; };
-    const missingEver = {}, lastVals = {};
+    // Actif sans cours de marché à cette date (société radiée, symbole introuvable, historique trop court) : on le valorise au DERNIER PRIX D'OPÉRATION connu
+    // (achat ou vente importé, converti au taux du jour de l'opération, ramené aux fractionnements survenus depuis) plutôt que de l'omettre.
+    // C'est une estimation, signalée (point.estimated + coverage.estimated), jamais un cours inventé. Sans prix d'opération exploitable : point « partiel » comme avant.
+    const tradeValue = (x, d) => {
+      if (!x.txMode || !x.rowsAt) return null;
+      let unit = null, fac = 1, qty = 0;
+      for (let k = 0; k < x.rowsAt.length; k++) {
+        const r = x.rowsAt[k]; if (r.date > d) break;
+        qty = r.qtyAfter;
+        if (r.type === 'split' && r.ratio > 0) fac *= r.ratio;
+        else if ((r.type === 'buy' || r.type === 'sell') && r.amt != null && r.qty > 0) { unit = r.amt / r.qty; fac = 1; }
+      }
+      return unit !== null && qty > 1e-9 ? qty * unit / fac : null;
+    };
+    const missingEver = {}, lastVals = {}, estimatedEver = {};
     const points = sample.map((d) => {
       const live = d === todayS, ymm = d.slice(0, 7);
-      let value = 0, cost = 0, costKnown = true, partial = false; const miss = [], parts = [];
+      let value = 0, cost = 0, costKnown = true, partial = false; const miss = [], parts = [], est = [];
       list.forEach((x, i) => {
         const q0 = qtyAt(x, i, d); if (!(q0 > 1e-9)) return;
         const q = q0 * (x.txMode ? splitAfter(x.adjSplits, d) : 1);                // base actuelle des fractionnements du marché (cours ajustés)
         const p = x.price(d, live && x.live), cv = p > 0 ? convertAt(q * p, x.cur, ymm) : null;
         if (d === todayS) lastVals[x.id] = cv;
+        if (cv === null && !(p > 0) && !(d === todayS && x.live)) {
+          const tv = tradeValue(x, d);
+          if (tv !== null) {
+            value += tv; parts.push([x.name, tv]); est.push(x.name);
+            estimatedEver[x.name] = estimatedEver[x.name] || { name: x.name, first: d, reason: x.hasHist ? 'cours indisponible à cette date' : 'aucun cours historique' };
+            const c2 = costAt(x, d); if (c2 === null) costKnown = false; else cost += c2;
+            return;
+          }
+        }
         if (cv === null) { partial = true; miss.push(x.name); missingEver[x.name] = missingEver[x.name] || { name: x.name, first: d, reason: p > 0 ? 'taux de change indisponible' : (x.hasHist ? 'cours indisponible à cette date' : 'aucun cours historique') }; return; }
         value += cv; parts.push([x.name, cv]);
         const c = costAt(x, d); if (c === null) costKnown = false; else cost += c;
       });
       parts.sort((a, b) => b[1] - a[1]);
-      return { date: d, ym: ymm, value, cost: costKnown ? cost : null, partial, missing: miss.slice(0, 6), nMissing: miss.length, parts: parts.slice(0, 4), rest: parts.slice(4).reduce((s, x) => s + x[1], 0) };
+      return { date: d, ym: ymm, value, cost: costKnown ? cost : null, partial, estimated: est.length > 0, estNames: est.slice(0, 6), nEstimated: est.length, missing: miss.slice(0, 6), nMissing: miss.length, parts: parts.slice(0, 4), rest: parts.slice(4).reduce((s, x) => s + x[1], 0) };
     });
     coverage.missing = Object.keys(missingEver).map((k) => missingEver[k]);
+    coverage.estimated = Object.keys(estimatedEver).map((k) => estimatedEver[k]);
 
     // flux (achats = apports, ventes = retraits), en devise de base au taux du mois d'exécution
     const flows = [];

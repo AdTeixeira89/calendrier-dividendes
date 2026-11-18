@@ -519,7 +519,7 @@ t('marge d\'erreur du contrôle de l\'historique : arrondi de quantité et PRU �
   assert.ok(codes(mk(10.01, 100, { qty: 0, pru: 0 })).indexOf('qty_ref') >= 0, 'marge nulle : écart de quantité signalé');
   assert.ok(codes(mk(10.01, 102.7, { qty: 0.01, pru: 0 })).indexOf('pru_diff') >= 0, 'marge PRU nulle : écart de PRU signalé');
   assert.ok(codes(mk(9.008416, 100)).indexOf('qty_ref') >= 0, 'un titre entier manquant : toujours signalé');
-  assert.strictEqual(L.marginOf({}).pru, 0.03); assert.strictEqual(L.marginOf({ settings: { margin: { pru: null, qty: '' } } }).qty, 0.01, 'valeurs vides : marge par défaut');
+  assert.strictEqual(L.marginOf({}).pru, 0.05); assert.strictEqual(L.marginOf({ settings: { margin: { pru: null, qty: '' } } }).qty, 0.01, 'valeurs vides : marge par défaut');
 });
 
 t('split noté comme un achat et une vente (DEGIRO) : détecté, traité comme un split à la demande (PRU et résultat corrigés), position saisie à la main jamais modifiée', () => {

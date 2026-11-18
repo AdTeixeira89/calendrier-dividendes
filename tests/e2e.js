@@ -902,17 +902,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
-  await test('accueil : cours historiques manquants signalés (pointillés + message), jamais inventés ; ancien relais = points mensuels annoncés', async () => {
+  await test('accueil : actif sans cours historique = estimé au dernier prix d\'opération (signalé, sans pointillés) ; ancien relais = points mensuels annoncés', async () => {
     RELAY.old = false;
     const seed = SEED(0), y = ymAgo(10);
     seed.holdings = [H(0, { ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide', quantity: 10, avgCost: 50, price: 100, hist: { from: ymAgo(24), c: Array.from({ length: 25 }, (_, k) => 40 + k) } }),
       H(1, { ticker: 'XYZ', displayTicker: 'XYZ', isin: 'FR0000000001', name: 'Sans cours', quantity: 5, avgCost: 20, price: 30, hist: { from: ymAgo(3), c: [25, 27, 28, 30] } })];
     seed.transactions = [{ id: 't1', holdingId: 'h0', date: y + '-15', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'degiro' }, { id: 't2', holdingId: 'h1', date: ymAgo(8) + '-10', type: 'buy', qty: 5, price: 20, fees: 0, currency: 'EUR', amountAcct: 100, acctCur: 'EUR', source: 'degiro' }];
     const p = await device({ guest: true, seed }); await p.open(); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300);
-    const note = await bellOpen(p); ok(/Cours historiques indisponibles/.test(note) && /Sans cours/.test(note) && /pointillés/.test(note), 'message explicatif dans la cloche : ' + note.slice(0, 400)); await bellClose(p);
-    ok(await p.locator('svg.chart path[stroke-dasharray="3 4"]').count() >= 1, 'portion partielle dessinée en pointillés');
-    const part = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 12, today: new Date() }); return { nPartial: h.points.filter((q) => q.partial).length, withVal: h.points.some((q) => !q.partial && q.value > 0), pre: h.points.filter((q) => q.partial && q.value >= 0).every((q) => q.parts.every((x) => x[0] !== 'Sans cours')) }; });
-    ok(part.nPartial > 0 && part.withVal && part.pre, 'points partiels exclus de la valeur (aucun cours inventé)');
+    const note = await p.locator('.chart-note').innerText(); ok(/Sans cours/.test(note) && /dernier prix de vos opérations/.test(note), 'note sous le graphique : valorisation estimée au dernier prix d\'opération : ' + note.slice(0, 300));
+    ok(await p.locator('svg.chart path[stroke-dasharray="3 4"]').count() === 0, 'plus de pointillés : courbe continue');
+    const part = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 12, today: new Date() }); return { nPartial: h.points.filter((q) => q.partial).length, nEst: h.points.filter((q) => q.estimated).length, est: h.coverage.estimated.map((x) => x.name), miss: h.coverage.missing.length }; });
+    ok(part.nPartial === 0 && part.nEst > 0 && part.est.join() === 'Sans cours' && part.miss === 0, 'points estimés (et signalés), aucun point partiel : ' + JSON.stringify(part));
     // ancien relais : pas de cours quotidiens
     RELAY.old = true; const q = await device({ guest: true }); await q.open(); await dgOpen(q, DG_CSV); await dgConfirm(q); await waitIdle(q); await q.evaluate(() => go('home')); await q.waitForTimeout(400);
     await q.click('#perSeg [data-per="3"]'); await q.waitForTimeout(250); ok(/Cours quotidiens indisponibles/.test(await bellOpen(q)), 'ancien relais : points mensuels annoncés (cloche)'); await bellClose(q); ok(!(await storeOf(q)).holdings[0].hist.d, 'pas de série quotidienne enregistrée'); RELAY.old = false;

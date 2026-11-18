@@ -372,7 +372,7 @@
   const qtyEq = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
   /* MARGE D'ERREUR des contrôles (réglable : Paramètres) : sous ces écarts, une position est considérée cohérente. Elle ne change AUCUN calcul (quantité, PRU, résultat) : seulement ce qui est signalé comme anomalie.
      Quantité : 0,01 titre par défaut (arrondi à 2 décimales d'un courtier, jamais un titre entier manquant). PRU : 3 % par défaut (frais d'achat inclus ou non selon le courtier). */
-  const MARGIN_DEFAULT = { pru: 0.03, qty: 0.01 };
+  const MARGIN_DEFAULT = { pru: 0.05, qty: 0.01 };
   const marginOf = (state) => { const m = (state && state.settings && state.settings.margin) || {}, ok = (v) => v !== '' && v != null && isFinite(Number(v)) && Number(v) >= 0; return { pru: ok(m.pru) ? Number(m.pru) : MARGIN_DEFAULT.pru, qty: ok(m.qty) ? Number(m.qty) : MARGIN_DEFAULT.qty }; };
   const qtyNear = (a, b, state) => Math.abs(a - b) <= Math.max(1e-6 * Math.max(1, Math.abs(b)), marginOf(state).qty);
   const pruNear = (a, b, state) => Math.abs(a - b) <= Math.max(0.005, Math.abs(b) * marginOf(state).pru);

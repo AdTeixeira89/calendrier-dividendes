@@ -82,6 +82,7 @@ function renderHome(host) {
     if (p.cost != null && p.cost > 0) s += '\nCapital investi : ' + fmtMoney(p.cost, baseCur(), { d: 0 });
     p.parts.forEach((x) => { s += '\n· ' + String(x[0]).slice(0, 22) + ' ' + fmtMoney(x[1], baseCur(), { d: 0 }); });
     if (p.rest > 0.5) s += '\n· autres ' + fmtMoney(p.rest, baseCur(), { d: 0 });
+    if (p.estimated) s += '\n≈ Estimé au dernier prix d\'opération : ' + p.estNames.slice(0, 3).join(', ') + (p.nEstimated > 3 ? '…' : '');
     if (p.partial) s += '\n⚠ Valeur partielle : cours manquants (' + p.missing.slice(0, 3).join(', ') + (p.nMissing > 3 ? '…' : '') + ')';
     if (cash.amount > 0 && p.date === lastPtDate) s += '\nLiquidités actuelles : ' + fmtMoney(cash.amount, baseCur(), { d: 0 }) + ' (' + cashScopeLabel(cash) + ')';
     return s;
@@ -96,6 +97,8 @@ function renderHome(host) {
   if (hasValue) {
     if (hist.allTx && state.transactions.length) notes.push('Valeur reconstituée : <b>opérations importées × cours historiques</b>' + (costLine ? ' · pointillés ocre : capital investi' : ''));
     else if (hist.retro) hn.push({ id: 'home:retro', level: 'info', title: 'Valeur passée estimée', body: 'Cours passés × quantités <b>actuelles</b> pour ' + (hist.coverage.retro.length > 3 ? hist.coverage.retro.length + ' actifs' : esc(hist.coverage.retro.join(', '))) + ' (pas d\'historique d\'opérations complet : rétrospectif).', edit: { label: 'Contrôler l\'historique', run: () => openDiagnostic() } });
+    const estd = hist.coverage.estimated || [];
+    if (estd.length) notes.push('Sans cours de marché : <b>' + estd.slice(0, 4).map((x) => esc(x.name)).join(', ') + (estd.length > 4 ? ' et ' + (estd.length - 4) + ' autre(s)' : '') + '</b> valorisé(s) au <b>dernier prix de vos opérations</b> (estimation)');
     const miss = hist.coverage.missing.filter((x) => { const hh = holdingByNameAny(x.name); return !(hh && (hh.listing === 'delisted' || hh.marketOff)); });      // sociétés plus cotées : pas de cours à attendre
     if (miss.length) hn.push({ id: 'home:missHist', level: 'warn', title: 'Cours historiques indisponibles', body: 'Pour ' + miss.slice(0, 3).map((m) => esc(m.name)).join(', ') + (miss.length > 3 ? ' et ' + (miss.length - 3) + ' autre(s)' : '') + ' (' + esc(miss[0].reason) + ' dès le ' + esc(fmtDate(miss[0].first)) + ') : les portions en <b>pointillés</b> sont partielles, ces actifs n\'y sont pas valorisés. Si l\'actualisation ne suffit pas, corrigez le symbole de l\'actif.', accept: { label: 'Actualiser', run: () => runFullRefresh('button'), ack: false }, edit: { label: 'Corriger les actifs…', run: () => openFailingHoldings(miss.map((m) => holdingByNameAny(m.name)).filter(Boolean)) } });
     const curs = new Set(state.holdings.concat(state.archive || []).map((x) => x.currency || 'EUR').concat(state.transactions.map((t) => t.acctCur || 'EUR'))); curs.delete(baseCur());
