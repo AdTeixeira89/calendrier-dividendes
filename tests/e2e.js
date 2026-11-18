@@ -444,6 +444,21 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p); eq(s.payments.length, 2, 'annulation : les deux versements sont restaurés'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('liquidités affichées : « Tous les portefeuilles » = total des liquidités de tous les portefeuilles ; un portefeuille sélectionné = ses liquidités seulement (accueil : texte, barre titres / liquidités, infobulle ; page Portefeuille : carte « Liquidités »)', async () => {
+    const seed = SEED(0); seed.accounts = [{ id: 'a', name: 'PEA', cash: { amount: 1000, include: false } }, { id: 'b', name: 'CTO', cash: { amount: 250, include: true } }, { id: 'c', name: 'Vide' }];
+    seed.holdings = [{ id: 'k', ticker: 'KO', displayTicker: 'KO', name: 'Coca', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, price: 100, account: 'a', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1200 } }); await p.open(); await p.waitForTimeout(400);
+    const flat = async (sel) => (await p.locator(sel).first().innerText()).replace(/[\s  ]/g, '');
+    await p.evaluate(() => { view.account = 'all'; go('home'); renderPage(); }); await p.waitForSelector('.cash-bar'); let t = await flat('.cash-bar');
+    ok(/1250/.test(t) && /Liquidités/.test(t), 'tous les portefeuilles : 1 000 + 250 = 1 250 € : ' + t); ok(/total des 2 portefeuilles/.test(await p.locator('.cash-bar').innerText()), 'périmètre indiqué'); ok(/Liquidités1250/.test((await flat('.hero-sub')).replace('liquidités', 'Liquidités')) || /1250/.test(await flat('.hero-sub')), 'texte de l\'accueil');
+    await p.evaluate(() => { view.account = 'a'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await flat('.cash-bar'); ok(/1000/.test(t) && !/1250/.test(t), 'portefeuille PEA seul : 1 000 € : ' + t);
+    await p.evaluate(() => { view.account = 'b'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await flat('.cash-bar'); ok(/250/.test(t) && !/1000/.test(t) && !/1250/.test(t), 'portefeuille CTO seul : 250 € : ' + t);
+    await p.evaluate(() => { view.account = 'c'; renderPage(); }); await p.waitForTimeout(300); eq(await p.locator('.cash-bar').count(), 0, 'portefeuille sans liquidités : rien affiché');
+    await p.evaluate(() => { view.account = 'all'; view.port.tab = 'positions'; go('portfolio'); renderPage(); }); await p.waitForSelector('.sum-strip'); let k = (await p.locator('.sum-strip').innerText()).replace(/[\s  ]/g, ' '); ok(/Liquidités/i.test(k) && /1\s?250/.test(k.replace(/ /g, '')) || /1250/.test(k.replace(/ /g, '')), 'page Portefeuille, tous : carte Liquidités 1 250 € : ' + k.slice(0, 200));
+    await p.evaluate(() => { view.account = 'b'; renderPage(); }); await p.waitForTimeout(300); k = (await p.locator('.sum-strip').innerText()).replace(/[\s  ]/g, ''); ok(/Liquidités/i.test(k) && /250/.test(k) && !/1250/.test(k), 'page Portefeuille, CTO : carte Liquidités 250 € : ' + k.slice(0, 200));
+    const s2 = await storeOf(p); eq(s2.accounts.map((a) => (a.cash || {}).amount), [1000, 250, undefined], 'aucune donnée modifiée'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
@@ -1844,7 +1859,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     let s = await storeOf(p); const c = s.accounts[0].cash; eq([c.amount, c.monthly, c.include], [1500, 200, false], 'liquidités et versement mensuel enregistrés, case non cochée par défaut');
     await p.evaluate(() => go('home')); await p.waitForTimeout(300); ok(/^1000/.test(await hero()) && /hors/.test(await p.locator('.hero-sub').innerText()), 'case non cochée : valeur inchangée, liquidités signalées à part');
     await p.evaluate(() => go('settings')); await p.waitForSelector('.cash-row .cs-inc'); await p.check('.cash-row .cs-inc'); await p.evaluate(() => go('home')); await p.waitForTimeout(300);
-    ok(/^2500/.test(await hero()) && /dont/.test(await p.locator('.hero-sub').innerText()), 'case cochée : 1 000 + 1 500 = 2 500 € : ' + await hero());
+    ok(/^2500/.test(await hero()) && /comptées dans la valeur/.test(await p.locator('.hero-sub').innerText()), 'case cochée : 1 000 + 1 500 = 2 500 € : ' + await hero());
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();

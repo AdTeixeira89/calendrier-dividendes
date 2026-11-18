@@ -221,16 +221,30 @@ function filteredHoldings() {
 }
 
 /* Bandeau de synthèse : valeur, investi, plus-value (PRU) et rendement total (plus-value + dividendes perçus vérifiés). */
+/* LIQUIDITÉS du périmètre affiché : TOUS les portefeuilles ensemble quand « Tous les portefeuilles » est choisi, sinon seulement le portefeuille sélectionné (Engine.cashTotals).
+   Affichées à part des titres ; elles n'entrent JAMAIS dans la plus-value ni la performance. */
+function cashScopeLabel(cash) { return view.account === 'all' ? (cash.count > 1 ? 'total des ' + cash.count + ' portefeuilles' : 'tous les portefeuilles') : accountName(view.account); }
+function cashCountedLabel(cash) { return cash.included >= cash.amount - 0.005 ? 'comptées dans la valeur' : cash.included > 0 ? 'comptées en partie dans la valeur' : 'hors de la valeur affichée'; }
+/* Barre « titres / liquidités » : part de chacun dans le total (titres valorisés + liquidités du périmètre). */
+function cashBarHtml(titres, cash) {
+  if (!(cash.amount > 0)) return '';
+  const tot = Math.max(0, titres) + cash.amount, pT = tot > 0 ? Math.max(0, titres) / tot : 0, pC = 1 - pT, pc = (x) => fmtPct(x, x < 0.1 && x > 0 ? 1 : 0);
+  return '<div class="cash-bar" style="margin:10px 0 2px"><div style="display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--border)" role="img" aria-label="Répartition titres et liquidités">' +
+    '<span style="width:' + (pT * 100).toFixed(2) + '%;background:var(--chart-1)"></span><span style="width:' + (pC * 100).toFixed(2) + '%;background:var(--chart-3)"></span></div>' +
+    '<div class="muted" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;margin-top:4px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-1);margin-right:5px"></i>Titres <span class="sens">' + money(Math.max(0, titres), 0) + '</span> (' + pc(pT) + ')</span>' +
+    '<span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-3);margin-right:5px"></i>Liquidités <span class="sens">' + money(cash.amount, 0) + '</span> (' + pc(pC) + ') · ' + esc(cashScopeLabel(cash)) + '</span></div></div>';
+}
 function portfolioSummaryHtml(perf) {
   const ids = visibleIds(), pv = Engine.portfolioValue(state, convert, ids), inv = Engine.investedTotal(state, convert, ids);
   const rec = Engine.receivedBetween(state, '2000-01-01', todayISO(), 'gross', convert, ids), div = rec.verified.total;
-  const tr = perf.count && perf.cost > 0 ? (perf.gain + div) / perf.cost : null;
+  const tr = perf.count && perf.cost > 0 ? (perf.gain + div) / perf.cost : null, cashK = Engine.cashTotals(state, view.account);
   const cls = (v) => (v >= 0 ? 'pos' : 'neg');
   const mask = !!state.settings.hideNumbers;
   return '<div class="grid kpis sum-strip' + (mask ? ' hide-nums' : '') + '" style="margin-bottom:12px">' +
     kpiCard('Valeur', pv.count ? money(pv.total, 0) : '—', pv.count + ' / ' + visibleHoldings().length + ' actif(s) valorisé(s)') +
     kpiCard('Investi (PRU)', inv.count ? money(inv.cost, 0) : '—', inv.count + ' actif(s) avec PRU') +
     kpiCard('Plus / moins-value', perf.count ? (perf.gain >= 0 ? '+' : '') + money(perf.gain, 0) : '—', perf.count ? fmtPct(perf.pct, 1, true) + ' sur ' + perf.count + ' actif(s) (PRU + cours)' : 'Nécessite le PRU et le cours', perf.count ? cls(perf.gain) === 'pos' ? 'income' : 'neg' : '') +
+    (cashK.amount > 0 ? kpiCard('Liquidités', money(cashK.amount, 0), cashScopeLabel(cashK) + ' · ' + cashCountedLabel(cashK)) : '') +
     kpiCard('Rendement total', tr === null ? '—' : fmtPct(tr, 1, true), tr === null ? 'Plus-value + dividendes perçus' : 'Plus-value + ' + money(div, 0) + ' de dividendes perçus (vérifiés)', tr !== null ? (tr >= 0 ? 'income' : 'neg') : '') + '</div>';
 }
 

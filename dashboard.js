@@ -75,6 +75,7 @@ function renderHome(host) {
   const signed = (v, d_) => (v >= 0 ? '+' : '') + money(v, d_ === undefined ? 0 : d_);
 
   /* --- 1. « Valeur du portefeuille » : valeur actuelle des positions détenues + 4 indicateurs --- */
+  const lastPtDate = hist.points.length ? hist.points[hist.points.length - 1].date : null;
   const tipOf = (p) => {
     if (mask) return fmtDate(p.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nMontants masqués';
     let s = fmtDate(p.date, { day: 'numeric', month: 'long', year: 'numeric' }) + '\nValeur : ' + fmtMoney(p.value, baseCur(), { d: 0 });
@@ -82,6 +83,7 @@ function renderHome(host) {
     p.parts.forEach((x) => { s += '\n· ' + String(x[0]).slice(0, 22) + ' ' + fmtMoney(x[1], baseCur(), { d: 0 }); });
     if (p.rest > 0.5) s += '\n· autres ' + fmtMoney(p.rest, baseCur(), { d: 0 });
     if (p.partial) s += '\n⚠ Valeur partielle : cours manquants (' + p.missing.slice(0, 3).join(', ') + (p.nMissing > 3 ? '…' : '') + ')';
+    if (cash.amount > 0 && p.date === lastPtDate) s += '\nLiquidités actuelles : ' + fmtMoney(cash.amount, baseCur(), { d: 0 }) + ' (' + cashScopeLabel(cash) + ')';
     return s;
   };
   const hasValue = hist.points.length > 1 && hist.points.some((p) => !p.partial && p.value > 0);
@@ -113,7 +115,7 @@ function renderHome(host) {
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
 
   const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count || cash.included > 0 ? money(totalShown, 0) : '—') + '</div>' +
-    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + (cash.amount > 0 ? sens(' · ' + (cash.included > 0 ? 'dont ' + money(cash.included, 0) + ' de liquidités' : 'hors ' + money(cash.amount, 0) + ' de liquidités')) : '') + '</div></div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
+    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + (cash.amount > 0 ? sens(' · liquidités ' + money(cash.amount, 0) + ' (' + cashScopeLabel(cash) + ', ' + cashCountedLabel(cash) + ')') : '') + '</div>' + cashBarHtml(pv.total, cash) + '</div><div class="hero-ind">' + indGain + indDay + '</div></div>' +
     '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
     '<div class="chart-wrap">' + chart + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
 
