@@ -723,6 +723,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
   const dgConfirm = async (p) => { await p.click('#dgGo'); await p.waitForTimeout(100); await p.click('#dgGo'); await p.waitForTimeout(300); };
   const waitIdle = async (p) => { await p.waitForFunction(() => !document.querySelector('#rfBar'), null, { timeout: 15000 }).catch(() => {}); await p.waitForTimeout(500); };
 
+  await test('IMPORT UNIQUE : un seul point d\'entrée, la source est reconnue d\'après le contenu du fichier (DEGIRO, Trade Republic, relevé de positions) ; relevé illisible → saisie à la main', async () => {
+    RELAY.old = false;
+    const p = await device({ guest: true }); await p.open(); await p.evaluate(() => go('history'));
+    const via = async (name, content) => { const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImport(); })]); await fc.setFiles(csvFile(name, content)); };
+    await via('Transactions.csv', DG_CSV); await p.waitForSelector('#dgSummary li'); ok(await p.locator('#dgGo').count(), 'fichier DEGIRO → import DEGIRO'); await p.evaluate(() => closeModal());
+    const TR = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,10,265.7,-2657,-1,,EUR,,,,,sap-1\n';
+    await via('export.csv', TR); await p.waitForSelector('#xGo'); eq(await p.locator('#dgGo').count(), 0, 'export Trade Republic → import de transactions, pas DEGIRO'); await p.evaluate(() => closeModal());
+    await via('positions.csv', 'Produit;Code ISIN;Quantité\nAcme;FR0000120073;10\nBeta;FR0000121014;5\n'); await p.waitForSelector('#mGo'); await p.evaluate(() => closeModal());
+    await via('inconnu.csv', 'foo;bar\n1;2\n3;4\n'); await p.waitForSelector('#urManual'); ok(/Relevé non reconnu/.test(await p.locator('.modal').innerText()), 'relevé illisible : message clair'); ok(/Rien n'a été modifié/i.test(await p.locator('.modal').innerText()), 'rien n\'a été modifié');
+    await p.click('#urManual'); await p.waitForSelector('#hName'); ok(true, 'saisie des positions à la main proposée');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('import DEGIRO : récapitulatif, confirmation, positions détenues créées avec PRU, soldées archivées, opérations conservées, cours passés récupérés', async () => {
     RELAY.old = false;
     const p = await device({ guest: true }); await p.open(); await dgOpen(p, DG_CSV);

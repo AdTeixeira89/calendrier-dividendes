@@ -52,9 +52,7 @@ function wireDo(host) {
   $$('[data-do]', host).forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.do;
     if (a === 'add') openHoldingModal(null);
-    else if (a === 'import') openImportPositions();
-    else if (a === 'import-tx') openImportTransactions();
-    else if (a === 'import-degiro') openImportDegiro();
+    else if (a === 'import' || a === 'import-tx' || a === 'import-degiro') openImport();
     else if (a === 'new-account') openNewAccountModal();
     else if (a === 'check-history') openDiagnostic();
     else if (a === 'export-csv') openCsvExport();

@@ -98,20 +98,52 @@ async function routeImport(want) {
     renderTxMapping(data.rows, guessHeaderRow(data.rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {}); return;
   }
   let kind = sniffImport(data.rows);
-  if (kind === 'history' && want === 'generic' && Ledger.detect(data.rows).cols.type !== undefined) kind = 'unknown';      // colonne « type » (Trade Republic…) : import générique, qui gère aussi les dividendes
+  const src = identifySource(data.rows, kind, file.name);
+  let typedHistory = false;
+  if (kind === 'history' && (want === 'generic' || want === 'auto') && Ledger.detect(data.rows).cols.type !== undefined) { kind = 'unknown'; typedHistory = true; }      // colonne « type » (Trade Republic…) : import générique, qui gère aussi les dividendes
   if (kind === 'history') {
-    if (want !== 'history') toast('Fichier d\'historique de transactions reconnu : ouverture de l\'import DEGIRO.');
+    if (want === 'auto') toast('Relevé reconnu : ' + src.label + '.', { ms: 5000 }); else if (want !== 'history') toast('Fichier d\'historique de transactions reconnu : ouverture de l\'import DEGIRO.');
     renderDegiroModal(data.rows, data.enc, file.name, null, { text: data.text || null, size: data.size || file.size, pendingRef: null }); return;
   }
   if (kind === 'positions') {
-    if (want !== 'positions') toast('Relevé de portefeuille reconnu : ouverture de l\'import des positions.');
+    if (want === 'auto') toast('Relevé reconnu : ' + src.label + '.', { ms: 5000 }); else if (want !== 'positions') toast('Relevé de portefeuille reconnu : ouverture de l\'import des positions.');
     renderPositionsMapping(data.rows, guessHeaderRow(data.rows, [['symbole', 'symbol', 'ticker', 'isin', 'code'], ['quantite', 'quantity', 'nombre', 'qty', 'position', 'en portefeuille']])); return;
   }
   if (want === 'history') { renderDegiroModal(data.rows, data.enc, file.name, null, { text: data.text || null, size: data.size || file.size, pendingRef: null }); return; }   // colonnes à indiquer à la main
   if (want === 'positions') { renderPositionsMapping(data.rows, guessHeaderRow(data.rows, [['symbole', 'symbol', 'ticker', 'isin', 'code'], ['quantite', 'quantity', 'nombre', 'qty', 'position', 'en portefeuille']])); return; }
+  if (want === 'auto' && typedHistory) toast('Relevé reconnu : ' + src.label + '.', { ms: 5000 });
+  else if (want === 'auto') { openUnreadableImport(data.rows, file, data); return; }       // import unique : relevé non reconnu → choix des colonnes à la main ou saisie des positions à la main
   renderTxMapping(data.rows, guessHeaderRow(data.rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {});
 }
+/* IMPORT UNIQUE : un seul bouton pour tous les relevés. La source (DEGIRO, Trade Republic, relevé de positions…) est reconnue d'après le contenu du fichier, jamais d'après le bouton cliqué. */
+const openImport = () => routeImport('auto');
 const openImportDegiro = () => routeImport('history');
+
+/* Source du relevé d'après ses colonnes (jamais d'après le nom du fichier). Seuls les formats DEGIRO et Trade Republic sont validés sur de vrais fichiers ; les autres courtiers sont lus par le lecteur générique
+   (colonnes reconnues par leur sens : date, produit / ISIN, quantité, cours, montant) et, s'ils ne sont pas reconnus, proposés à la saisie à la main. */
+function identifySource(rows, kind, fileName) {
+  const heads = rows.slice(0, 8).map((r) => r.map(norm)), has = (k) => heads.some((r) => r.includes(k));
+  if (has('transaction_id') && (has('asset_class') || has('account_type'))) return { id: 'trade_republic', label: 'Trade Republic (export des transactions)' };
+  const det = Ledger.detect(rows);
+  if (det.statement) return { id: 'degiro_account', label: 'DEGIRO (relevé de compte : dividendes, retenues)' };
+  if (kind === 'history' && (det.cols.orderId !== undefined || det.cols.venue !== undefined || det.cols.exchange !== undefined || det.cols.localValue !== undefined)) return { id: 'degiro', label: 'DEGIRO (historique des transactions)' };
+  if (kind === 'history') return { id: 'generic_history', label: 'historique de transactions (format générique : colonnes reconnues par leur sens)' };
+  if (kind === 'positions') return { id: 'positions', label: 'relevé de portefeuille (ISIN et quantités)' };
+  return { id: 'unknown', label: 'format non reconnu' };
+}
+function openUnreadableImport(rows, file, data) {
+  const pdf = /^PDF/.test(data.enc || ''), txt = rows.slice(0, 40).map((r) => r.join(' ')).join(' ').toUpperCase();
+  const tr = pdf && /TRADE REPUBLIC/.test(txt);
+  const m = openModal('<h2>Relevé non reconnu</h2><div class="sub">« ' + esc(file.name) + ' » n\'a pas pu être identifié (DEGIRO, Trade Republic, relevé de portefeuille…). <b>Rien n\'a été modifié.</b></div>' +
+    (pdf ? '<div class="notice warn"><span>' + (tr ? 'Relevé PDF Trade Republic : la mise en page de ce PDF ne permet pas de retrouver de façon fiable les quantités et les prix de chaque ordre (certaines lignes n\'indiquent que le montant). ' : 'Les relevés PDF sont lus au mieux, mais leur mise en page ne permet pas toujours de retrouver quantités et prix. ') + 'Si votre courtier propose un export <b>CSV</b> ou Excel des transactions, utilisez-le : il est lu sans erreur.</span></div>' : '') +
+    '<p>Vous pouvez :</p><div class="btn-row" style="flex-direction:column;align-items:stretch;gap:8px">' +
+    '<button class="btn" type="button" id="urCols">Associer les colonnes à la main</button>' +
+    '<button class="btn primary" type="button" id="urManual">Saisir mes positions à la main</button></div>' +
+    '<div class="hint" style="margin-top:8px">La saisie à la main enregistre la quantité, le prix de revient et la date d\'achat de chaque position ; vous pourrez ensuite ajouter chaque achat dans la fiche (bouton « Achats »).</div>' +
+    '<div class="modal-actions"><span></span><button class="btn" type="button" data-close>Annuler</button></div>');
+  $('#urCols', m).onclick = () => { closeModal(); renderTxMapping(rows, guessHeaderRow(rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {}); };
+  $('#urManual', m).onclick = () => { closeModal(); openHoldingModal(null); };
+}
 
 function degiroDefaultAccount(rows, det) {
   // portefeuille qui contient déjà le plus des actifs du fichier ; à défaut un portefeuille « DEGIRO » ; à défaut le portefeuille affiché
@@ -397,7 +429,7 @@ function renderOperations(host) {
   const closedIds = new Set((state.archive || []).map((a) => a.id));
   const rows = opRows();
   const cfg = { id: 'ops', columns: opColumns(), rows, getId: (r) => r.id, selectable: false, sortKey: 'date', sortDir: -1, pageSize: 100,
-    empty: '<div class="card empty"><h3>Aucune opération' + (state.transactions.length ? ' pour ces filtres' : ' enregistrée') + '</h3><p>' + (state.transactions.length ? 'Modifiez les filtres.' : 'Importez l\'historique de vos transactions DEGIRO pour reconstituer vos achats, ventes, prix de revient et l\'évolution de votre portefeuille.') + '</p>' + (state.transactions.length ? '' : '<button class="btn primary" data-do="import-degiro" type="button">' + icon('upload') + 'Importer l\'historique DEGIRO</button>') + '</div>',
+    empty: '<div class="card empty"><h3>Aucune opération' + (state.transactions.length ? ' pour ces filtres' : ' enregistrée') + '</h3><p>' + (state.transactions.length ? 'Modifiez les filtres.' : 'Importez l\'historique de vos transactions DEGIRO pour reconstituer vos achats, ventes, prix de revient et l\'évolution de votre portefeuille.') + '</p>' + (state.transactions.length ? '' : '<button class="btn primary" data-do="import-degiro" type="button">' + icon('upload') + 'Importer un relevé</button>') + '</div>',
     footer: (rs) => { const cs = new Set(rs.map((r) => r.costCur)); const re = rs.filter((r) => r.realized != null).reduce((s, r) => s + r.realized, 0); return { date: rs.length + ' opération(s)', realized: cs.size === 1 && rs.some((r) => r.type === 'sell') ? '<span class="' + (re >= 0 ? 'pos' : 'neg') + '">' + (re >= 0 ? '+' : '') + fmtMoney(re, Array.from(cs)[0]) + '</span>' : '—' }; } };
   let detail = '';
   if (o.asset !== 'all') {
@@ -408,7 +440,7 @@ function renderOperations(host) {
       kpiCard('Résultat réalisé', led.realizedKnown ? (led.realized >= 0 ? '+' : '') + fmtMoney(led.realized, led.cur) : '—', led.realizedKnown ? 'sur les ventes' : 'données insuffisantes', led.realizedKnown ? (led.realized >= 0 ? 'income' : 'neg') : '') + '</div>';
   }
   host.innerHTML = pageHead('Mon portefeuille', state.holdings.length + ' position(s) · ' + (state.archive || []).filter((a) => !a.statementOnly).length + ' clôturée(s) · ' + state.transactions.length + ' opération(s)',
-    '<button class="btn" type="button" data-do="check-history">' + icon('check') + 'Contrôle de l\'historique</button><button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>') +
+    '<button class="btn" type="button" data-do="check-history">' + icon('check') + 'Contrôle de l\'historique</button><button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer un relevé</button>') +
     '<div class="toolbar">' + portTabsHtml() +
     '<select id="opAsset" aria-label="Actif" style="width:auto;max-width:200px"><option value="all">Tous les actifs</option>' + insts.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || x.displayTicker || x.ticker) + (closedIds.has(x.id) ? ' (clôturée)' : '') + '</option>').join('') + '</select>' +
     '<select id="opType" aria-label="Type" style="width:auto"><option value="all">Tous les types</option><option value="buy">Achats</option><option value="sell">Ventes</option><option value="other">Autres mouvements</option></select>' +
@@ -433,7 +465,7 @@ function renderClosed(host) {
       '<td class="r">' + (x.led.qty > 1e-8 ? '<span class="badge warn" title="L\'historique montre encore ' + esc(fmtNum(x.led.qty)) + ' titre(s) : la vente ou la liquidation n\'est pas enregistrée.">Non liquidée</span>' : x.led.realizedKnown ? '<b class="' + (x.led.realized >= 0 ? 'pos' : 'neg') + '">' + (x.led.realized >= 0 ? '+' : '') + fmtMoney(x.led.realized, x.led.cur) + '</b>' + (pct != null ? ' <small class="muted">' + fmtPct(pct, 1, true) + '</small>' : '') : '—') + '</td>' +
       '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + ' <button class="btn sm" type="button" data-delarch="' + esc(x.a.id) + '">Supprimer…</button></td></tr>';
   }).join('') + '</tbody></table></div>' : '<div class="card empty"><h3>Aucune position clôturée</h3><p>Les actifs entièrement vendus apparaissent ici (ils ne figurent plus dans les positions actuelles).</p></div>';
-  host.innerHTML = pageHead('Mon portefeuille', rows.length + ' position(s) entièrement vendue(s)', '<button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer l\'historique DEGIRO</button>') +
+  host.innerHTML = pageHead('Mon portefeuille', rows.length + ' position(s) entièrement vendue(s)', '<button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer un relevé</button>') +
     '<div class="toolbar">' + portTabsHtml() + '<span class="grow"></span></div>' + body + '<p class="hint" style="margin-top:8px">Ces positions restent dans l\'historique (calcul des résultats réalisés et reconstitution de l\'évolution passée du portefeuille). « Actualiser » récupère leurs cours passés.</p>';
   wirePortTabs(host); wireDo(host);
   $$('[data-liq]', host).forEach((b) => b.onclick = () => openLiquidationModal(b.dataset.liq));

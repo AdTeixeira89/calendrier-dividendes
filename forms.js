@@ -700,7 +700,7 @@ function holdingMatching(r, acc, same) {
   return state.holdings.find((h) => (same ? h.account === acc : h.account !== acc) && ((s && (String(h.isin || '').toUpperCase() === s || String(h.ticker).toUpperCase() === s)) || (nmn && norm(h.name) === nmn)));
 }
 function commitTransactions(p, o) {
-  if (!p.buys.length && !p.sells.length && !p.dividends.length) { toast('Aucune opération exploitable : vérifiez les colonnes choisies.', { error: true }); return; }
+  if (!p.buys.length && !p.sells.length && !p.dividends.length) { toast('Aucune opération exploitable : vérifiez les colonnes choisies, ou saisissez vos positions à la main.', { error: true, ms: 12000, action: { label: 'Saisir à la main', fn: () => { closeModal(); openHoldingModal(null); } } }); return; }
   const accOf = (r) => (r.acct && o.accMap && o.accMap[r.acct]) || o.acc;       // portefeuille de la ligne : celui du type de compte (PEA, CTO…) du fichier, sinon le portefeuille choisi
   const findHolding = (r) => {
     const s = r.sym.toUpperCase(), nmn = norm(r.name);
