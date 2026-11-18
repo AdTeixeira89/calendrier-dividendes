@@ -392,6 +392,15 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(s.transactions.length, 2, 'aucune opération créée ni dupliquée'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('export Trade Republic importé depuis « Importer l\'historique DEGIRO » : redirigé vers l\'import de transactions (type de compte → portefeuille), jamais l\'import DEGIRO', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,10,265.7,-2657,-1,,EUR,,,,,sap-1\n2025-04-07T09:00:00Z,2025-04-07,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,1,223.5,-223.5,-1,,EUR,,,,,sap-2\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportDegiro(); })]); await fc.setFiles(csvFile('tr.csv', csv));
+    await p.waitForSelector('#xGo', { timeout: 8000 }); eq(await p.locator('#dgGo').count(), 0, 'pas la fenêtre d\'import DEGIRO'); eq(await p.locator('[data-av="PEA"]').inputValue(), 'pea', 'type de compte PEA → portefeuille PEA');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

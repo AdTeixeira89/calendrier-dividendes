@@ -91,6 +91,12 @@ async function routeImport(want) {
   const file = await pickFile(IMPORT_ACCEPT); if (!file) return; lastImportName = file.name;
   let data; try { data = await readHistoryRows(file); } catch (e) { toast(e.message, { error: true }); return; }
   if (!data.rows.length) { toast('Fichier vide ou illisible.', { error: true }); return; }
+  // Export Trade Republic (colonnes transaction_id / asset_class) : toujours l'import de transactions (portefeuille choisi selon le type de compte PEA / CTO, identifiants d'ordre conservés),
+  // jamais l'import DEGIRO (autres identifiants d'opérations : les doublons ne seraient pas reconnus et les achats iraient dans le mauvais portefeuille)
+  if (data.rows.slice(0, 5).some((r) => { const h = r.map(norm); return h.includes('transaction_id') && (h.includes('asset_class') || h.includes('account_type')); })) {
+    if (want !== 'generic') toast('Export Trade Republic reconnu : ouverture de l\'import de transactions.', { ms: 5000 });
+    renderTxMapping(data.rows, guessHeaderRow(data.rows, [['date', 'datetime', 'time'], ['type', 'operation', 'transaction', 'category', 'description']]), {}); return;
+  }
   let kind = sniffImport(data.rows);
   if (kind === 'history' && want === 'generic' && Ledger.detect(data.rows).cols.type !== undefined) kind = 'unknown';      // colonne « type » (Trade Republic…) : import générique, qui gère aussi les dividendes
   if (kind === 'history') {
