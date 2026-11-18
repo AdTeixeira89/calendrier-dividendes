@@ -804,6 +804,12 @@
         cause: 'Le ' + p.date + ' : un achat et une vente de même montant, la vente portant sur tous les titres détenus. C\'est un split ' + lbl + ' que le courtier écrit comme un achat et une vente : lu tel quel, il crée un faux résultat réalisé et un prix de revient faux.',
         action: 'Traiter comme un split : le coût total reste inchangé (le PRU est divisé par ' + p.ratio + '), les deux opérations restent dans l\'historique. Une position saisie à la main n\'est pas modifiée.', act: ['apply_split_pair'] });
     });
+    findDuplicatePayments(state).forEach((p) => {
+      const x = insts.find(({ h }) => h.id === p.holdingId); if (!x) return; const h = x.h, f = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
+      push({ instId: p.holdingId, isin: holdingIsin(h), name: h.name || h.displayTicker || holdingIsin(h), level: 'warn', code: 'div_duplicate', txIds: [], payIds: [p.drop], pay: p,
+        cause: 'Dividende du ' + p.date + ' enregistré deux fois : ' + f(p.brokerGross) + ' € (import du courtier) et ' + f(p.manualGross) + ' € (saisie à la main). Ils comptent tous les deux dans vos dividendes perçus.',
+        action: 'Fusionner : le versement du courtier est conservé' + (p.manualGross > p.brokerGross + 0.011 ? ' avec le brut (' + f(p.manualGross) + ' €), la retenue et le net (' + f(p.brokerGross) + ' € perçus) déduits de la saisie' : '') + ' ; la saisie à la main est supprimée.', act: ['merge_div_dupes'] });
+    });
     // opérations enregistrées deux fois par deux voies d'import
     const dupGroups = {}; findDuplicateTx(state).forEach((p) => { (dupGroups[p.instId] = dupGroups[p.instId] || []).push(p); });
     Object.keys(dupGroups).forEach((id) => {
@@ -1043,7 +1049,38 @@
     return { ok: true, ratio: found.ratio, result: reevaluate(state, found.instId, deps) };
   }
 
+  /* VERSEMENTS EN DOUBLE : un même dividende enregistré deux fois, une fois par l'import du courtier (identifiant du courtier) et une fois à la main (sans identifiant), à moins de 4 jours d'écart.
+     Le montant du courtier est le montant crédité (souvent le NET) ; la saisie à la main porte souvent le BRUT. Compatible si brut(main) ≥ montant(courtier) et ≤ 1,5 × montant(courtier).
+     Deux versements portant TOUS DEUX un identifiant du courtier ne sont jamais associés (ex. dividende en numéraire + dividende en actions le même jour). Lecture seule. */
+  function findDuplicatePayments(state) {
+    const real = (p) => !p.estimated && p.verified !== false && p.source !== 'auto' && p.source !== 'market-history', day = (p) => Date.parse(p.payDate || p.exDate || '') / 86400000;
+    const ids = new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id)), out = [], used = new Set();
+    const pays = (state.payments || []).filter((p) => real(p) && ids.has(p.holdingId) && (p.payDate || p.exDate) && Number(p.gross) > 0), brokers = pays.filter((p) => p.extId), manual = pays.filter((p) => !p.extId);
+    const cands = [];
+    brokers.forEach((b) => manual.forEach((m) => {
+      if (m.holdingId !== b.holdingId) return; const dd = Math.abs(day(b) - day(m)), bg = Number(b.gross), mg = Number(m.gross);
+      if (dd <= 4 && mg >= bg - 0.011 && mg <= bg * 1.5 + 0.011) cands.push({ b, m, d: dd });
+    }));
+    cands.sort((x, y) => x.d - y.d).forEach((c) => { if (used.has(c.b.id) || used.has(c.m.id)) return; used.add(c.b.id); used.add(c.m.id); out.push({ holdingId: c.b.holdingId, keep: c.b.id, drop: c.m.id, brokerGross: Number(c.b.gross), manualGross: Number(c.m.gross), date: c.b.payDate || c.b.exDate }); });
+    return out;
+  }
+  /* Fusionne : le versement du courtier est conservé (identifiant d'origine). Si la saisie à la main portait un brut supérieur et que le versement du courtier n'avait ni retenue ni net,
+     le montant du courtier devient le NET perçu et la différence la retenue (révision conservée). La saisie à la main est supprimée. */
+  function mergeDuplicatePayments(state, dropIds) {
+    const ids = new Set(dropIds || []), pairs = findDuplicatePayments(state).filter((p) => ids.has(p.drop)); if (!pairs.length) return { ok: false, error: 'Aucun versement en double à fusionner.' };
+    const r2n = (x) => Math.round(x * 100) / 100, now = new Date().toISOString(); let merged = 0, enriched = 0;
+    pairs.forEach((p) => {
+      const b = state.payments.find((x) => x.id === p.keep), m = state.payments.find((x) => x.id === p.drop); if (!b || !m) return;
+      if (Number(m.gross) > Number(b.gross) + 0.011 && b.tax == null && b.net == null) {
+        b.revisions = (b.revisions || []).concat([{ at: now, kind: 'fusion', before: { gross: b.gross, tax: b.tax, net: b.net } }]);
+        const received = r2n(Number(b.gross)); b.gross = r2n(Number(m.gross)); b.net = received; b.tax = r2n(b.gross - received - Number(b.fees || 0)); if (Number(b.qty) > 0) b.perShare = Math.round(b.gross / Number(b.qty) * 10000) / 10000; enriched++;
+      }
+      state.payments = state.payments.filter((x) => x.id !== m.id); merged++;
+    });
+    return { ok: true, merged, enriched };
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

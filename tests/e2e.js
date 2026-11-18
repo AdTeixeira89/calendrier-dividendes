@@ -433,6 +433,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     s = await storeOf(p); eq(s.transactions.length, 0, 'aucun achat créé'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('dividende enregistré deux fois (ASML : import du courtier 9,59 € + saisie 11,28 €) : détecté dans le contrôle, fusionné en un clic (brut 11,28, retenue 1,69, net 9,59), compté une seule fois, annulable', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'a', ticker: 'ASML', displayTicker: 'ASML', isin: 'NL0010273215', name: 'ASML', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 6, avgCost: 678.15, price: 700, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
+      payments: [{ id: 'b', holdingId: 'a', payDate: '2026-11-04', gross: 9.59, tax: null, net: null, qty: 6, perShare: 1.5983, currency: 'EUR', source: 'csv', verified: true, extId: 'tr-1' }, { id: 'm', holdingId: 'a', payDate: '2026-11-04', gross: 11.28, qty: 6, perShare: 1.88, currency: 'EUR', source: 'manual', verified: true }] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1100 } }); await p.open();
+    ok(await p.evaluate(() => Dividends.summary(state, {}).count === 2), 'avant : deux versements comptés');
+    await p.evaluate(() => { go('portfolio'); openDiagnostic(); }); await p.waitForSelector('[data-diag="merge_div_dupes"]'); await p.click('[data-diag="merge_div_dupes"]'); await p.waitForTimeout(700); let s = await storeOf(p);
+    eq(s.payments.length, 1, 'un seul versement'); eq([s.payments[0].extId, s.payments[0].gross, s.payments[0].net, s.payments[0].tax], ['tr-1', 11.28, 9.59, 1.69], 'identifiant du courtier conservé ; brut 11,28, net 9,59, retenue 1,69');
+    ok(await p.evaluate(() => Dividends.summary(state, {}).count === 1), 'après : compté une seule fois');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p); eq(s.payments.length, 2, 'annulation : les deux versements sont restaurés'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

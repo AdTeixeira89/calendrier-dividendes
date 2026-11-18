@@ -537,4 +537,18 @@ t('split noté comme un achat et une vente (DEGIRO) : détecté, traité comme u
   const c = mk(); c.transactions.forEach((x) => { x.date = x.date === '2021-04-27' ? '2021-04-27' : x.date; }); c.holdings[0].isin = ''; assert.strictEqual(L.findSplitPairs(c).length, 0, 'sans ISIN : pas de proposition');
 });
 
+t('versements en double (import du courtier + saisie à la main) : détectés, fusionnés (brut / retenue / net déduits), deux versements du courtier le même jour jamais associés', () => {
+  const P = (id, gross, o) => Object.assign({ id, holdingId: 'a', payDate: '2026-11-04', gross, currency: 'EUR', source: 'csv', verified: true, qty: 6 }, o);
+  const mk = () => ({ holdings: [{ id: 'a', isin: 'NL0010273215', name: 'ASML', currency: 'EUR', account: 'p', quantity: 6, avgCost: 678 }], archive: [], corp: [], transactions: [],
+    payments: [P('b', 9.59, { extId: 'tr-1', tax: null, net: null }), P('m', 11.28, { source: 'manual', perShare: 1.88 })] });
+  const st = mk(), d = L.findDuplicatePayments(st); assert.deepStrictEqual(d.map((x) => [x.keep, x.drop]), [['b', 'm']]);
+  assert.ok(L.diagnose(st, { today: '2026-11-18' }).items.some((i) => i.code === 'div_duplicate' && i.act.indexOf('merge_div_dupes') >= 0), 'proposé dans le contrôle de l\'historique');
+  const r = L.mergeDuplicatePayments(st, ['m']); assert.ok(r.ok && r.merged === 1 && r.enriched === 1); assert.strictEqual(st.payments.length, 1);
+  const k = st.payments[0]; assert.deepStrictEqual([k.id, k.extId, k.gross, k.net, k.tax, k.perShare], ['b', 'tr-1', 11.28, 9.59, 1.69, 1.88], 'brut 11,28 ; net perçu 9,59 ; retenue 1,69'); assert.strictEqual(k.revisions.length, 1, 'révision conservée');
+  const eq = mk(); eq.payments[1].gross = 9.59; const r2 = L.mergeDuplicatePayments(eq, ['m']); assert.ok(r2.ok && r2.enriched === 0 && eq.payments[0].gross === 9.59, 'montants égaux : simple suppression de la saisie');
+  const two = mk(); two.payments = [P('b1', 27.83, { extId: 'tr-1' }), P('b2', 15.07, { extId: 'tr-2' })]; assert.strictEqual(L.findDuplicatePayments(two).length, 0, 'dividende en numéraire + en actions le même jour : jamais associés');
+  const far = mk(); far.payments[1].payDate = '2026-10-01'; assert.strictEqual(L.findDuplicatePayments(far).length, 0, 'plus de 4 jours d\'écart : pas associés');
+  const big = mk(); big.payments[1].gross = 30; assert.strictEqual(L.findDuplicatePayments(big).length, 0, 'montants incompatibles : pas associés');
+});
+
 console.log('\n' + n + ' tests réussis');
