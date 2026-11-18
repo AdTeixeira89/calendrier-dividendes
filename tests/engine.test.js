@@ -98,6 +98,16 @@ t('phase 1 : positionFor tient compte des splits VALIDÉS (state.corp) et donne 
   assert.strictEqual(sans.quantity, 3); assert.strictEqual(avec.quantity, 12); assert.ok(Math.abs(avec.avgCost - 50) < 1e-9, 'PRU = 600 / 12'); assert.strictEqual(avec.costCurrency, 'EUR', 'devise des montants du relevé, pas celle de la cotation (USD)');
   assert.strictEqual(E.positionFor({ transactions: [], corp: [] }, h).avgCost, null);
 });
+t('historique de valeur : une paire achat / vente validée comme split n\'est pas comptée deux fois (quantité 25, pas 75)', () => {
+  const months = []; for (let y = 2020, m = 12; y < 2026 || m <= 10; ) { months.push(1); m++; if (m > 12) { m = 1; y++; } if (y === 2026 && m > 10) break; }
+  const hist = { from: '2020-12', c: months.map(() => 40) };
+  const T = (id, d, type, q, p, amt) => ({ id, holdingId: 'v', date: d, type, qty: q, price: p, fees: 0, currency: 'EUR', amountAcct: amt, acctCur: 'EUR', source: 'degiro' });
+  const st = { holdings: [{ id: 'v', isin: 'DK0061539921', ticker: 'VWS', displayTicker: 'VWS', name: 'Vestas', type: 'stock', currency: 'EUR', quantity: 25, avgCost: 29.3, price: 40, account: 'a', hist, dividend: {} }], archive: [], payments: [], corp: [],
+    transactions: [T('1', '2020-12-07', 'buy', 3, 165, 499.2), T('2', '2021-04-27', 'buy', 15, 35.468, 532.02), T('3', '2021-04-27', 'sell', 3, 177.34, 532.02), T('4', '2023-09-14', 'buy', 5, 20.904, 109.42), T('5', '2023-11-02', 'buy', 3, 20.795, 67.28), T('6', '2024-01-23', 'buy', 2, 26.05, 57)] };
+  const Ld = require('../ledger.js'); Ld.applySplitPair(st, Ld.findSplitPairs(st)[0], { uid: () => 'c1', today: '2026-11-18' });
+  const h = E.portfolioHistory(st, (v) => v, { months: 0, today: new Date(2026, 9, 14) }), last = h.points[h.points.length - 1];
+  assert.strictEqual(last.value, 25 * 40, 'valeur finale = 25 titres × 40 (pas 75 × 40)'); assert.ok(h.points.filter((p) => p.date >= '2021-05-31' && p.date < '2023-09-01').every((p) => p.value === 15 * 40), '15 titres entre le split et l\'achat de septembre 2023');
+});
 t('monthly series splits received / upcoming / unrecorded', () => {
   const p = { id: 'p', holdingId: 'h', ticker: 'T', payDate: '2026-02-15', qty: 10, gross: 10, net: 10, currency: 'EUR' };
   const m = E.monthlySeries(st([mk({})], [p]), 2026, 'gross', conv, today);

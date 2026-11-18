@@ -370,6 +370,12 @@
   }
   const priceClose = (a, b) => Math.abs(a - b) <= Math.max(1e-4, Math.abs(b) * 1e-4);
   const qtyEq = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
+  /* MARGE D'ERREUR des contrôles (réglable : Paramètres) : sous ces écarts, une position est considérée cohérente. Elle ne change AUCUN calcul (quantité, PRU, résultat) : seulement ce qui est signalé comme anomalie.
+     Quantité : 0,01 titre par défaut (arrondi à 2 décimales d'un courtier, jamais un titre entier manquant). PRU : 3 % par défaut (frais d'achat inclus ou non selon le courtier). */
+  const MARGIN_DEFAULT = { pru: 0.03, qty: 0.01 };
+  const marginOf = (state) => { const m = (state && state.settings && state.settings.margin) || {}, ok = (v) => v !== '' && v != null && isFinite(Number(v)) && Number(v) >= 0; return { pru: ok(m.pru) ? Number(m.pru) : MARGIN_DEFAULT.pru, qty: ok(m.qty) ? Number(m.qty) : MARGIN_DEFAULT.qty }; };
+  const qtyNear = (a, b, state) => Math.abs(a - b) <= Math.max(1e-6 * Math.max(1, Math.abs(b)), marginOf(state).qty);
+  const pruNear = (a, b, state) => Math.abs(a - b) <= Math.max(0.005, Math.abs(b) * marginOf(state).pru);
 
   /* Montant d'une opération dans la devise du compte : montant enregistré, sinon quantité × prix ± frais ; INCONNU (null) si le prix n'a pas été saisi (jamais 0 par défaut). */
   function txAmount(t) {
@@ -383,7 +389,7 @@
   }
   /* Entrées du grand livre d'un actif enregistré : ses transactions + ses opérations sur titres. Montants dans UNE devise (celle de la première opération). */
   function entriesFor(state, inst) {
-    const txs = (state.transactions || []).filter((t) => t.holdingId === inst.id && (t.type === 'buy' || t.type === 'sell') && t.date);
+    const txs = (state.transactions || []).filter((t) => t.holdingId === inst.id && (t.type === 'buy' || t.type === 'sell') && t.date && !t.splitPair);      // une paire « split » validée est représentée par l'opération sur titres
     const cc = (t) => t.acctCur || t.currency || 'EUR';
     const first = txs.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0], cur = first ? cc(first) : 'EUR';
     const entries = txs.map((t) => {
@@ -433,18 +439,18 @@
       const name = (list.find((o) => o.name) || {}).name || '';
       const found = findExisting(st2, key, name, account), refObj = found ? found.ref : null;
       const existing = refObj ? txs.filter((t) => t.holdingId === refObj.id && (t.type === 'buy' || t.type === 'sell')) : [];
-      const used = new Set();
+      const used = new Set(), skipPair = new Set(), pairExt = new Set(existing.filter((t) => t.splitPair && t.extId).map((t) => t.extId));
       const dupOps = [], newOps = [];
       list.forEach((o) => {
-        if (byExt.has(o.extId)) { dupOps.push(o); return; }
+        if (byExt.has(o.extId)) { dupOps.push(o); if (pairExt.has(o.extId)) skipPair.add(o); return; }
         // même opération déjà saisie autrement (autre source) : comparaison un pour un, jamais « même jour = doublon »
         const j = existing.findIndex((t, idx) => !used.has(idx) && t.date === o.date && t.type === o.type && Math.abs(Number(t.qty) - o.qty) < EPS && priceClose(Number(t.price), o.price));
-        if (j >= 0) { used.add(j); dupOps.push(o); } else newOps.push(o);
+        if (j >= 0) { used.add(j); dupOps.push(o); if (existing[j].splitPair) skipPair.add(o); } else newOps.push(o);
       });
       const fileIds = new Set(list.map((o) => o.extId)), cur0 = last.acctCur;
       // historique connu = opérations du fichier + opérations déjà enregistrées que ce fichier ne contient pas (autre source, ancien export)
-      const extra = existing.filter((t, idx) => !used.has(idx) && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? txAmount(t) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
-      const entries = list.map((o) => ({ date: o.date, time: o.time, type: o.zero ? (o.type === 'buy' ? 'grant' : 'retire') : o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
+      const extra = existing.filter((t, idx) => !used.has(idx) && !t.splitPair && !(t.extId && fileIds.has(t.extId))).map((t) => ({ date: t.date, time: t.time || '', type: t.corp ? (t.type === 'buy' ? 'grant' : 'retire') : t.type, qty: Number(t.qty), amt: (t.acctCur || t.currency) === cur0 ? txAmount(t) : null, fees: Number(t.fees || 0), line: 'enregistrée' }));
+      const entries = list.filter((o) => !skipPair.has(o)).map((o) => ({ date: o.date, time: o.time, type: o.zero ? (o.type === 'buy' ? 'grant' : 'retire') : o.type, qty: o.qty, amt: o.amt, fees: o.fees, extId: o.extId, price: o.price, priceCur: o.priceCur, line: o.line }))
         .concat(extra, corpEntries(st2, isNameKey(key) ? '' : key));
       const led = run(entries);
       const inst = { key, isin: isNameKey(key) ? '' : key, name, ops: list, newOps, dupOps, led, include: true, ref: found, currency: last.priceCur, acctCur: last.acctCur, venue: last.venue || '',
@@ -462,14 +468,14 @@
       // Position déjà dans l'application : jamais modifiée sans choix explicite
       const h = found.ref, hq = Number(h.quantity) || 0;
       inst.status = 'holding';
-      const qtyOk = qtyEq(led.qty, hq);
+      const qtyOk = qtyNear(led.qty, hq, state);
       if (h.derived === true && !h.manual && v.code === 'open') {          // position calculée par l'import : recalculée depuis les transactions (jamais une position saisie ou corrigée à la main)
         inst.recompute = !qtyOk || (led.pru != null && !(Math.abs((Number(h.avgCost) || 0) - led.pru) < 1e-4));
         if (inst.recompute) inst.update = { from: hq, to: led.qty, pruFrom: Number(h.avgCost) || null, pruTo: led.pru };
       } else if (!qtyOk) inst.divergence = { app: hq, file: led.qty, diff: r8(led.qty - hq) };
       const hAvg = Number(h.avgCost) > 0 ? Number(h.avgCost) : null, hCostCur = h.costCurrency || h.currency || 'EUR';
       if (hAvg == null && led.pru != null && qtyOk && !inst.recompute) inst.fill.avgCost = { value: led.pru, cur: inst.acctCur };
-      if (!inst.recompute && hAvg != null && led.pru != null && hCostCur === inst.acctCur && qtyOk && Math.abs(hAvg - led.pru) > Math.max(0.005, hAvg * 0.002)) inst.pruDiff = { app: hAvg, file: led.pru, cur: inst.acctCur };
+      if (!inst.recompute && hAvg != null && led.pru != null && hCostCur === inst.acctCur && qtyOk && !pruNear(hAvg, led.pru, state)) inst.pruDiff = { app: hAvg, file: led.pru, cur: inst.acctCur };
       if (!h.isin && inst.isin) inst.fill.isin = inst.isin;
       if (!h.name && name) inst.fill.name = name;
       if (existing.length && existing.reduce((s, t) => s + (t.type === 'buy' ? 1 : -1) * Number(t.qty || 0), 0) !== hq && newOps.length) inst.reasons.push('Historique existant incomplet : les opérations manquantes seront ajoutées.');
@@ -757,7 +763,7 @@
       }
       const led = run(entries), r = ref.map.get(key), base = { instId: h.id, isin, name: h.name || h.displayTicker || isin };
       const hq = kind === 'holding' ? Number(h.quantity) || 0 : 0;
-      rows.push({ id: h.id, isin, name: base.name, kind, app: hq, calc: led.qty, ref: r ? r.qty : null, tx: txs.length, ok: led.negative ? false : (kind === 'holding' ? (qtyEq(led.qty, hq) && (!r || ref.mode !== 'file' || qtyEq(r.qty, led.qty))) : (led.qty <= EPS || !!h.check ? null : false)) });
+      rows.push({ id: h.id, isin, name: base.name, kind, app: hq, calc: led.qty, ref: r ? r.qty : null, tx: txs.length, ok: led.negative ? false : (kind === 'holding' ? (qtyNear(led.qty, hq, state) && (!r || ref.mode !== 'file' || qtyNear(r.qty, led.qty, state))) : (led.qty <= EPS || !!h.check ? null : false)) });
       if (led.negative) {
         const t = txs.filter((x) => x.type === 'sell').map((x) => x.id);
         push(Object.assign({}, base, { level: 'error', code: 'negative', txIds: t, cause: 'Quantité calculée négative : les ventes dépassent les achats connus. Causes probables : split ou regroupement non présent dans le CSV, changement d\'ISIN (l\'achat est sous l\'ancien ISIN), historique incomplet.',
@@ -767,11 +773,11 @@
         if (h.derived && led.qty <= EPS && !led.negative) push(Object.assign({}, base, { code: 'zero_held', cause: 'Quantité calculée nulle (position entièrement vendue) mais l\'actif figure encore dans le portefeuille actuel.', action: 'Archiver : la position quitte le portefeuille actuel, ses opérations restent dans l\'historique.', act: ['archive'] }));
         if (ref.map.size && isin && !r && h.derived) push(Object.assign({}, base, { level: 'error', code: 'not_in_ref', cause: 'Position calculée à partir de l\'historique, absente de vos positions réelles. Causes probables : ancienne position (changement d\'ISIN, fusion, radiation), vente ou split non visibles dans le CSV.',
           action: 'Archiver cette position (rien n\'est supprimé), ou la fusionner avec l\'ISIN actuel.', act: ['archive', 'alias', 'removal'] }));
-        if (r && !led.negative && led.qty > EPS && !qtyEq(led.qty, r.qty)) push(Object.assign({}, base, { level: 'error', code: 'qty_ref', txIds: txs.map((x) => x.id), cause: 'Quantité calculée ' + led.qty + ' ≠ position réelle ' + r.qty + '. Cause probable : split ou regroupement absent du CSV (ou transaction manquante).',
+        if (r && !led.negative && led.qty > EPS && !qtyNear(led.qty, r.qty, state)) push(Object.assign({}, base, { level: 'error', code: 'qty_ref', txIds: txs.map((x) => x.id), cause: 'Quantité calculée ' + led.qty + ' ≠ position réelle ' + r.qty + '. Cause probable : split ou regroupement absent du CSV (ou transaction manquante).',
           action: 'Rechercher un split (Yahoo) ; sinon vérifier les transactions de cet actif.', act: ['search_split', 'manual_split'] }));
-        else if (hq > 0 && led.qty > EPS && !qtyEq(led.qty, hq) && !led.negative && (!r || !qtyEq(r.qty, led.qty)) && h.derived && !h.manual) push(Object.assign({}, base, { code: 'qty_app', cause: 'Quantité enregistrée ' + hq + ' ≠ quantité recalculée ' + led.qty + '.', action: 'Recalculer la position à partir des transactions.', act: ['recompute'] }));
+        else if (hq > 0 && led.qty > EPS && !qtyNear(led.qty, hq, state) && !led.negative && (!r || !qtyNear(r.qty, led.qty, state)) && h.derived && !h.manual) push(Object.assign({}, base, { code: 'qty_app', cause: 'Quantité enregistrée ' + hq + ' ≠ quantité recalculée ' + led.qty + '.', action: 'Recalculer la position à partir des transactions.', act: ['recompute'] }));
         const pr = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
-        if (pr != null && led.pru != null && qtyEq(led.qty, hq) && (h.costCurrency || h.currency || 'EUR') === cur && Math.abs(pr - led.pru) > Math.max(0.005, pr * 0.002)) push(Object.assign({}, base, { code: 'pru_diff', cause: 'PRU enregistré ' + pr.toFixed(2) + ' ≠ PRU recalculé ' + led.pru.toFixed(2) + ' ' + cur + (h.derived ? '' : ' (PRU saisi à la main : conservé)') + '.',
+        if (pr != null && led.pru != null && qtyNear(led.qty, hq, state) && (h.costCurrency || h.currency || 'EUR') === cur && !pruNear(pr, led.pru, state)) push(Object.assign({}, base, { code: 'pru_diff', cause: 'PRU enregistré ' + pr.toFixed(2) + ' ≠ PRU recalculé ' + led.pru.toFixed(2) + ' ' + cur + (h.derived ? '' : ' (PRU saisi à la main : conservé)') + '.',
           action: h.derived && !h.manual ? 'Recalculer la position à partir des transactions.' : 'Aucune : le PRU saisi est protégé ; aligner seulement si vous le souhaitez.', act: h.derived && !h.manual ? ['recompute'] : [] }));
       } else if (h.check && verdict(led, key, ref).code === 'open') {
         push(Object.assign({}, base, { level: 'info', code: 'promote_ok', txIds: [], cause: 'Quantité calculée ' + led.qty + ' confirmée par vos positions réelles : cet actif peut rejoindre le portefeuille actuel.', action: 'Ajouter au portefeuille actuel (quantité et PRU calculés).', act: ['promote'] }));
@@ -780,9 +786,9 @@
       const first = led.first;
       const zeroMoves = txs.filter((t) => t.corp).map((t) => t.date);
       const cands = (h.splits || []).filter((s) => first && s.date >= first && s.date <= today && !zeroMoves.some((d0) => Math.abs(Date.parse(d0) - Date.parse(s.date)) < 10 * 86400000) && !(state.corp || []).some((c) => c.isin === key && c.kind === 'split' && Math.abs(Date.parse(c.date) - Date.parse(s.date)) < 5 * 86400000));
-      if (cands.length && (led.negative || (r && led.qty > EPS && !qtyEq(led.qty, r.qty)) || (kind === 'archive' && h.check))) {
+      if (cands.length && (led.negative || (r && led.qty > EPS && !qtyNear(led.qty, r.qty, state)) || (kind === 'archive' && h.check))) {
         const sim = run(entries.concat(cands.map((s) => ({ date: s.date, time: '', type: 'split', qty: 0, ratio: s.ratio, amt: null }))));
-        const coherent = !sim.negative && (r ? qtyEq(sim.qty, r.qty) : true);
+        const coherent = !sim.negative && (r ? qtyNear(sim.qty, r.qty, state) : true);
         push(Object.assign({}, base, { level: coherent ? 'info' : 'warn', code: 'split_candidate', cause: 'Split(s) trouvé(s) dans les données de marché : ' + cands.map((s) => s.ratio + ' pour 1 le ' + s.date).join(' ; ') + '. Avec ce split la quantité calculée serait ' + sim.qty + (r ? ' (position réelle : ' + r.qty + ')' : '') + (coherent ? ' : cohérent.' : ' : toujours incohérent.'),
           action: coherent ? 'Valider le split pour recalculer la quantité et le PRU (le coût total reste inchangé).' : 'Vérifier avant d\'appliquer : le split seul ne suffit pas.', act: coherent ? ['apply_split'] : ['manual_split'], splits: cands, coherent }));
       }
@@ -791,6 +797,12 @@
       const wn = txs.filter((t) => t.warn && t.warn.length);
       if (wn.length) push(Object.assign({}, base, { level: 'info', code: 'tx_warn', txIds: wn.map((x) => x.id), cause: wn.length + ' transaction(s) importée(s) avec alerte : ' + Array.from(new Set([].concat.apply([], wn.map((x) => x.warn)))).slice(0, 3).join(' ; ') + '.', action: 'Contrôler ces lignes dans le CSV d\'origine.' }));
       if (led.cycles > 1) push(Object.assign({}, base, { level: 'info', code: 'cycles', cause: 'Position clôturée puis rachetée : ' + led.cycles + ' cycles distincts, le PRU actuel ne reprend que le dernier cycle.', action: 'Aucune.' }));
+    });
+    findSplitPairs(state).forEach((p) => {
+      const x = insts.find(({ h }) => h.id === p.instId); if (!x) return; const h = x.h, lbl = p.ratio >= 1 ? p.ratio + ' pour 1' : '1 pour ' + r8(1 / p.ratio);
+      push({ instId: p.instId, isin: p.isin, name: h.name || h.displayTicker || p.isin, level: 'warn', code: 'split_pair', txIds: [p.buyId, p.sellId], pair: p,
+        cause: 'Le ' + p.date + ' : un achat et une vente de même montant, la vente portant sur tous les titres détenus. C\'est un split ' + lbl + ' que le courtier écrit comme un achat et une vente : lu tel quel, il crée un faux résultat réalisé et un prix de revient faux.',
+        action: 'Traiter comme un split : le coût total reste inchangé (le PRU est divisé par ' + p.ratio + '), les deux opérations restent dans l\'historique. Une position saisie à la main n\'est pas modifiée.', act: ['apply_split_pair'] });
     });
     // opérations enregistrées deux fois par deux voies d'import
     const dupGroups = {}; findDuplicateTx(state).forEach((p) => { (dupGroups[p.instId] = dupGroups[p.instId] || []).push(p); });
@@ -998,7 +1010,40 @@
     return res;
   }
 
+  /* SPLITS ÉCRITS COMME UN ACHAT ET UNE VENTE : DEGIRO note certains splits (ex. 5 pour 1) comme la vente de tous les anciens titres et l'achat des nouveaux, le même jour, pour le même montant.
+     Lus tels quels, ils créent un faux résultat réalisé et un PRU faux. findSplitPairs est en lecture seule : même position (ISIN connu), même date, UN achat et UNE vente de même montant,
+     la vente portant sur TOUS les titres détenus, cours de la vente / cours de l'achat = ratio. Rien n'est appliqué sans la décision de l'utilisateur. */
+  function findSplitPairs(state) {
+    const out = [];
+    (state.holdings || []).concat(state.archive || []).forEach((inst) => {
+      const isin = holdingIsin(inst); if (!isin) return;
+      const { entries, txs } = entriesFor(state, inst), byDate = {};
+      txs.forEach((t) => { (byDate[t.date] = byDate[t.date] || []).push(t); });
+      Object.keys(byDate).forEach((d) => {
+        const day = byDate[d], buys = day.filter((t) => t.type === 'buy' && !t.corp), sells = day.filter((t) => t.type === 'sell' && !t.corp); if (buys.length !== 1 || sells.length !== 1) return;
+        const b = buys[0], s = sells[0], ab = Math.abs(txAmount(b) || 0), as = Math.abs(txAmount(s) || 0);
+        if (!(ab > 0) || Math.abs(ab - as) > Math.max(0.05, ab * 0.01)) return;
+        const before = run(entries.filter((e) => e.date < d)).qty;
+        if (!(before > EPS) || Math.abs(before - Number(s.qty)) > 1e-6 * Math.max(1, before)) return;
+        const ratio = Number(b.qty) / Number(s.qty); if (!(ratio > 0) || Math.abs(ratio - 1) < 1e-6) return;
+        const pb = Number(b.price), ps = Number(s.price); if (pb > 0 && ps > 0 && Math.abs(ps / pb - ratio) > 0.02 * ratio) return;
+        out.push({ instId: inst.id, isin, date: d, ratio: r8(ratio), buyId: b.id, sellId: s.id });
+      });
+    });
+    return out;
+  }
+  /* Enregistre le split (opération sur titres validée) et marque les deux opérations d'origine : elles restent dans l'historique, mais le grand livre les remplace par le split
+     (le coût total est conservé, le PRU est divisé par le ratio, aucun résultat réalisé). Les positions saisies à la main ne sont jamais modifiées (seul le grand livre change). */
+  function applySplitPair(state, pair, deps) {
+    const found = findSplitPairs(state).find((p) => p.buyId === (pair && pair.buyId) && p.sellId === (pair && pair.sellId)); if (!found) return { ok: false, error: 'Cette paire achat / vente n\'est plus reconnue comme un split.' };
+    const b = state.transactions.find((t) => t.id === found.buyId), s = state.transactions.find((t) => t.id === found.sellId), id = deps.uid();
+    state.corp = state.corp || [];
+    state.corp.push({ id, isin: found.isin, date: found.date, kind: 'split', ratio: found.ratio, validated: true, at: deps.today, source: 'split-pair', note: 'Split noté par le courtier comme un achat et une vente (même jour, même montant)', txIds: [found.buyId, found.sellId] });
+    b.splitPair = id; s.splitPair = id;
+    return { ok: true, ratio: found.ratio, result: reevaluate(state, found.instId, deps) };
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

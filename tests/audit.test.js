@@ -59,7 +59,15 @@ t('quantité enregistrée arrondie à 2 décimales : le split de marché est rec
 });
 t('un split de marché antérieur au premier achat n\'explique rien et n\'est pas proposé comme explication', () => {
   const s = { accounts: [{ id: 'a', name: 'TR' }], holdings: [H('h9', { quantity: 12.51, avgCost: 83.94, splits: [{ date: '2021-07-20', ratio: 4 }] })], transactions: [tx('n1', 'h9', '2023-03-16', 'buy', 0.735903, 441.63), tx('n2', 'h9', '2025-01-10', 'buy', 5.149386, 140.79)], payments: [], corp: [{ id: 'c', isin: 'FR0000000009', date: '2024-06-10', kind: 'split', ratio: 10, validated: true }] };
-  s.holdings[0].isin = 'FR0000000009'; const p = A.positions(s).divergent[0]; assert.ok(p, 'divergente'); assert.ok(!p.hints.some((x) => /×4/.test(x)), p.hints.join(' | '));
+  s.holdings[0].isin = 'FR0000000009';
+  assert.strictEqual(A.positions(s).coherent.length, 1, 'marge d\'erreur par défaut : 12,51 enregistré contre 12,5084 calculé = cohérente (arrondi à 2 décimales)');
+  s.settings = { margin: { qty: 0, pru: 0 } }; const p = A.positions(s).divergent[0]; assert.ok(p, 'divergente sans marge'); assert.ok(!p.hints.some((x) => /×4/.test(x)), p.hints.join(' | '));
+});
+t('marge d\'erreur : PRU à 2,7 % (frais) cohérent par défaut, divergent au-delà ; un titre entier manquant n\'est jamais toléré ; marge réglable', () => {
+  const mkS = (avg, qty, margin) => ({ settings: margin ? { margin } : {}, accounts: [{ id: 'a', name: 'DEGIRO' }], holdings: [H('h9', { quantity: qty, avgCost: avg })], transactions: [tx('m1', 'h9', '2024-01-10', 'buy', 10, 100, 0)], payments: [], corp: [] });
+  assert.strictEqual(A.positions(mkS(102.7, 10)).coherent.length, 1, 'PRU +2,7 % : dans la marge de 3 %'); assert.strictEqual(A.positions(mkS(104, 10)).divergent.length, 1, 'PRU +4 % : hors marge');
+  assert.strictEqual(A.positions(mkS(100, 9)).divergent.length, 1, 'un titre entier manquant : toujours signalé'); assert.strictEqual(A.positions(mkS(100, 10.005)).coherent.length, 1, '0,005 titre : arrondi toléré');
+  assert.strictEqual(A.positions(mkS(104, 10, { pru: 0.05 })).coherent.length, 1, 'marge PRU portée à 5 %'); assert.strictEqual(A.positions(mkS(102.7, 10, { pru: 0, qty: 0 })).divergent.length, 1, 'marge 0 : comportement strict');
 });
 t('divergente par PRU (quantités identiques)', () => { const p = find(A.positions(mk()), 'h4'); assert.deepStrictEqual(p.reasons, ['pru']); assert.strictEqual(p.qtyDiff, 0); assert.strictEqual(p.ledgerPru, 100); assert.strictEqual(p.pruDiff, 20); assert.ok(Math.abs(p.pruDiffPct - 0.2) < 1e-9); });
 t('PRU absent mais calculable ; devise du coût différente ; solde négatif ; achat sans montant', () => {

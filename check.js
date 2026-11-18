@@ -7,7 +7,7 @@
 
 const DIAG_LVL = { error: ['Anomalie', 'warn'], warn: ['À vérifier', 'warn'], info: ['Information', 'info'] };
 
-const DIAG_BTN = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null], fix_tx: ['Saisir la date / le montant…', null], del_tx: ['Supprimer ces opérations…', null], remove_dupes: ['Supprimer les doublons', null] };
+const DIAG_BTN = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null], fix_tx: ['Saisir la date / le montant…', null], del_tx: ['Supprimer ces opérations…', null], remove_dupes: ['Supprimer les doublons', null], apply_split_pair: ['Traiter comme un split', 'check'] };
 const diagActLabel = (a, it) => (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + fmtDate(s.date) + ')').join(', ') : (DIAG_BTN[a] || [a])[0]);
 /* Ignore durablement une anomalie (elle ne revient que si la situation change) ; rétablissable dans le contrôle de l'historique. */
 function diagIgnore(it) { state.ignored = state.ignored || {}; state.ignored[it.sig] = { at: new Date().toISOString(), code: it.code, name: it.name || '' }; saveState(); }
@@ -33,7 +33,7 @@ function openDiagnostic() {
   const btn = DIAG_BTN;
   const items = d.items.map((it, n) => {
     const lv = DIAG_LVL[it.level], tx = it.txIds.slice(0, 5).map(diagTxLabel).filter(Boolean);
-    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'archive' || a === 'set_ref_qty' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + diagActLabel(a, it).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</button>').join('');
+    const acts = it.act.map((a) => '<button class="btn sm' + (a === 'apply_split' || a === 'apply_split_pair' || a === 'archive' || a === 'set_ref_qty' ? ' primary' : '') + '" type="button" data-diag="' + a + '" data-n="' + n + '">' + diagActLabel(a, it).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</button>').join('');
     return '<div class="diag-item lvl-' + it.level + '"><div class="diag-h"><span class="badge ' + lv[1] + '">' + lv[0] + '</span> <b>' + esc(it.name || '—') + '</b>' + (it.isin ? ' <small class="muted">' + esc(it.isin) + '</small>' : '') + '</div>' +
       '<div class="diag-line"><b>Cause probable :</b> ' + esc(it.cause) + '</div><div class="diag-line"><b>Action recommandée :</b> ' + esc(it.action || '—') + '</div>' +
       (tx.length ? '<div class="diag-line muted"><b>Transactions concernées :</b> ' + tx.map(esc).join(' ; ') + (it.txIds.length > 5 ? ' … (+' + (it.txIds.length - 5) + ')' : '') + '</div>' : '') + '<div class="btn-row" style="margin-top:8px">' + acts + '<button class="btn sm ghost" type="button" data-ign="' + n + '" title="Masquer cette anomalie sans rien modifier. Elle réapparaîtra si la situation change.">Ignorer</button></div></div>';
@@ -119,6 +119,7 @@ async function diagAct(kind, it) {
         diagCommit('Actifs fusionnés', () => Ledger.mergeInstruments(state, from, to, diagDeps())); });
     return;
   }
+  if (kind === 'apply_split_pair') { diagCommit('Split enregistré : ' + it.name, () => Ledger.applySplitPair(state, it.pair, diagDeps())); return; }
   if (kind === 'remove_dupes') { diagCommit('Doublons supprimés : ' + it.name, () => Ledger.removeDuplicateTx(state, it.txIds)); return; }
   if (kind === 'archive') { diagCommit('Position archivée : ' + it.name, () => Ledger.demote(state, it.instId, it.code, it.cause, diagDeps())); return; }
   if (kind === 'promote') { diagCommit('Position ajoutée au portefeuille actuel : ' + it.name, () => Ledger.promote(state, it.instId, diagDeps()), () => { const h = state.holdings.find((x) => x.id === it.instId); if (h && state.settings.relayUrl) refreshMarket([h], { silent: true }); }); return; }

@@ -511,4 +511,30 @@ t('doublons d\'import (identifiant DEGIRO « dg: » + identifiant du courtier) :
   assert.strictEqual(L.removeDuplicateTx(mk(), ['1']).ok, false, 'on ne supprime jamais l\'opération du courtier');
 });
 
+t('marge d\'erreur du contrôle de l\'historique : arrondi de quantité et PRU à 2,7 % ne sont plus signalés ; marge nulle = comportement strict ; un titre entier manquant toujours signalé', () => {
+  const T = (id, d, q, p) => ({ id, holdingId: 'h', date: d, type: 'buy', qty: q, price: p, fees: 0, currency: 'EUR', amountAcct: q * p, acctCur: 'EUR', source: 'csv', extId: 'x' + id });
+  const mk = (qty, avg, margin) => ({ settings: margin ? { margin } : {}, holdings: [{ id: 'h', isin: 'FR0000000001', name: 'A', currency: 'EUR', costCurrency: 'EUR', account: 'a', quantity: qty, avgCost: avg }], archive: [], corp: [], transactions: [T('1', '2024-01-10', 10.008416, 100)] });
+  const codes = (st) => L.diagnose(st, { today: '2026-11-18' }).items.filter((i) => i.instId === 'h').map((i) => i.code).sort();
+  assert.deepStrictEqual(codes(mk(10.01, 102.7)), [], 'quantité à 0,0016 près et PRU à +2,7 % : cohérent');
+  assert.ok(codes(mk(10.01, 100, { qty: 0, pru: 0 })).indexOf('qty_ref') >= 0, 'marge nulle : écart de quantité signalé');
+  assert.ok(codes(mk(10.01, 102.7, { qty: 0.01, pru: 0 })).indexOf('pru_diff') >= 0, 'marge PRU nulle : écart de PRU signalé');
+  assert.ok(codes(mk(9.008416, 100)).indexOf('qty_ref') >= 0, 'un titre entier manquant : toujours signalé');
+  assert.strictEqual(L.marginOf({}).pru, 0.03); assert.strictEqual(L.marginOf({ settings: { margin: { pru: null, qty: '' } } }).qty, 0.01, 'valeurs vides : marge par défaut');
+});
+
+t('split noté comme un achat et une vente (DEGIRO) : détecté, traité comme un split à la demande (PRU et résultat corrigés), position saisie à la main jamais modifiée', () => {
+  const T = (id, d, type, q, p, amt) => ({ id, holdingId: 'v', date: d, type, qty: q, price: p, fees: 0, currency: 'EUR', amountAcct: amt, acctCur: 'EUR', source: 'degiro', extId: 'dg:' + id });
+  const mk = () => ({ holdings: [{ id: 'v', isin: 'DK0061539921', name: 'Vestas', currency: 'DKK', costCurrency: 'EUR', account: 'a', quantity: 25, avgCost: 28.56, manual: true }], archive: [], corp: [], settings: {},
+    transactions: [T('1', '2020-12-07', 'buy', 3, 165, 499.2), T('2', '2021-04-27', 'buy', 15, 35.468, 532.02), T('3', '2021-04-27', 'sell', 3, 177.34, 532.02), T('4', '2023-09-14', 'buy', 5, 20.904, 109.42), T('5', '2023-11-02', 'buy', 3, 20.795, 67.28), T('6', '2024-01-23', 'buy', 2, 26.05, 57)] });
+  const st = mk(), led0 = L.run(L.entriesFor(st, st.holdings[0]).entries); assert.ok(Math.abs(led0.pru - 43.722) < 1e-3 && Math.abs(led0.realized - 360.15) < 1e-2, 'avant : PRU faux et gain fictif');
+  const pairs = L.findSplitPairs(st); assert.strictEqual(pairs.length, 1); assert.deepStrictEqual([pairs[0].date, pairs[0].ratio, pairs[0].buyId, pairs[0].sellId], ['2021-04-27', 5, '2', '3']);
+  assert.ok(L.diagnose(st, { today: '2026-11-18' }).items.some((i) => i.code === 'split_pair' && i.act.indexOf('apply_split_pair') >= 0), 'proposé dans le contrôle de l\'historique');
+  let n2 = 0; const r = L.applySplitPair(st, pairs[0], { uid: () => 'c' + (++n2), today: '2026-11-18' }); assert.ok(r.ok);
+  const led1 = L.run(L.entriesFor(st, st.holdings[0]).entries); assert.strictEqual(led1.qty, 25); assert.ok(Math.abs(led1.pru - 732.9 / 25) < 1e-9, 'après : PRU 29,316 (coût 732,90 / 25)'); assert.strictEqual(led1.realized, 0, 'aucun résultat réalisé fictif'); assert.strictEqual(led1.splits, 1);
+  assert.strictEqual(st.transactions.length, 6, 'les 6 opérations restent dans l\'historique'); assert.deepStrictEqual([st.holdings[0].quantity, st.holdings[0].avgCost], [25, 28.56], 'position saisie à la main inchangée'); assert.strictEqual(L.findSplitPairs(st).length, 0, 'plus proposé une fois traité');
+  // pas un split : la vente ne porte pas sur tous les titres, ou les montants diffèrent
+  const a = mk(); a.transactions[2].qty = 2; assert.strictEqual(L.findSplitPairs(a).length, 0, 'vente partielle : ce n\'est pas un split'); const b2 = mk(); b2.transactions[2].amountAcct = 400; assert.strictEqual(L.findSplitPairs(b2).length, 0, 'montants différents : jamais un split');
+  const c = mk(); c.transactions.forEach((x) => { x.date = x.date === '2021-04-27' ? '2021-04-27' : x.date; }); c.holdings[0].isin = ''; assert.strictEqual(L.findSplitPairs(c).length, 0, 'sans ISIN : pas de proposition');
+});
+
 console.log('\n' + n + ' tests réussis');

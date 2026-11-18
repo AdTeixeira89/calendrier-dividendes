@@ -58,7 +58,7 @@
     const led = Ledger.run(entries);
     rec.ledgerQty = led.qty; rec.ledgerPru = led.pru; rec.ledgerCost = led.cost;
     rec.qtyDiff = r8(storedQty - led.qty);
-    const qtyOk = Ledger.qtyEq(led.qty, storedQty);
+    const qtyOk = Ledger.qtyNear(led.qty, storedQty, state);
     // anomalies informatives (toutes catégories)
     (led.issues || []).forEach((i) => rec.anomalies.push(i.date + ' : ' + i.msg));
     const warned = txs.filter((t) => t.warn && t.warn.length).length; if (warned) rec.anomalies.push(warned + ' opération(s) importée(s) avec alerte de lecture');
@@ -79,7 +79,7 @@
     else if (!sameCur) rec.reasons.push('cost_currency');
     else {
       rec.pruComparable = true; rec.pruDiff = storedPru - led.pru; rec.pruDiffPct = led.pru > 0 ? rec.pruDiff / led.pru : null;
-      if (Math.abs(rec.pruDiff) > Math.max(0.005, storedPru * 0.002)) rec.reasons.push('pru');          // même seuil que le contrôle d'import existant
+      if (!Ledger.pruNear(storedPru, led.pru, state)) rec.reasons.push('pru');          // marge d'erreur réglable (Paramètres) : 3 % par défaut
     }
     if (rec.reasons.length) rec.category = 'divergent';
     // aides au diagnostic (opérations manquantes ou causes probables)

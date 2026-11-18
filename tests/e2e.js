@@ -413,6 +413,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq([s.transactions.length, s.holdings[0].quantity], [6, 24], 'annulation : état d\'avant restauré'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('split noté comme un achat et une vente (Vestas) : proposé dans le contrôle, traité en un clic (PRU du grand livre ≈ DEGIRO, plus de gain fictif), position saisie inchangée, annulable', async () => {
+    const T = (id, d, type, q, p, amt) => ({ id, holdingId: 'v', date: d, type, qty: q, price: p, fees: 0, currency: 'EUR', amountAcct: amt, acctCur: 'EUR', source: 'degiro', extId: 'dg:' + id });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }], holdings: [{ id: 'v', ticker: 'VWS', displayTicker: 'VWS', isin: 'DK0061539921', name: 'Vestas', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'EUR', quantity: 25, avgCost: 28.56, manual: true, price: 150, account: 'dg', logo: null, source: 'degiro', addedAt: '2020-12-07', dividend: { none: true } }],
+      transactions: [T('1', '2020-12-07', 'buy', 3, 165, 499.2), T('2', '2021-04-27', 'buy', 15, 35.468, 532.02), T('3', '2021-04-27', 'sell', 3, 177.34, 532.02), T('4', '2023-09-14', 'buy', 5, 20.904, 109.42), T('5', '2023-11-02', 'buy', 3, 20.795, 67.28), T('6', '2024-01-23', 'buy', 2, 26.05, 57)] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1100 } }); await p.open();
+    await p.evaluate(() => { go('portfolio'); openDiagnostic(); }); await p.waitForSelector('[data-diag="apply_split_pair"]'); ok(/Traiter comme un split/.test(await p.locator('[data-diag="apply_split_pair"]').innerText()), 'bouton proposé');
+    await p.click('[data-diag="apply_split_pair"]'); await p.waitForTimeout(700); let s = await storeOf(p);
+    eq([s.corp.length, s.corp[0].ratio, s.corp[0].date], [1, 5, '2021-04-27'], 'split ×5 du 27/04/2021 enregistré'); eq(s.transactions.filter((t) => t.splitPair).length, 2, 'les deux opérations d\'origine sont marquées, conservées dans l\'historique'); eq([s.holdings[0].quantity, s.holdings[0].avgCost], [25, 28.56], 'position saisie à la main inchangée');
+    const led = await p.evaluate(() => { const h = state.holdings[0], l = Ledger.run(Ledger.entriesFor(state, h).entries); return [l.qty, Math.round(l.pru * 1000) / 1000, l.realized]; }); eq(led, [25, 29.316, 0], 'grand livre : 25 titres, PRU 29,316 (28,56 hors frais chez DEGIRO), aucun gain fictif');
+    ok(await p.evaluate(() => Audit.positions(state).coherent.some((x) => x.name === 'Vestas')), 'Vestas devient cohérente (marge d\'erreur de 3 % sur les frais)');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p); eq([(s.corp || []).length, s.transactions.filter((t) => t.splitPair).length], [0, 0], 'annulation : état d\'avant restauré'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

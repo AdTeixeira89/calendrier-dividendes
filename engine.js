@@ -438,7 +438,7 @@
     const today = o.today || new Date(), todayS = toISO(today), ids = o.ids || null, months = o.months === undefined ? 12 : o.months;
     const insts = (state.holdings || []).filter((h) => !ids || ids.has(h.id)).map((h) => ({ kind: 'holding', h }))
       .concat((state.archive || []).filter((a) => !ids || ids.has(a.id)).map((a) => ({ kind: 'archive', h: a })));
-    const txAll = (state.transactions || []).filter((t) => (t.type === 'buy' || t.type === 'sell') && t.date);
+    const txAll = (state.transactions || []).filter((t) => (t.type === 'buy' || t.type === 'sell') && t.date && !t.splitPair);      // une paire « split » validée est représentée par l'opération sur titres (state.corp)
     const byInst = {}; txAll.forEach((t) => { (byInst[t.holdingId] = byInst[t.holdingId] || []).push(t); });
     const sortTx = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time || '') < (b.time || '') ? -1 : (a.time || '') > (b.time || '') ? 1 : 0);
 
