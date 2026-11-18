@@ -401,6 +401,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('doublons d\'import (SAP : 6 opérations, 24 titres au lieu de 3 et 12) : détectés dans le contrôle de l\'historique, supprimés en un clic (celui du courtier gardé), quantité corrigée, annulable', async () => {
+    const T = (id, d, q, p, ext, src) => ({ id, holdingId: 's', date: d, type: 'buy', qty: q, price: p, fees: 1, currency: 'EUR', amountAcct: q * p + 1, acctCur: 'EUR', source: src, extId: ext });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 's', ticker: 'SAP', displayTicker: 'SAP', isin: 'DE0007164600', name: 'SAP SE', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 24, avgCost: 252.9383, price: 160, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
+      transactions: [T('1', '2025-01-30', 10, 265.7, 'uuid-1', 'csv'), T('2', '2025-04-07', 1, 223.5, 'uuid-2', 'csv'), T('3', '2026-04-16', 1, 152, 'uuid-3', 'csv'), T('4', '2025-01-30', 10, 265.7, 'dg:aaa:1', 'degiro'), T('5', '2025-04-07', 1, 223.5, 'dg:bbb:1', 'degiro'), T('6', '2026-04-16', 1, 152, 'dg:ccc:1', 'degiro')] });
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1100 } }); await p.open();
+    await p.evaluate(() => { go('portfolio'); openDiagnostic(); }); await p.waitForSelector('[data-diag="remove_dupes"]'); ok(/Supprimer les doublons/.test(await p.locator('[data-diag="remove_dupes"]').innerText()), 'bouton « Supprimer les doublons » dans le contrôle');
+    await p.click('[data-diag="remove_dupes"]'); await p.waitForTimeout(700); let s = await storeOf(p);
+    eq(s.transactions.map((t) => t.id).sort(), ['1', '2', '3'], 'les 3 opérations du courtier sont conservées, les 3 doublons supprimés'); eq([s.holdings[0].quantity, s.holdings[0].avgCost], [12, 252.9383], 'quantité 12, PRU inchangé');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p);
+    eq([s.transactions.length, s.holdings[0].quantity], [6, 24], 'annulation : état d\'avant restauré'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

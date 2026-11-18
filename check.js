@@ -7,7 +7,7 @@
 
 const DIAG_LVL = { error: ['Anomalie', 'warn'], warn: ['À vérifier', 'warn'], info: ['Information', 'info'] };
 
-const DIAG_BTN = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null], fix_tx: ['Saisir la date / le montant…', null], del_tx: ['Supprimer ces opérations…', null] };
+const DIAG_BTN = { search_split: ['Rechercher un split (Yahoo)', 'refresh'], apply_split: ['Valider le split', 'check'], manual_split: ['Saisir un split…', null], alias: ['Fusionner avec un autre ISIN…', null], removal: ['Marquer une sortie…', null], archive: ['Archiver la position', null], promote: ['Ajouter au portefeuille actuel', null], recompute: ['Recalculer depuis les transactions', 'refresh'], set_ref_qty: ['Utiliser la position réelle', 'check'], edit: ['Corriger à la main…', null], fix_tx: ['Saisir la date / le montant…', null], del_tx: ['Supprimer ces opérations…', null], remove_dupes: ['Supprimer les doublons', null] };
 const diagActLabel = (a, it) => (a === 'apply_split' && it.splits ? 'Valider le split ' + it.splits.map((s) => '×' + s.ratio + ' (' + fmtDate(s.date) + ')').join(', ') : (DIAG_BTN[a] || [a])[0]);
 /* Ignore durablement une anomalie (elle ne revient que si la situation change) ; rétablissable dans le contrôle de l'historique. */
 function diagIgnore(it) { state.ignored = state.ignored || {}; state.ignored[it.sig] = { at: new Date().toISOString(), code: it.code, name: it.name || '' }; saveState(); }
@@ -119,6 +119,7 @@ async function diagAct(kind, it) {
         diagCommit('Actifs fusionnés', () => Ledger.mergeInstruments(state, from, to, diagDeps())); });
     return;
   }
+  if (kind === 'remove_dupes') { diagCommit('Doublons supprimés : ' + it.name, () => Ledger.removeDuplicateTx(state, it.txIds)); return; }
   if (kind === 'archive') { diagCommit('Position archivée : ' + it.name, () => Ledger.demote(state, it.instId, it.code, it.cause, diagDeps())); return; }
   if (kind === 'promote') { diagCommit('Position ajoutée au portefeuille actuel : ' + it.name, () => Ledger.promote(state, it.instId, diagDeps()), () => { const h = state.holdings.find((x) => x.id === it.instId); if (h && state.settings.relayUrl) refreshMarket([h], { silent: true }); }); return; }
   if (kind === 'set_ref_qty') { diagCommit('Quantité corrigée : ' + it.name + ' → ' + it.refQty, () => { const h = state.holdings.find((x) => x.id === it.instId); if (!h || !(it.refQty > 0)) return { ok: false, error: 'Position réelle introuvable.' }; h.quantity = it.refQty; h.manual = true; return { ok: true }; }); return; }

@@ -499,4 +499,16 @@ t('fiche « Achats » : la devise des achats est celle des opérations (position
   assert.strictEqual(mixed.pruCalc, null, 'devises mélangées : pas de PRU indicatif trompeur'); assert.strictEqual(mixed.pruCur, null);
 });
 
+t('doublons d\'import (identifiant DEGIRO « dg: » + identifiant du courtier) : détectés, supprimés (celui du courtier est gardé), quantité enregistrée corrigée ; deux ordres légitimes identiques ne sont jamais touchés', () => {
+  const T = (id, d, q, p, ext, src) => ({ id, holdingId: 's', date: d, type: 'buy', qty: q, price: p, fees: 1, currency: 'EUR', amountAcct: q * p + 1, acctCur: 'EUR', source: src, extId: ext });
+  const mk = () => ({ holdings: [{ id: 's', isin: 'DE0007164600', name: 'SAP SE', currency: 'EUR', costCurrency: 'EUR', account: 'a', quantity: 24, avgCost: 252.9383 }], archive: [], corp: [],
+    transactions: [T('1', '2025-01-30', 10, 265.7, 'uuid-1', 'csv'), T('2', '2025-04-07', 1, 223.5, 'uuid-2', 'csv'), T('3', '2026-04-16', 1, 152, 'uuid-3', 'csv'), T('4', '2025-01-30', 10, 265.7, 'dg:aaa:1', 'degiro'), T('5', '2025-04-07', 1, 223.5, 'dg:bbb:1', 'degiro'), T('6', '2026-04-16', 1, 152, 'dg:ccc:1', 'degiro')] });
+  const st = mk(), d = L.findDuplicateTx(st); assert.deepStrictEqual(d.map((x) => [x.keep, x.drop]).sort(), [['1', '4'], ['2', '5'], ['3', '6']]);
+  const diag = L.diagnose(st, { today: '2026-11-18' }).items.find((i) => i.code === 'tx_duplicate'); assert.ok(diag && diag.act.indexOf('remove_dupes') >= 0 && diag.txIds.length === 3);
+  const r = L.removeDuplicateTx(st, diag.txIds); assert.ok(r.ok && r.removed === 3); assert.deepStrictEqual(st.transactions.map((x) => x.id).sort(), ['1', '2', '3']); assert.strictEqual(st.holdings[0].quantity, 12, 'quantité enregistrée (24) ramenée à 12'); assert.strictEqual(st.holdings[0].avgCost, 252.9383, 'PRU inchangé');
+  const none = mk(); none.transactions = [T('1', '2025-01-30', 1, 10, 'uuid-1', 'csv'), T('2', '2025-01-30', 1, 10, 'uuid-2', 'csv')]; assert.strictEqual(L.findDuplicateTx(none).length, 0, 'deux ordres identiques portant tous deux l\'identifiant du courtier : jamais des doublons');
+  const keep = mk(); keep.holdings[0].quantity = 12; keep.transactions = keep.transactions.filter((x) => ['1', '2', '3', '4'].includes(x.id)); const r2 = L.removeDuplicateTx(keep, ['4']); assert.ok(r2.ok); assert.strictEqual(keep.holdings[0].quantity, 12, 'quantité enregistrée différente du grand livre d\'avant : non touchée');
+  assert.strictEqual(L.removeDuplicateTx(mk(), ['1']).ok, false, 'on ne supprime jamais l\'opération du courtier');
+});
+
 console.log('\n' + n + ' tests réussis');

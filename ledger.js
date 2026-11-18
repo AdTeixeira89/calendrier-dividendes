@@ -792,6 +792,14 @@
       if (wn.length) push(Object.assign({}, base, { level: 'info', code: 'tx_warn', txIds: wn.map((x) => x.id), cause: wn.length + ' transaction(s) importée(s) avec alerte : ' + Array.from(new Set([].concat.apply([], wn.map((x) => x.warn)))).slice(0, 3).join(' ; ') + '.', action: 'Contrôler ces lignes dans le CSV d\'origine.' }));
       if (led.cycles > 1) push(Object.assign({}, base, { level: 'info', code: 'cycles', cause: 'Position clôturée puis rachetée : ' + led.cycles + ' cycles distincts, le PRU actuel ne reprend que le dernier cycle.', action: 'Aucune.' }));
     });
+    // opérations enregistrées deux fois par deux voies d'import
+    const dupGroups = {}; findDuplicateTx(state).forEach((p) => { (dupGroups[p.instId] = dupGroups[p.instId] || []).push(p); });
+    Object.keys(dupGroups).forEach((id) => {
+      const x = insts.find(({ h }) => h.id === id); if (!x) return; const h = x.h;
+      push({ instId: id, isin: holdingIsin(h), name: h.name || h.displayTicker || holdingIsin(h), level: 'warn', code: 'tx_duplicate', txIds: dupGroups[id].map((p) => p.drop),
+        cause: dupGroups[id].length + ' opération(s) enregistrée(s) deux fois (importées par deux voies : l\'import DEGIRO et l\'export du courtier) : même date, même quantité, même prix.',
+        action: 'Supprimer les doublons : l\'opération portant l\'identifiant du courtier est conservée ; la quantité enregistrée est corrigée si elle comptait les doublons.', act: ['remove_dupes'] });
+    });
     // opérations sur titres repérées dans le CSV (jamais appliquées sans validation)
     const impo = (state.imports || []).slice(-1)[0];
     ((impo && impo.report && impo.report.corp) || []).forEach((c) => {
@@ -957,7 +965,40 @@
     return { ok: true, moved: ids.size, isinSet, from: moveSummary(state, pv.from), to: moveSummary(state, pv.to) };
   }
 
+  /* ---------------------------------------------------------------
+     DOUBLONS D'IMPORT : une même opération enregistrée deux fois par deux voies différentes (import DEGIRO : identifiant « dg:… » ; export du courtier : son propre identifiant).
+     Mêmes position, date, type, quantité et prix. Deux opérations identiques portant TOUTES DEUX l'identifiant du courtier ne sont jamais considérées comme des doublons
+     (deux ordres légitimes identiques le même jour). Rien n'est supprimé ici : findDuplicateTx est en lecture seule.
+     --------------------------------------------------------------- */
+  function findDuplicateTx(state) {
+    const out = [];
+    (state.holdings || []).concat(state.archive || []).forEach((inst) => {
+      const txs = (state.transactions || []).filter((t) => t.holdingId === inst.id && (t.type === 'buy' || t.type === 'sell') && t.date && !t.corp), used = new Set();
+      const mine = txs.filter((t) => /^dg:/.test(String(t.extId || ''))), others = txs.filter((t) => t.extId && !/^dg:/.test(String(t.extId)) && t.source !== 'manual');
+      mine.forEach((d) => {
+        const k = others.find((o) => !used.has(o.id) && o.type === d.type && o.date === d.date && Math.abs(Number(o.qty) - Number(d.qty)) < EPS && priceClose(Number(o.price), Number(d.price)));
+        if (k) { used.add(k.id); out.push({ instId: inst.id, keep: k.id, drop: d.id }); }
+      });
+    });
+    return out;
+  }
+  /* Supprime les doublons indiqués (celui portant l'identifiant « dg: » ; l'opération du courtier est conservée). Si la quantité ENREGISTRÉE de la position comptait les doublons
+     (égale au grand livre d'avant), elle est ramenée à celle du grand livre d'après ; le PRU n'est pas modifié (mêmes prix). */
+  function removeDuplicateTx(state, dropIds) {
+    const ids = new Set(dropIds || []), pairs = findDuplicateTx(state).filter((p) => ids.has(p.drop));
+    if (!pairs.length) return { ok: false, error: 'Aucun doublon à supprimer.' };
+    const byInst = {}; pairs.forEach((p) => { (byInst[p.instId] = byInst[p.instId] || []).push(p.drop); });
+    const res = { ok: true, removed: 0, qtyFixed: [] };
+    Object.keys(byInst).forEach((id) => {
+      const inst = instById(state, id), before = run(entriesFor(state, inst).entries);
+      state.transactions = state.transactions.filter((t) => byInst[id].indexOf(t.id) < 0); res.removed += byInst[id].length;
+      const after = run(entriesFor(state, inst).entries);
+      if ((state.holdings || []).includes(inst) && qtyEq(Number(inst.quantity) || 0, before.qty) && !qtyEq(before.qty, after.qty)) { res.qtyFixed.push({ id, from: Number(inst.quantity) || 0, to: after.qty }); inst.quantity = after.qty; }
+    });
+    return res;
+  }
+
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions };
+    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);
