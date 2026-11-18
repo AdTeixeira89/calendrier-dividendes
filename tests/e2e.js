@@ -372,6 +372,14 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/75,\d+\s*€/.test(t.split('Prix de revient')[1] || ''), 'PRU indicatif en euros'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import CSV / Excel : bibliothèques locales (aucune dépendance au réseau) — importer fonctionne même quand le CDN est injoignable', async () => {
+    const p = await device({ guest: true }); await p.route(/cdn\.jsdelivr\.net/, (r) => r.abort()); await p.open(); await p.evaluate(() => go('history'));
+    eq(await p.evaluate(() => [typeof Papa, typeof XLSX]), ['object', 'object'], 'Papa et XLSX disponibles sans CDN');
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,SAP SE,DE0007164600,10,265.7,-2657,-1,,EUR,,,,,sap-1\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xGo');
+    ok(/1 achat/.test(await p.locator('#xSummary').innerText()), 'fichier lu sans réseau'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
