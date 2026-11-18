@@ -463,16 +463,39 @@ function renderClosed(host) {
       '<td>' + esc(fmtDate(x.led.first)) + ' → ' + esc(fmtDate(x.led.last)) + '</td><td class="r">' + fmtMoney(buys, x.led.cur) + '</td><td class="r">' + fmtMoney(sells, x.led.cur) + '</td>' +
       '<td class="r">' + (dv.count ? money(dv.gross) + (dv.netUnknown ? '*' : '') : '—') + '</td>' +
       '<td class="r">' + (x.led.qty > 1e-8 ? '<span class="badge warn" title="L\'historique montre encore ' + esc(fmtNum(x.led.qty)) + ' titre(s) : la vente ou la liquidation n\'est pas enregistrée.">Non liquidée</span>' : x.led.realizedKnown ? '<b class="' + (x.led.realized >= 0 ? 'pos' : 'neg') + '">' + (x.led.realized >= 0 ? '+' : '') + fmtMoney(x.led.realized, x.led.cur) + '</b>' + (pct != null ? ' <small class="muted">' + fmtPct(pct, 1, true) + '</small>' : '') : '—') + '</td>' +
-      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + ' <button class="btn sm" type="button" data-delarch="' + esc(x.a.id) + '">Supprimer…</button></td></tr>';
+      '<td class="r"><button class="btn sm" type="button" data-opsof="' + esc(x.a.id) + '">Opérations</button>' + (x.led.qty > 1e-8 ? ' <button class="btn sm primary" type="button" data-liq="' + esc(x.a.id) + '">Enregistrer la liquidation…</button>' : '') + ' <button class="btn sm" type="button" data-acctarch="' + esc(x.a.id) + '" title="Ranger cette position dans un autre portefeuille">Portefeuille…</button> <button class="btn sm" type="button" data-delarch="' + esc(x.a.id) + '">Supprimer…</button></td></tr>';
   }).join('') + '</tbody></table></div>' : '<div class="card empty"><h3>Aucune position clôturée</h3><p>Les actifs entièrement vendus apparaissent ici (ils ne figurent plus dans les positions actuelles).</p></div>';
   host.innerHTML = pageHead('Mon portefeuille', rows.length + ' position(s) entièrement vendue(s)', '<button class="btn" type="button" data-do="import-degiro">' + icon('upload') + 'Importer un relevé</button>') +
     '<div class="toolbar">' + portTabsHtml() + '<span class="grow"></span></div>' + body + '<p class="hint" style="margin-top:8px">Ces positions restent dans l\'historique (calcul des résultats réalisés et reconstitution de l\'évolution passée du portefeuille). « Actualiser » récupère leurs cours passés.</p>';
   wirePortTabs(host); wireDo(host);
   $$('[data-liq]', host).forEach((b) => b.onclick = () => openLiquidationModal(b.dataset.liq));
   $$('[data-delarch]', host).forEach((b) => b.onclick = () => confirmDeleteArchived(b.dataset.delarch));
+  $$('[data-acctarch]', host).forEach((b) => b.onclick = () => openArchiveAccount(b.dataset.acctarch));
   $$('[data-opsof]', host).forEach((b) => b.onclick = () => { view.port.tab = 'ops'; view.ops.asset = b.dataset.opsof; renderPortfolio(host); });
 }
 
+
+/* ---------------------------------------------------------------
+   CHANGER LE PORTEFEUILLE d'une position clôturée (rangée par erreur dans le mauvais portefeuille, p. ex. DEGIRO au lieu de PEA Trade Republic).
+   Ses opérations et ses versements la suivent (ils lui sont rattachés par identifiant) ; aucun montant ni date ne change ; annulable.
+   --------------------------------------------------------------- */
+function openArchiveAccount(id) {
+  const a = (state.archive || []).find((x) => x.id === id); if (!a) return;
+  const others = state.accounts.filter((x) => x.id !== a.account); if (!others.length) { toast('Aucun autre portefeuille : créez-en un d\'abord (Paramètres).', { error: true }); return; }
+  const nTx = state.transactions.filter((t) => t.holdingId === a.id).length, nPay = (state.payments || []).filter((p) => p.holdingId === a.id).length, nm = a.name || a.displayTicker || a.ticker;
+  const same = (state.archive || []).concat(state.holdings).filter((x) => x.id !== a.id && Ledger.holdingIsin(x) && Ledger.holdingIsin(x) === Ledger.holdingIsin(a));
+  const m = openModal('<h2>Changer de portefeuille</h2><div class="sub"><b>' + esc(nm) + '</b> est actuellement rangée dans <b>' + esc(accountName(a.account)) + '</b>. Ses <b>' + nTx + '</b> opération(s) et ses <b>' + nPay + '</b> versement(s) la suivent ; aucun montant ni aucune date ne change.</div>' +
+    fld('Nouveau portefeuille', '<select id="aaTo">' + others.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>').join('') + '</select>', '', 'aaTo') +
+    (same.length ? '<div class="notice info"><span>Le même titre existe aussi ailleurs : ' + same.map((x) => esc(accountName(x.account)) + (state.holdings.includes(x) ? ' (détenue)' : ' (clôturée)')).join(', ') + '. Chaque portefeuille reste indépendant.</span></div>' : '') +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="aaGo">Ranger dans ce portefeuille</button></div></div>');
+  $('#aaGo', m).onclick = () => {
+    const to = $('#aaTo', m).value; if (!to) return;
+    snapshotForUndo('changement de portefeuille');
+    const from = a.account; a.account = to; (state.payments || []).forEach((p) => { if (p.holdingId === a.id && p.account !== undefined) p.account = to; });
+    saveState(); closeModal(); renderPage();
+    toast(nm + ' : ' + accountName(from) + ' → ' + accountName(to) + '.', { ms: 9000, action: { label: 'Annuler', fn: async () => { await undoLastImport(); } } });
+  };
+}
 
 /* ---------------------------------------------------------------
    DÉPLACER DES OPÉRATIONS vers une autre position (opérations rangées au mauvais endroit)

@@ -377,6 +377,20 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(400); ok(/TotalEnergies/.test(await p.locator('#page').innerText()), 'visible dans l\'historique');
   });
 
+  await test('positions clôturées : « Portefeuille… » range la position (opérations et versements suivent) dans le bon portefeuille ; annulable', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [],
+      archive: [{ id: 'tte', ticker: 'TTE.PA', displayTicker: 'TTE.PA', isin: 'FR0000120271', name: 'TotalEnergies', currency: 'EUR', account: 'dg', source: 'import-tx', closedAt: '2026-04-08' }],
+      transactions: [{ id: 'a1', holdingId: 'tte', date: '2025-01-30', type: 'buy', qty: 40, price: 55.88, fees: 1, currency: 'EUR', amountAcct: 2236.2, acctCur: 'EUR', source: 'csv', extId: 'x1' }, { id: 'a2', holdingId: 'tte', date: '2026-04-08', type: 'sell', qty: 40, price: 73.63, fees: 1, currency: 'EUR', amountAcct: 2945.2, acctCur: 'EUR', source: 'csv', extId: 'x2' }],
+      payments: [{ id: 'p1', holdingId: 'tte', account: 'dg', ticker: 'TTE.PA', name: 'TotalEnergies', payDate: '2025-07-02', qty: 40, gross: 34, net: null, currency: 'EUR', source: 'csv', verified: true, extId: 'd1' }] });
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1000 } }); await p.open();
+    await p.evaluate(() => { view.account = 'all'; view.port.tab = 'closed'; go('portfolio'); renderPage(); }); await p.waitForSelector('[data-acctarch="tte"]'); await p.click('[data-acctarch="tte"]'); await p.waitForSelector('#aaTo');
+    ok(/DEGIRO/.test(await p.locator('.modal .sub').innerText()) && /1<\/b> versement|1 versement/.test(await p.locator('.modal .sub').innerHTML().then((h) => h.replace(/<[^>]+>/g, ''))), 'aperçu : portefeuille actuel et nombre d\'opérations / versements');
+    await p.selectOption('#aaTo', 'pea'); await p.click('#aaGo'); await p.waitForTimeout(400); let st = await storeOf(p);
+    eq([st.archive[0].account, st.payments[0].account, st.payments[0].holdingId, st.transactions.length, st.transactions.every((t) => t.holdingId === 'tte')], ['pea', 'pea', 'tte', 2, true], 'position et versement rangés dans le PEA, opérations rattachées inchangées');
+    await p.evaluate(() => { view.account = 'pea'; renderPage(); }); await p.waitForTimeout(300); ok(/TotalEnergies/.test(await p.locator('#page').innerText()), 'visible dans le portefeuille PEA');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); st = await storeOf(p); eq([st.archive[0].account, st.payments[0].account], ['dg', 'dg'], 'annulation : retour à DEGIRO'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('fiche « Achats » : achats importés en EUR sur une position cotée en DKK affichés en EUR (pas « DKK »)', async () => {
     const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'n', ticker: 'NOVO', displayTicker: 'NOVO', isin: '', name: 'Novo Nordisk A/S', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'DKK', quantity: 40, avgCost: 413, price: 300, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
       transactions: [{ id: 't1', holdingId: 'n', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'a' }, { id: 't2', holdingId: 'n', date: '2025-04-07', type: 'buy', qty: 10, price: 56.94, fees: 1, currency: 'EUR', amountAcct: 570.4, acctCur: 'EUR', source: 'csv', extId: 'b' }] });
