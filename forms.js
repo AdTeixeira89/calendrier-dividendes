@@ -676,7 +676,7 @@ function renderTxMapping(rows, hIdx, prev) {
       [].concat(parsed.buys, parsed.sells).forEach((r) => {
         const t = r.ext && byExt.get(r.ext); if (!t) return;
         const have = instrumentById(t.holdingId), acc = (r.acct && accMap[r.acct]) || defAcc, tgt = holdingMatching(r, acc, true);
-        const e = known.get(t.holdingId) || { n: 0, name: have ? (have.name || have.displayTicker || have.ticker) : 'position supprimée', where: have ? accountName(have.account) : '—', other: !!(tgt && tgt.id !== t.holdingId) };
+        const e = known.get(t.holdingId) || { n: 0, name: have ? (have.name || have.displayTicker || have.ticker) : 'position supprimée', where: have ? accountName(have.account) : '—', other: !!((tgt || $('#xNew', m).checked) && !(tgt && tgt.id === t.holdingId)) };
         e.n++; known.set(t.holdingId, e);
       });
       const knownHtml = known.size ? '<div class="notice ' + (Array.from(known.values()).some((e) => e.other) ? 'warn' : 'info') + '" style="margin:6px 0"><span><b>' + Array.from(known.values()).reduce((x, e) => x + e.n, 0) + ' opération(s) du fichier sont déjà dans l\'application</b> (même identifiant, elles ne seront pas ajoutées une seconde fois) : ' + esc(Array.from(known.values()).map((e) => e.n + ' dans « ' + e.name + ' » (' + e.where + ')').join(' ; ')) + '.' + (Array.from(known.values()).some((e) => e.other) ? ' <b>Certaines sont rattachées à une AUTRE position que celle du portefeuille choisi</b> : elles peuvent être rattachées à la bonne position pendant l\'import.' : '') + '</span></div>' + (Array.from(known.values()).some((e) => e.other) ? '<label class="chk"><input type="checkbox" id="xRelink"' + (relinkOn ? ' checked' : '') + '><span>Rattacher ces opérations à la position du portefeuille choisi (rien n\'est créé ni supprimé ; annulable)</span></label>' : '') : '';
@@ -692,7 +692,7 @@ function renderTxMapping(rows, hIdx, prev) {
   };
   $$('select', m).forEach((s) => s.addEventListener('change', (e) => { if (e.target.id === 'xH') renderTxMapping(rows, Number(e.target.value), {}); else refresh(); }));
   refresh();
-  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, accMap: accMap, relink: !!($('#xRelink', m) && $('#xRelink', m).checked), createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
+  $('#xGo', m).onclick = () => { const parsed = refresh(); commitTransactions(parsed, { acc: $('#xacc', m).value, accMap: accMap, relink: $('#xRelink', m) ? $('#xRelink', m).checked : true, createNew: $('#xNew', m).checked, updateExisting: $('#xUpd', m).checked }); };
 }
 /* Position détenue qui correspond à une ligne de fichier (même ISIN, même ticker ou même nom). same = true : dans le portefeuille acc ; false : dans un autre portefeuille. */
 function holdingMatching(r, acc, same) {

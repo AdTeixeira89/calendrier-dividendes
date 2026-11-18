@@ -382,6 +382,16 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/1 achat/.test(await p.locator('#xSummary').innerText()), 'fichier lu sans réseau'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import : la position cible a été supprimée, ses opérations sont restées sur un doublon → l\'import recrée la position et y rattache les opérations (quantité et PRU du grand livre)', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [], archive: [{ id: 'dup', ticker: 'DK0062498333', displayTicker: 'DK0062498333', isin: 'DK0062498333', name: 'Novo Nordisk A/S', currency: 'EUR', account: 'dg', closedAt: '2026-04-16' }],
+      transactions: [{ id: 't1', holdingId: 'dup', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'novo-1' }, { id: 't2', holdingId: 'dup', date: '2025-04-07', type: 'buy', qty: 10, price: 56.94, fees: 1, currency: 'EUR', amountAcct: 570.4, acctCur: 'EUR', source: 'csv', extId: 'novo-2' }] });
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('history'));
+    const csv = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n2025-01-30T09:00:00Z,2025-01-30,PEA,TRADING,BUY,STOCK,Novo Nordisk A/S,DK0062498333,30,81.11,-2433.3,-1,,EUR,,,,,novo-1\n2025-04-07T09:00:00Z,2025-04-07,PEA,TRADING,BUY,STOCK,Novo Nordisk A/S,DK0062498333,10,56.94,-569.4,-1,,EUR,,,,,novo-2\n';
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xRelink'); await p.click('#xGo'); await p.waitForTimeout(900);
+    const s = await storeOf(p); const h = s.holdings.find((x) => x.isin === 'DK0062498333'); ok(h && h.account === 'pea', 'position recréée dans le PEA'); eq([h.quantity, s.transactions.filter((t) => t.holdingId === h.id).length], [40, 2], '40 titres et 2 opérations rattachées'); ok(Math.abs(h.avgCost - (2434.3 + 570.4) / 40) < 1e-9, 'PRU du grand livre'); eq(h.costCurrency, 'EUR', 'devise du PRU = EUR');
+    eq(s.transactions.length, 2, 'aucune opération créée ni dupliquée'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');
