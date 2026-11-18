@@ -52,12 +52,19 @@ function perfStripHtml(o) {
   const reliable = !pr.retro && !pr.truncated && !pr.endPartial && pr.pct !== null;
   const sub = o.showPct ? (reliable ? sens('<b class="' + cl(pr.pct) + '">' + fmtPct(pr.pct, 1, true) + '</b>') + ' pondéré dans le temps' : 'pourcentage non affiché (historique incomplet)') : 'gain de marché + dividendes';
   const tipMain = 'Performance de la période = plus-value de marché + dividendes perçus. Les achats et ventes (apports / retraits) ne sont jamais comptés comme gain ou perte' + (o.showPct ? ' ; le pourcentage est pondéré dans le temps (l\'effet de chaque versement est neutralisé) et n\'est affiché que si l\'historique d\'achats de toutes les positions est complet.' : '.');
-  return { pr, html: '<div class="perf-strip" aria-label="Rentabilité de la période">' +
+  const full = '<div class="perf-strip" aria-label="Rentabilité de la période">' +
     '<div class="ind" tabindex="0" data-tip="' + esc(tipMain) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '<small>' + sub + '</small></div>' +
     '<div class="ind"><span>Plus-value de marché</span>' + sens('<b class="' + cl(pr.marketGain) + '">' + sgn(pr.marketGain) + '</b>') + '<small>variation des cours</small></div>' +
     '<div class="ind"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '<small>' + pr.dividendCount + ' versement(s) validé(s)</small></div>' +
     '<div class="ind" tabindex="0" data-tip="Argent ajouté (achats) moins argent retiré (ventes) sur la période : ce n\'est ni un gain ni une perte."><span>Apports nets</span>' + sens('<b>' + sgn(pr.netFlows) + '</b>') + '<small>' + sens(money(pr.buys, 0) + ' versés · ' + money(pr.sells, 0) + ' retirés') + '</small></div></div>' +
-    '<div class="perf-line muted">' + nt.join('<br>') + '</div>' };
+    '<div class="perf-line muted">' + nt.join('<br>') + '</div>';
+  if (!o.compact) return { pr, html: full };
+  // accueil : le graphique d'abord ; deux chiffres (gain de la période, dividendes), détails repliés
+  const tipP = 'Gain de marché + dividendes sur la période (' + perLbl + '), du ' + fmtDate(pr.from) + ' au ' + fmtDate(pr.to) + '. Les achats et ventes ne sont jamais comptés comme gain ou perte.';
+  const row = '<div class="perf-mini">' +
+    '<div class="ind" tabindex="0" data-tip="' + esc(tipP) + '"><span>Performance · ' + esc(perLbl) + '</span>' + sens('<b class="' + cl(pr.totalGain) + '">' + sgn(pr.totalGain) + '</b>') + '</div>' +
+    '<div class="ind" tabindex="0" data-tip="' + esc(pr.dividendCount + ' versement(s) validé(s) sur la période') + '"><span>Dividendes perçus</span>' + sens('<b class="' + (pr.dividends > 0 ? 'pos' : '') + '">' + (pr.dividends > 0 ? '+' : '') + money(pr.dividends, 0) + '</b>') + '</div></div>';
+  return { pr, html: row, details: full };
 }
 
 /* ===============================================================
@@ -91,7 +98,7 @@ function renderHome(host) {
   const pts = hist.points.map((p) => ({ label: lbl(p.date, view.home.period), t: dn(p.date), value: p.value, cost: p.cost, partial: p.partial, tip: tipOf(p) }));
   const costLine = pts.length > 1 && pts.every((p) => p.cost != null && !p.partial) && hist.allTx;
   const chart = hasValue
-    ? lineChart({ points: pts, cur: baseCur(), mask, title: 'Évolution de la valeur du portefeuille', costLine, tLabel: tLabel(view.home.period) })
+    ? lineChart({ points: pts, cur: baseCur(), mask, title: 'Évolution de la valeur du portefeuille', costLine, tLabel: tLabel(view.home.period), h: 360 })
     : '<div class="empty" style="padding:28px 8px"><h3>Pas encore d\'historique de cours</h3><p>Actualisez les données de marché pour tracer l\'évolution de la valeur' + (state.transactions.length ? ' à partir de vos opérations importées' : '') + '.</p><button class="btn primary" type="button" data-do="refresh">' + icon('refresh') + 'Actualiser les données</button></div>';
   const notes = [], hn = [];
   if (hasValue) {
@@ -107,21 +114,22 @@ function renderHome(host) {
   }
   Notify.set('home', hn);
   const unitNote = un.count < pv.count ? un.count + ' / ' + pv.count + ' positions avec PRU' : un.count + ' position(s) avec PRU';
-  const indCash = cash.amount > 0 ? '<div class="ind"><span>Liquidités</span>' + sens('<b style="color:var(--chart-3)">' + money(cash.amount, 0) + '</b>') + '<small>' + esc(cashScopeLabel(cash)) + ' · ' + esc(cashCountedLabel(cash)) + '</small></div>' : '';
-  const indGain = '<div class="ind"><span>Plus-value totale</span>' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + signed(un.gain) + '</b>') + '<small>' + sens(fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis') + ' · ' + unitNote + '</small>' : '<b>—</b><small>Nécessite un PRU fiable et le cours</small>') + '</div>';
-  const indDay = '<div class="ind" data-do="daily-detail" role="button" tabindex="0" title="Voir le détail position par position" style="cursor:pointer"><span>Plus-value journalière ›</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + ' · séance du ' + esc(fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' })) + ' vs clôture précédente · effet de change ' + (daily.rows.some((r) => r.fx) ? 'inclus' : 'non inclus') + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + (daily.noPru.length ? ' · ' + daily.noPru.length + ' sans PRU (non comptée' + (daily.noPru.length > 1 ? 's' : '') + ')' : '') + '</small>'
-    : '<b>—</b><small>Données insuffisantes (clôture précédente indisponible : actualisez avec le relais à jour)</small>') + '</div>';
+  const indCash = cash.amount > 0 ? '<div class="ind" tabindex="0" data-tip="' + esc('Liquidités : ' + cashScopeLabel(cash) + ' · ' + cashCountedLabel(cash)) + '"><span>Liquidités</span>' + sens('<b style="color:var(--chart-3)">' + money(cash.amount, 0) + '</b>') + '</div>' : '';
+  const indGain = '<div class="ind" tabindex="0" data-tip="' + esc(un.count ? fmtPct(un.pct, 1, true) + ' sur ' + money(un.cost, 0) + ' investis · ' + unitNote : 'Nécessite un PRU fiable et le cours') + '"><span>Plus-value</span>' + (un.count ? sens('<b class="' + (un.gain >= 0 ? 'pos' : 'neg') + '">' + signed(un.gain) + '</b>') + '<small>' + sens(fmtPct(un.pct, 1, true)) + '</small>' : '<b>—</b>') + '</div>';
+  const dayTip = daily.count ? (daily.pct === null ? '' : fmtPct(daily.pct, 2, true) + ' · ') + 'séance du ' + fmtDate(daily.prevDate ? daily.prevDate : todayS, { day: 'numeric', month: 'short' }) + ' vs clôture précédente · effet de change ' + (daily.rows.some((r) => r.fx) ? 'inclus' : 'non inclus') + (daily.missing.length ? ' · ' + daily.missing.length + ' sans clôture' : '') + (daily.noPru.length ? ' · ' + daily.noPru.length + ' sans PRU (non comptée' + (daily.noPru.length > 1 ? 's' : '') + ')' : '') + ' · toucher le titre pour le détail' : 'Données insuffisantes (clôture précédente indisponible : actualisez avec le relais à jour)';
+  const indDay = '<div class="ind" data-do="daily-detail" role="button" tabindex="0" data-tip="' + esc(dayTip) + '" style="cursor:pointer"><span>Aujourd\'hui ›</span>' + (daily.count ? sens('<b class="' + (daily.amount >= 0 ? 'pos' : 'neg') + '">' + signed(daily.amount) + '</b>') + '<small>' + sens(daily.pct === null ? '' : fmtPct(daily.pct, 2, true)) + '</small>' : '<b>—</b>') + '</div>';
   /* --- Rentabilité réelle de la période choisie pour le portefeuille affiché : gain = marché + dividendes, apports neutralisés --- */
   const per = view.home.period, acctLbl = view.account === 'all' ? 'Tous les portefeuilles' : accountName(view.account);
-  const perfStrip = perfStripHtml({ ids, per, scope: acctLbl, hist, today, showPct: false, src: 'perfHome' }).html;
+  const perfR = perfStripHtml({ ids, per, scope: acctLbl, hist, today, showPct: false, src: 'perfHome', compact: true }), perfStrip = perfR.html + (perfR.details ? '<details class="hero-more"><summary>Détails de la période</summary>' + perfR.details + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</details>' : (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : ''));
   const availFrom = (() => { const ha = histFor(0); return ha && !ha.empty ? (ha.summary && ha.summary.firstTx) || (ha.points[0] && ha.points[0].date) : null; })();
   const perBtn = (q) => { const rf = q[0] > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - q[0], today.getDate())) : null; const short = !!(rf && availFrom && Date.parse(availFrom) - Date.parse(rf) > 35 * 86400000);
     return '<button type="button" data-per="' + q[0] + '" class="' + (per === q[0] ? 'on' : '') + (short ? ' dim' : '') + '"' + (short ? ' title="Historique disponible depuis le ' + esc(fmtDate(availFrom)) + ' seulement : la période est raccourcie"' : '') + '>' + q[1] + '</button>'; };
 
-  const hero = '<section class="card card-pad hero"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val">' + sens(pv.count || cash.included > 0 ? money(totalShown, 0) : '—') + '</div>' +
-    '<div class="hero-sub muted">' + (pv.count ? pv.count + ' / ' + hs.length + ' position(s) valorisée(s)' : 'Cours non disponibles') + (pv.latest ? ' · cours du ' + esc(fmtDate(pv.latest.slice(0, 10))) : '') + '</div>' + cashBarHtml(pv.total, cash) + '</div><div class="hero-ind">' + indGain + indCash + indDay + '</div></div>' +
+  const incompl = pv.count && pv.count < hs.length ? '<div class="hero-sub muted">' + pv.count + ' / ' + hs.length + ' position(s) valorisée(s)</div>' : (!pv.count ? '<div class="hero-sub muted">Cours non disponibles</div>' : '');
+  const hero = '<section class="card card-pad hero hero-lean"><div class="hero-top"><div class="hero-main"><div class="lbl">Valeur du portefeuille</div><div class="hero-val"' + (pv.latest ? ' data-tip="' + esc('Cours du ' + fmtDate(pv.latest.slice(0, 10))) + '" tabindex="0"' : '') + '>' + sens(pv.count || cash.included > 0 ? money(totalShown, 0) : '—') + '</div>' + incompl + '</div></div>' +
+    '<div class="hero-ind">' + indGain + indCash + indDay + '</div>' + cashBarHtml(pv.total, cash, true) +
     '<div class="hero-ctrl"><div class="seg" id="perSeg" role="group" aria-label="Période">' + HOME_PERIODS.map(perBtn).join('') + '</div></div>' +
-    '<div class="chart-wrap">' + chart + '</div>' + perfStrip + (notes.length ? '<div class="chart-note">' + notes.join('<br>') + '</div>' : '') + '</section>';
+    '<div class="chart-wrap">' + chart + '</div>' + perfStrip + '</section>';
 
   /* --- 2. « Dividendes » (raccourci) --- */
   const next = Engine.nextEvents(state, today, 120, ids), first = next[0];

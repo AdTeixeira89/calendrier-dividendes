@@ -226,9 +226,10 @@ function filteredHoldings() {
 function cashScopeLabel(cash) { return view.account === 'all' ? (cash.count > 1 ? 'total des ' + cash.count + ' portefeuilles' : 'tous les portefeuilles') : accountName(view.account); }
 function cashCountedLabel(cash) { return cash.included >= cash.amount - 0.005 ? 'comptées dans la valeur' : cash.included > 0 ? 'comptées en partie dans la valeur' : 'hors de la valeur affichée'; }
 /* Barre « titres / liquidités » : part de chacun dans le total (titres valorisés + liquidités du périmètre). */
-function cashBarHtml(titres, cash) {
+function cashBarHtml(titres, cash, slim) {
   if (!(cash.amount > 0)) return '';
   const tot = Math.max(0, titres) + cash.amount, pT = tot > 0 ? Math.max(0, titres) / tot : 0, pC = 1 - pT, pc = (x) => fmtPct(x, x < 0.1 && x > 0 ? 1 : 0);
+  if (slim) return '<div class="cash-bar" style="margin:8px 0 2px" tabindex="0" data-tip="' + esc('Titres ' + money(Math.max(0, titres), 0) + ' (' + pc(pT) + ') · Liquidités ' + money(cash.amount, 0) + ' (' + pc(pC) + ')') + '"><div style="display:flex;height:6px;border-radius:4px;overflow:hidden;background:var(--border)" role="img" aria-label="Répartition titres et liquidités"><span style="width:' + (pT * 100).toFixed(2) + '%;background:var(--chart-1)"></span><span style="width:' + (pC * 100).toFixed(2) + '%;background:var(--chart-3)"></span></div></div>';
   return '<div class="cash-bar" style="margin:12px 0 4px"><div style="display:flex;height:14px;border-radius:8px;overflow:hidden;background:var(--border)" role="img" aria-label="Répartition titres et liquidités">' +
     '<span style="width:' + (pT * 100).toFixed(2) + '%;background:var(--chart-1)"></span><span style="width:' + (pC * 100).toFixed(2) + '%;background:var(--chart-3)"></span></div>' +
     '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px;margin-top:6px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-1);margin-right:5px"></i>Titres <b class="sens">' + money(Math.max(0, titres), 0) + '</b> (' + pc(pT) + ')</span>' +

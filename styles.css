@@ -556,3 +556,21 @@ html{overscroll-behavior-y:contain}
 .nt-toggle{margin-top:10px;background:none;border:0;color:var(--muted);font-size:12.5px;cursor:pointer;padding:4px 2px}
 .nt-done{margin-top:6px;opacity:.8}
 @media print{ .bell-panel,.bell-btn{display:none} }
+
+/* accueil « graphique d'abord » : peu de chiffres, détails en infobulle ou repliés */
+.hero-lean .hero-top{align-items:flex-end;margin-bottom:2px}
+.hero-lean .hero-ctrl{margin:10px 0 0;justify-content:center}
+.hero-lean .hero-ind{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px 14px;max-width:none;flex:none;min-width:0;margin-top:6px}
+.hero-lean .ind>span{font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-lean .ind b{font-size:17px}
+.hero-lean .ind>small{font-size:11px}
+.hero-lean .chart-wrap{margin:6px -4px 0}
+.hero-lean .chart-wrap svg.chart{display:block;width:100%;height:auto;max-height:420px}
+.perf-mini{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border)}
+.perf-mini .ind b{font-size:17px}
+.hero-more{margin-top:8px}
+.hero-more>summary{cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600;padding:4px 0;list-style:none}
+.hero-more>summary::-webkit-details-marker{display:none}
+.hero-more>summary::before{content:'▸ ';}
+.hero-more[open]>summary::before{content:'▾ ';}
+@media (max-width:640px){ .hero-lean .hero-ind{gap:6px 8px} .hero-lean .ind b{font-size:15px} }

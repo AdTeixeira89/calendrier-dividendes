@@ -449,10 +449,11 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.holdings = [{ id: 'k', ticker: 'KO', displayTicker: 'KO', name: 'Coca', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 50, price: 100, account: 'a', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
     const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1200 } }); await p.open(); await p.waitForTimeout(400);
     const flat = async (sel) => (await p.locator(sel).first().innerText()).replace(/[\s  ]/g, '');
-    await p.evaluate(() => { view.account = 'all'; go('home'); renderPage(); }); await p.waitForSelector('.cash-bar'); let t = await flat('.cash-bar');
-    ok(/1250/.test(t) && /Liquidités/.test(t), 'tous les portefeuilles : 1 000 + 250 = 1 250 € : ' + t); ok(/total des 2 portefeuilles/.test(await p.locator('.hero-ind').innerText()), 'périmètre indiqué dans l\'indicateur Liquidités'); ok(/Liquidités1250/.test(await flat('.hero-ind .ind:nth-child(2)')) || /1250/.test(await flat('.hero-ind')), 'indicateur « Liquidités » de l\'accueil, au niveau de la plus-value');
-    await p.evaluate(() => { view.account = 'a'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await flat('.cash-bar'); ok(/1000/.test(t) && !/1250/.test(t), 'portefeuille PEA seul : 1 000 € : ' + t);
-    await p.evaluate(() => { view.account = 'b'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await flat('.cash-bar'); ok(/250/.test(t) && !/1000/.test(t) && !/1250/.test(t), 'portefeuille CTO seul : 250 € : ' + t);
+    const tipFlat = async (sel) => ((await p.locator(sel).first().getAttribute('data-tip')) || '').replace(/\s/g, '');
+    await p.evaluate(() => { view.account = 'all'; go('home'); renderPage(); }); await p.waitForSelector('.cash-bar'); let t = await tipFlat('.cash-bar');
+    ok(/1250/.test(t) && /Liquidités/.test(t), 'tous les portefeuilles : 1 000 + 250 = 1 250 € : ' + t); ok(/totaldes2portefeuilles/.test(await tipFlat('.hero-ind .ind:nth-child(2)')), 'périmètre indiqué (infobulle de l\'indicateur Liquidités)'); ok(/Liquidités1250/.test(await flat('.hero-ind .ind:nth-child(2)')) || /1250/.test(await flat('.hero-ind')), 'indicateur « Liquidités » de l\'accueil, au niveau de la plus-value');
+    await p.evaluate(() => { view.account = 'a'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await tipFlat('.cash-bar'); ok(/1000/.test(t) && !/1250/.test(t), 'portefeuille PEA seul : 1 000 € : ' + t);
+    await p.evaluate(() => { view.account = 'b'; renderPage(); }); await p.waitForSelector('.cash-bar'); t = await tipFlat('.cash-bar'); ok(/250/.test(t) && !/1000/.test(t) && !/1250/.test(t), 'portefeuille CTO seul : 250 € : ' + t);
     await p.evaluate(() => { view.account = 'c'; renderPage(); }); await p.waitForTimeout(300); eq(await p.locator('.cash-bar').count(), 0, 'portefeuille sans liquidités : rien affiché');
     await p.evaluate(() => { view.account = 'all'; view.port.tab = 'positions'; go('portfolio'); renderPage(); }); await p.waitForSelector('.sum-strip'); let k = (await p.locator('.sum-strip').innerText()).replace(/[\s  ]/g, ' '); ok(/Liquidités/i.test(k) && /1\s?250/.test(k.replace(/ /g, '')) || /1250/.test(k.replace(/ /g, '')), 'page Portefeuille, tous : carte Liquidités 1 250 € : ' + k.slice(0, 200));
     await p.evaluate(() => { view.account = 'b'; renderPage(); }); await p.waitForTimeout(300); k = (await p.locator('.sum-strip').innerText()).replace(/[\s  ]/g, ''); ok(/Liquidités/i.test(k) && /250/.test(k) && !/1250/.test(k), 'page Portefeuille, CTO : carte Liquidités 250 € : ' + k.slice(0, 200));
@@ -545,7 +546,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const g = await p.evaluate(() => [Engine.value(state.holdings[0]), Math.round(Engine.unrealized(state, convert, null).gain * 100) / 100, Math.round(Engine.unrealized(state, convert, null).pct * 1000) / 1000]);
     eq(g, [1900, 583.33, 0.583], 'valeur 1900 $ = 1583,33 €, coût 1000 € → +583,33 € (+58,3 %)');
     await p.evaluate(() => go('home')); await p.waitForTimeout(250); const home = await p.locator('main').innerText();
-    ok(/1\s?583\s?€/.test(home) && /\+58,3\s?%/.test(home) && /PLUS-VALUE TOTALE/i.test(home), 'accueil : valeur et plus-value totale — ' + home.slice(home.indexOf('Valeur du'), home.indexOf('Valeur du') + 200).replace(/\n/g, ' '));
+    ok(/1\s?583\s?€/.test(home) && /\+58,3\s?%/.test(home) && /PLUS-VALUE/i.test(home), 'accueil : valeur et plus-value totale — ' + home.slice(home.indexOf('Valeur du'), home.indexOf('Valeur du') + 200).replace(/\n/g, ' '));
     // modification du PRU : investi, rendement sur coût et plus-value suivent
     await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200); await p.click('.asset'); await p.fill('#hCost', '150'); await p.click('#hSave'); await p.waitForTimeout(300);
     const after = await p.evaluate(() => [Engine.invested(state.holdings[0]), Math.round(Engine.yieldOnCost(state, convert, null).rate * 10000) / 10000]); eq(after, [1500, Math.round((10 * 0.26 * 4 / 1.2) / 1500 * 10000) / 10000], 'investi 1500 € ; rendement sur coût recalculé');
@@ -665,7 +666,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed: PSEED(3) }); await p.open();
     const pg = await p.locator('#page').innerText();
     ok(await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"]').count(), 'courbe de valeur tracée');
-    ok(/Valeur du portefeuille/.test(pg) && /PLUS-VALUE TOTALE/i.test(pg) && /PLUS-VALUE JOURNALIÈRE/i.test(pg) && /Dividendes \d{4}/.test(pg) && /PERFORMANCES/.test(pg), 'blocs de l\'accueil : ' + pg.replace(/\n/g, ' | ').slice(0, 400));
+    ok(/Valeur du portefeuille/.test(pg) && /PLUS-VALUE/i.test(pg) && /AUJOURD'HUI/i.test(pg) && /Dividendes \d{4}/.test(pg) && /PERFORMANCES/.test(pg), 'blocs de l\'accueil : ' + pg.replace(/\n/g, ' | ').slice(0, 400));
     ok(!/Bruts|Nets\b|Par secteur|Par pays|vs PRU|Rendement sur coût|Actifs\b/.test(pg), 'anciennes cases supprimées : ' + pg.replace(/\n/g, ' | ').slice(0, 500));
     const n1 = await p.locator('svg.chart[aria-label="Évolution de la valeur du portefeuille"] .hit').count();
     await p.click('#perSeg [data-per="60"]'); await p.waitForTimeout(200);
@@ -909,7 +910,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
       H(1, { ticker: 'XYZ', displayTicker: 'XYZ', isin: 'FR0000000001', name: 'Sans cours', quantity: 5, avgCost: 20, price: 30, hist: { from: ymAgo(3), c: [25, 27, 28, 30] } })];
     seed.transactions = [{ id: 't1', holdingId: 'h0', date: y + '-15', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'degiro' }, { id: 't2', holdingId: 'h1', date: ymAgo(8) + '-10', type: 'buy', qty: 5, price: 20, fees: 0, currency: 'EUR', amountAcct: 100, acctCur: 'EUR', source: 'degiro' }];
     const p = await device({ guest: true, seed }); await p.open(); await p.click('#perSeg [data-per="12"]'); await p.waitForTimeout(300);
-    const note = await p.locator('.chart-note').innerText(); ok(/Sans cours/.test(note) && /dernier prix de vos opérations/.test(note), 'note sous le graphique : valorisation estimée au dernier prix d\'opération : ' + note.slice(0, 300));
+    const note = await p.locator('.chart-note').first().textContent(); ok(/Sans cours/.test(note) && /dernier prix de vos opérations/.test(note), 'note sous le graphique : valorisation estimée au dernier prix d\'opération : ' + note.slice(0, 300));
     ok(await p.locator('svg.chart path[stroke-dasharray="3 4"]').count() === 0, 'plus de pointillés : courbe continue');
     const part = await p.evaluate(() => { const h = Engine.portfolioHistory(state, convertAt, { months: 12, today: new Date() }); return { nPartial: h.points.filter((q) => q.partial).length, nEst: h.points.filter((q) => q.estimated).length, est: h.coverage.estimated.map((x) => x.name), miss: h.coverage.missing.length }; });
     ok(part.nPartial === 0 && part.nEst > 0 && part.est.join() === 'Sans cours' && part.miss === 0, 'points estimés (et signalés), aucun point partiel : ' + JSON.stringify(part));
@@ -1130,8 +1131,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const T = (id, h, k, day, qty, price) => ({ id, holdingId: h, date: ym(k) + '-' + day, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'degiro' });
     seed.transactions = [T('t1', 'a1', 33, '10', 10, 100), T('t2', 'a1', 16, '10', 10, 120), T('t3', 'b1', 20, '10', 10, 50)];
     seed.payments = [{ id: 'd1', holdingId: 'a1', ticker: 'AAA', name: 'Alpha', payDate: ym(3) + '-15', qty: 20, gross: 60, net: 50, currency: 'EUR', source: 'manual', verified: true }, { id: 'd2', holdingId: 'a1', ticker: 'AAA', name: 'Alpha', payDate: ym(5) + '-15', qty: 20, gross: 400, net: 400, currency: 'EUR', source: 'auto', verified: false }];
-    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.waitForSelector('.perf-strip');
-    const strip = async () => (await p.locator('.hero .perf-strip').innerText() + ' || ' + await p.locator('.hero .perf-line').innerText()).replace(/\s+/g, ' ');
+    const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); await p.open(); await p.waitForSelector('.perf-strip', { state: 'attached' });
+    const strip = async () => { await p.evaluate(() => document.querySelectorAll('.hero-more').forEach((d) => { d.open = true; })); return (await p.locator('.hero .perf-strip').innerText() + ' || ' + await p.locator('.hero .perf-line').innerText()).replace(/\s+/g, ' '); };
     await p.selectOption('#acctSel', 'dg'); await p.waitForTimeout(300); await p.click('#perSeg [data-per="0"]'); await p.waitForTimeout(300); let t = await strip();
     ok(/Performance · Tout/i.test(t) && /\+\s?490\s?€/i.test(t) && /Apports nets\s+\+2\s?200\s?€/i.test(t) && /Dividendes perçus\s+\+50\s?€/i.test(t), 'DEGIRO, depuis le début : gain 440 (marché) + 50 (dividendes) = 490, apports 2 200 séparés : ' + t.slice(0, 400));
     ok(/Plus-value de marché\s+\+440\s?€/i.test(t), 'plus-value de marché 440 € : ' + t.slice(0, 300)); ok(!/à vérifier/i.test(t), 'le brouillon de 400 € (« auto ») n\'est ni compté ni affiché : seuls 50 € de dividendes réels');
@@ -1334,8 +1335,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1100 } }); await p.open(); await p.waitForSelector('.hero');
     const pg = (await p.locator('#page').innerText()).replace(/\n/g, ' | ');
     ok(!/Bruts|Nets\b|Par secteur|Par pays|vs PRU|Rendement sur coût|Actifs\b|Prochains dividendes/.test(pg), 'anciennes cases supprimées : ' + pg.slice(0, 600));
-    ok(/1\s?450\s?€/.test(pg), 'valeur totale = 10 × 120 + 5 × 50 = 1 450 €'); ok(/PLUS-VALUE TOTALE \| \+200\s?€/i.test(pg), 'plus-value totale = 1 450 − (1 000 + 250) = +200 € : ' + pg.slice(0, 300));
-    ok(/PLUS-VALUE JOURNALIÈRE( ›)? \| \+20\s?€/i.test(pg) && /\+1,69\s?%/.test(pg), 'plus-value journalière = 10 × (120 − 118) = +20 € : l\'achat du jour (Bêta) ne compte pas : ' + pg.slice(0, 500));
+    ok(/1\s?450\s?€/.test(pg), 'valeur totale = 10 × 120 + 5 × 50 = 1 450 €'); ok(/PLUS-VALUE \| \+200\s?€/i.test(pg), 'plus-value totale = 1 450 − (1 000 + 250) = +200 € : ' + pg.slice(0, 300));
+    ok(/AUJOURD'HUI( ›)? \| \+20\s?€/i.test(pg) && /\+1,69\s?%/.test(pg), 'plus-value journalière = 10 × (120 − 118) = +20 € : l\'achat du jour (Bêta) ne compte pas : ' + pg.slice(0, 500));
     ok(!(await p.locator('.xirr-chip').count()) && !/Rendement annuel moyen|annualisé/i.test(pg), 'le taux de rendement annuel n\'est plus affiché');
     const geo = await p.evaluate(() => { const cs = Array.from(document.querySelectorAll('#page .card')), hero = cs.find((c) => c.classList.contains('hero')), div = cs.find((c) => /^Dividendes/.test((c.querySelector('h3') || {}).textContent || '')), perf = cs.find((c) => /^PERFORMANCES/.test((c.querySelector('h3') || {}).textContent || '')); const r = (e) => e.getBoundingClientRect(); return { hero: r(hero), div: r(div), perf: r(perf) }; });
     ok(geo.hero.right <= geo.div.left + 1 && Math.abs(geo.hero.top - geo.div.top) < 4, 'ordinateur : valeur et dividendes côte à côte : ' + JSON.stringify([geo.hero.left, geo.hero.right, geo.div.left, geo.hero.top, geo.div.top]));
@@ -1345,7 +1346,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const seed2 = SEED(0); seed2.holdings = [H(0, { name: 'Alpha', quantity: 10, avgCost: 100, price: 120, priceAt: iso(T), hist: { from: ymAgo(6), c: [100, 102, 104, 108, 112, 116, 120] } })];
     seed2.transactions = [{ id: 't1', holdingId: 'h0', date: ymAgo(5) + '-15', type: 'buy', qty: 10, price: 100, fees: 0, currency: 'EUR', amountAcct: 1000, acctCur: 'EUR', source: 'degiro' }];
     const q = await device({ guest: true, seed: seed2 }); await q.open(); await q.waitForSelector('.hero'); ok(!(await q.locator('.xirr-chip').count()), 'moins d\'un an : aucun indicateur annuel affiché');
-    ok(/PLUS-VALUE JOURNALIÈRE( ›)? \| —/i.test((await q.locator('#page').innerText()).replace(/\n/g, ' | ')), 'sans clôture précédente : « — » (pas de chiffre inventé)');
+    ok(/AUJOURD'HUI( ›)? \| —/i.test((await q.locator('#page').innerText()).replace(/\n/g, ' | ')), 'sans clôture précédente : « — » (pas de chiffre inventé)');
     // téléphone : pas de débordement
     const m = await device({ guest: true, seed, mobile: true, viewport: { width: 360, height: 800 } }); await m.open(); await m.waitForSelector('.hero');
     const o = await m.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth })); ok(o.sw <= o.iw + 1, 'mobile sans débordement : ' + JSON.stringify(o));
@@ -1746,7 +1747,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     seed.holdings = [{ id: 'a', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 10, avgCost: 90, price: 120, prevClose: 110, prevCloseAt: y, priceAt: '2026-11-11T10:00:00.000Z', account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } },
       { id: 'b', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 50, price: 60, prevClose: null, account: 'main', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }];
     const p = await device({ guest: true, seed, viewport: { width: 390, height: 844 }, mobile: true }); await p.open(); await p.waitForSelector('[data-do="daily-detail"]');
-    ok(/plus-value journalière/i.test(await p.locator('[data-do="daily-detail"]').innerText()), 'carte cliquable');
+    ok(/aujourd'hui/i.test(await p.locator('[data-do="daily-detail"]').innerText()), 'carte cliquable');
     await p.click('[data-do="daily-detail"]'); await p.waitForSelector('#ddCopy', { timeout: 5000 }).catch(async () => { throw new Error('modale absente : ' + JSON.stringify(p.errors || []) + ' ' + (await p.evaluate(() => { try { openDailyDetail(); return 'ok'; } catch (e) { return String(e.stack || e); } }))); }); const tx = await p.locator('.modal').innerText();
     ok(/Alpha/.test(tx) && /\+100,00/.test(tx.replace(/\u202f|\u00a0/g, '')) && /Beta/.test(tx) && /clôture précédente absente/.test(tx), 'détail : Alpha +100 €, Beta signalée sans clôture précédente : ' + tx.replace(/\s+/g, ' ').slice(0, 300));
   });
@@ -1857,9 +1858,9 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const hero = async () => (await p.locator('.hero-val').innerText()).replace(/[\s\u202f\u00a0]/g, ''); ok(/^1000/.test(await hero()), 'valeur sans liquidités : ' + await hero());
     await p.evaluate(() => go('settings')); await p.waitForSelector('.cash-det'); await p.click('.cash-det summary'); await p.fill('.cash-row .cs-amt', '1500'); await p.fill('.cash-row .cs-mo', '200'); await p.dispatchEvent('.cash-row .cs-mo', 'change'); await p.waitForTimeout(500);
     let s = await storeOf(p); const c = s.accounts[0].cash; eq([c.amount, c.monthly, c.include], [1500, 200, false], 'liquidités et versement mensuel enregistrés, case non cochée par défaut');
-    await p.evaluate(() => go('home')); await p.waitForTimeout(300); ok(/^1000/.test(await hero()) && /hors de la valeur/.test(await p.locator('.hero-ind').innerText()), 'case non cochée : valeur inchangée, liquidités signalées à part');
+    await p.evaluate(() => go('home')); await p.waitForTimeout(300); ok(/^1000/.test(await hero()) && /hors de la valeur/.test(await p.locator('.hero-ind .ind:nth-child(2)').getAttribute('data-tip')), 'case non cochée : valeur inchangée, liquidités signalées à part');
     await p.evaluate(() => go('settings')); await p.waitForSelector('.cash-row .cs-inc'); await p.check('.cash-row .cs-inc'); await p.evaluate(() => go('home')); await p.waitForTimeout(300);
-    ok(/^2500/.test(await hero()) && /comptées dans la valeur/.test(await p.locator('.hero-ind').innerText()), 'case cochée : 1 000 + 1 500 = 2 500 € : ' + await hero());
+    ok(/^2500/.test(await hero()) && /comptées dans la valeur/.test(await p.locator('.hero-ind .ind:nth-child(2)').getAttribute('data-tip')), 'case cochée : 1 000 + 1 500 = 2 500 € : ' + await hero());
   });
   await test('synchronisation : la fusion de deux appareils ne perd rien (positions clôturées comprises) et ne double aucun versement ni opération importé séparément ; deux versements légitimes identiques restent deux', async () => {
     const p = await device({ guest: true, seed: SEED(0) }); await p.open();
