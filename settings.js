@@ -40,10 +40,12 @@ function renderSettings(host) {
   const mg = Ledger.marginOf(state), fnum = (x) => String(x).replace('.', ',');
   const margin = '<div class="hint" style="margin-bottom:10px">Sous ces écarts, une position est considérée <b>cohérente</b> : le rapport d\'audit et le contrôle de l\'historique ne la signalent plus. Cela ne change <b>aucun calcul</b> (quantités, prix de revient, résultats) ; seul ce qui est signalé change. Un titre entier manquant est toujours signalé.</div>' +
     '<div class="row2">' + fld('Marge sur le prix de revient (%)', '<input type="text" inputmode="decimal" id="sMarPru" value="' + esc(fnum(Math.round(mg.pru * 1000) / 10)) + '">', 'Par défaut 3 % : frais d\'achat comptés ou non selon le courtier.', 'sMarPru') + fld('Marge sur la quantité (titres)', '<input type="text" inputmode="decimal" id="sMarQty" value="' + esc(fnum(mg.qty)) + '">', 'Par défaut 0,01 : arrondi à 2 décimales d\'un courtier.', 'sMarQty') + '</div>';
+  const dca = state.settings.dca || {}, dcaBox = '<label class="chk"><input type="checkbox" id="sDcaOn"' + (dca.on ? ' checked' : '') + '><span>Me rappeler d\'importer mon relevé après chaque exécution de mon plan d\'épargne</span></label>' +
+    fld('Jours du mois des exécutions', '<input type="text" inputmode="numeric" id="sDcaDays" value="' + esc((dca.days || [2, 16]).join(', ')) + '" placeholder="2, 16">', 'Ex. « 2, 16 » : le 2 et le 16 de chaque mois. Le rappel apparaît dans la cloche le lendemain si les achats ne sont pas encore importés. Rien n\'est créé automatiquement.', 'sDcaDays');
   const notif = '<p class="muted" style="margin:0 0 10px" id="nStatus">' + esc(notifStatusText()) + '</p><div class="btn-row"><button class="btn" type="button" id="nEnable">Activer les rappels</button><button class="btn" type="button" id="nIcs">Ajouter à l\'agenda (.ics)</button></div>';
   host.innerHTML = pageHead('Paramètres', 'Compte, préférences d\'affichage et gestion des données') +
     (account ? sec('Compte utilisateur', 'Retrouvez vos données sur tous vos appareils.', account) : '') + sec('Apparence', 'Mode et thème de fond de l\'application.', look) + sec('Affichage', '', display) + sec('Données de marché', 'Source unique des historiques de dividendes (aucune clé API requise).', dataSrc) +
-    (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Liquidités', '', cash) + sec('Marge d\'erreur des contrôles', 'Écarts tolérés avant de signaler une anomalie.', margin) + sec('Rappels de versement', '', notif) +
+    (Vault.hasPin() ? sec('Verrouillage', '', security) : '') + sec('Sauvegarde et import', 'Vos données sont enregistrées sur cet appareil. Exportez-les pour les conserver ou les changer d\'appareil.', backup) + sec('Liquidités', '', cash) + sec('Plan d\'épargne', 'Rappel d\'import (Trade Republic…).', dcaBox) + sec('Marge d\'erreur des contrôles', 'Écarts tolérés avant de signaler une anomalie.', margin) + sec('Rappels de versement', '', notif) +
     '<p class="hint" style="text-align:center;margin-top:18px">StockPilot · build ' + APP_BUILD + ' · ' + (Cloud.configured() ? 'synchronisation activée' : 'données sur cet appareil') + '</p>';
   wireDo(host);
   const on = (id, fn) => { const e = $('#' + id, host); if (e) e.onclick = fn; };
@@ -71,6 +73,8 @@ function renderSettings(host) {
   on('sAudit', openPositionsAudit);
   on('sImport', async () => { const f = await pickFile('application/json,.json'); if (f) importBackup(f); });
   on('sPin', openSecurityModal);
+  { const saveDca = () => { const days = ($('#sDcaDays', host).value || '').split(/[^0-9]+/).map(Number).filter((x) => x >= 1 && x <= 28); state.settings.dca = { on: $('#sDcaOn', host).checked, days: Array.from(new Set(days)).sort((a, b) => a - b) }; saveState(); collectGlobalNotices(); };
+    ['sDcaOn', 'sDcaDays'].forEach((id) => { const e = $('#' + id, host); if (e) e.addEventListener('change', saveDca); }); }
   { const saveMargin = () => { const p = numOrNull($('#sMarPru', host).value), q = numOrNull($('#sMarQty', host).value); state.settings.margin = { pru: p !== null && p >= 0 ? p / 100 : null, qty: q !== null && q >= 0 ? q : null }; saveState(); renderPageSoft(); };
     ['sMarPru', 'sMarQty'].forEach((id) => { const e = $('#' + id, host); if (e) e.addEventListener('change', saveMargin); }); }
   $$('.cash-row', host).forEach((row) => {

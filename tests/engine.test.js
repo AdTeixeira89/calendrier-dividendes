@@ -108,6 +108,16 @@ t('historique de valeur : une paire achat / vente validée comme split n\'est pa
   const h = E.portfolioHistory(st, (v) => v, { months: 0, today: new Date(2026, 9, 14) }), last = h.points[h.points.length - 1];
   assert.strictEqual(last.value, 25 * 40, 'valeur finale = 25 titres × 40 (pas 75 × 40)'); assert.ok(h.points.filter((p) => p.date >= '2021-05-31' && p.date < '2023-09-01').every((p) => p.value === 15 * 40), '15 titres entre le split et l\'achat de septembre 2023');
 });
+t('rappel du plan d\'épargne : dernière date du plan passée sans import ni achat daté de cette date ; jamais d\'achat créé ; réglage désactivé = aucun rappel', () => {
+  const st = (o) => Object.assign({ settings: { dca: { on: true, days: [2, 16] } }, transactions: [], dividendImports: [] }, o);
+  assert.deepStrictEqual(E.dcaDue(st({ transactions: [{ source: 'csv', date: '2026-10-16' }] }), '2026-11-18'), { due: '2026-11-16', lastImport: null, lastTx: '2026-10-16' }, 'plan du 16/11 non importé');
+  assert.strictEqual(E.dcaDue(st({ transactions: [{ source: 'csv', date: '2026-11-16' }] }), '2026-11-18'), null, 'achat daté du 16/11 présent : rien à rappeler');
+  assert.strictEqual(E.dcaDue(st({ dividendImports: [{ kind: 'transactions', at: '2026-11-17T10:00:00Z' }], transactions: [{ source: 'csv', date: '2026-10-16' }] }), '2026-11-18'), null, 'import fait après la date du plan');
+  assert.strictEqual(E.dcaDue(st({ dividendImports: [{ kind: 'transactions', at: '2026-11-16T07:00:00Z' }], transactions: [{ source: 'csv', date: '2026-10-16' }] }), '2026-11-18').due, '2026-11-16', 'import fait le jour même du plan, avant l\'exécution : rappel');
+  assert.strictEqual(E.dcaDue(st({ transactions: [{ source: 'csv', date: '2026-10-16' }] }), '2026-11-16').due, '2026-11-02', 'le jour du plan : la date strictement passée précédente');
+  assert.strictEqual(E.dcaDue(st({}), '2027-01-01').due, '2026-12-16', 'changement d\'année'); assert.strictEqual(E.dcaDue({ settings: {}, transactions: [] }, '2026-11-18'), null, 'désactivé par défaut');
+  assert.strictEqual(E.dcaDue(st({ settings: { dca: { on: true, days: [] } } }), '2026-11-18'), null, 'aucun jour');
+});
 t('monthly series splits received / upcoming / unrecorded', () => {
   const p = { id: 'p', holdingId: 'h', ticker: 'T', payDate: '2026-02-15', qty: 10, gross: 10, net: 10, currency: 'EUR' };
   const m = E.monthlySeries(st([mk({})], [p]), 2026, 'gross', conv, today);

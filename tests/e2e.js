@@ -426,6 +426,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); s = await storeOf(p); eq([(s.corp || []).length, s.transactions.filter((t) => t.splitPair).length], [0, 0], 'annulation : état d\'avant restauré'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('rappel du plan d\'épargne : réglage dans Paramètres, notification dans la cloche avec bouton « Importer un relevé », aucun achat créé', async () => {
+    const p = await device({ guest: true, seed: SEED(0), viewport: { width: 1100, height: 1000 } }); await p.open(); await p.evaluate(() => go('settings')); await p.waitForSelector('#sDcaOn');
+    await p.check('#sDcaOn'); await p.fill('#sDcaDays', '1'); await p.dispatchEvent('#sDcaDays', 'change'); await p.waitForTimeout(500); let s = await storeOf(p); eq([s.settings.dca.on, s.settings.dca.days], [true, [1]], 'réglage enregistré');
+    await p.evaluate(() => { collectGlobalNotices(); }); await p.waitForTimeout(400); const tx = await bellOpen(p); ok(/Plan d'épargne/i.test(tx) && /Importer un relevé/i.test(tx), 'notification dans la cloche : ' + tx.slice(0, 200)); await bellClose(p);
+    s = await storeOf(p); eq(s.transactions.length, 0, 'aucun achat créé'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('historique : ajout manuel d\'un versement (brut − retenue − frais = net), alerte versement identique (jamais de suppression silencieuse), suppression multiple', async () => {
     const p = await device({ guest: true, seed: SEED(2) }); await p.open(); await p.evaluate(() => go('history')); await p.waitForTimeout(200);
     ok(await p.locator('text=Aucun versement enregistré').count(), 'état vide explicite');

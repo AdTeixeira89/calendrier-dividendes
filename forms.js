@@ -1029,6 +1029,13 @@ function positionNotices() {
   return [{ id: 'pos:todo', level: 'warn', title: ids.size + ' position(s) à compléter (PRU, date d\'achat)', body: (p.noPru.length ? '<b>' + p.noPru.length + '</b> sans PRU : leur valeur reste dans le portefeuille mais elles ne comptent <b>ni dans la plus-value totale ni dans celle du jour</b>. ' : '') + (p.noDate.length ? '<b>' + p.noDate.length + '</b> sans date d\'achat : les dividendes éligibles ne peuvent pas être vérifiés précisément.' : ''),
     accept: { label: 'Compléter…', run: () => openPositionsToComplete(), ack: false } }];
 }
+/* Rappel du plan d'épargne : notification quand les exécutions de la dernière date du plan ne sont pas encore importées (aucun achat créé automatiquement). */
+function dcaNotices() {
+  const r = Engine.dcaDue(state, todayISO()); if (!r) return [];
+  return [{ id: 'dca:' + r.due, level: 'info', title: 'Plan d\'épargne : relevé à importer',
+    body: 'Les exécutions du plan du <b>' + esc(fmtDate(r.due)) + '</b> ne sont pas encore importées (dernier import : ' + (r.lastImport ? esc(fmtDate(r.lastImport)) : 'aucun') + (r.lastTx ? ' ; dernier achat importé : ' + esc(fmtDate(r.lastTx)) : '') + '). Exportez vos transactions depuis l\'application du courtier, puis importez-les : seuls les nouveaux achats sont ajoutés.',
+    accept: { label: 'Importer un relevé', run: () => openImport(), ack: false } }];
+}
 function openPositionsToComplete() {
   const p = positionsToComplete(), all = new Map(); p.noPru.forEach((h) => all.set(h.id, h)); p.noDate.forEach((h) => all.set(h.id, h));
   const hs = Array.from(all.values()).sort((a, b) => (a.name || a.ticker || '').localeCompare(b.name || b.ticker || ''));

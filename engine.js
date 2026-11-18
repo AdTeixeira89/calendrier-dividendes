@@ -789,8 +789,22 @@
     return out;
   }
 
+  /* RAPPEL DU PLAN D'ÉPARGNE (réglages : state.settings.dca = { on, days: [2, 16] }). La dernière date du plan STRICTEMENT passée (E) : si aucun import de transactions n'a eu lieu après E
+     et qu'aucun achat importé n'est daté du jour E ou après, les exécutions de cette date ne sont pas encore dans l'application. Aucun achat n'est jamais créé : seulement un rappel. */
+  function dcaDue(state, todayISO) {
+    const d = (state.settings && state.settings.dca) || {}; if (!d.on) return null;
+    const days = (d.days || []).map(Number).filter((x) => x >= 1 && x <= 28).sort((a, b) => a - b); if (!days.length) return null;
+    const p = String(todayISO).split('-').map(Number), cands = [];
+    for (let k = 0; k >= -1; k--) { const t = new Date(p[0], p[1] - 1 + k, 1); days.forEach((dd) => cands.push(iso(t.getFullYear(), t.getMonth() + 1, dd))); }
+    const due = cands.filter((c) => c < todayISO).sort().pop(); if (!due) return null;
+    const imps = (state.dividendImports || []).filter((x) => x.kind === 'transactions' && x.at).map((x) => String(x.at).slice(0, 10)).sort(), lastImport = imps[imps.length - 1] || null;
+    const txd = (state.transactions || []).filter((t) => t.source === 'csv' && t.date).map((t) => t.date).sort(), lastTx = txd[txd.length - 1] || null;
+    if ((lastImport && lastImport > due) || (lastTx && lastTx >= due)) return null;
+    return { due, lastImport, lastTx };
+  }
+
   root.Engine = {
-    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, positionFor, positionFromEntries, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
+    valueSeries, portfolioHistory, periodReturn, category, dailyChange, xirr, performance, allocation, ymOf, addYM, closeAt, TYPES, dcaDue, positionFor, positionFromEntries, isAccumulating, isPayer, dividendStatus, cashTotals, annualPerShare, divCur, annualInPos, taxRate, invested, costCur, value, portfolioValue, unrealized, yieldOnPrice, quantityAt, positionFromTransactions,
     buildEvents, amount, sumEvents, runRate, yieldOnCost, investedTotal, receivedBetween, yoy, monthlySeries, yearlySeries,
     forecast12, nextEvents, distribution, paymentKey, heldQtyFn, dividendProposals, toISO, parse, iso
   };
