@@ -365,6 +365,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq([s.transactions.length, s.transactions[0].holdingId, s.transactions[0].movedFrom.holdingId], [1, 'novo', 'dup'], 'case cochée : l\'opération est rattachée à la bonne position (trace conservée), sans doublon'); eq([s.holdings.find((h) => h.id === 'novo').quantity, s.holdings.find((h) => h.id === 'novo').avgCost], [90, 413.32], 'quantité et PRU enregistrés inchangés'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('Ajouter un versement : les positions clôturées sont proposées (et présélectionnées depuis « Dividendes dus ») ; le versement s\'enregistre sur la position clôturée', async () => {
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'k', ticker: 'KO', displayTicker: 'KO', name: 'Coca', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', quantity: 5, avgCost: 50, price: 60, account: 'pea', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } }],
+      archive: [{ id: 'tte', ticker: 'TTE.PA', displayTicker: 'TTE.PA', isin: 'FR0000120271', name: 'TotalEnergies', currency: 'EUR', account: 'pea', source: 'import-tx', closedAt: '2026-04-08' }],
+      transactions: [{ id: 'a1', holdingId: 'tte', date: '2025-01-30', type: 'buy', qty: 40, price: 55.88, fees: 1, currency: 'EUR', amountAcct: 2236.2, acctCur: 'EUR', source: 'csv', extId: 'x1' }, { id: 'a2', holdingId: 'tte', date: '2026-04-08', type: 'sell', qty: 40, price: 73.63, fees: 1, currency: 'EUR', amountAcct: 2945.2, acctCur: 'EUR', source: 'csv', extId: 'x2' }] });
+    const p = await device({ guest: true, seed }); await p.open();
+    await p.evaluate(() => openPaymentModal(null, { holdingId: 'tte', ticker: 'TTE.PA', name: 'TotalEnergies', exDate: '2025-06-19', payDate: '', qty: 40, currency: 'EUR' })); await p.waitForSelector('#pH');
+    eq(await p.locator('#pH').inputValue(), 'tte', 'TotalEnergies (clôturée) présélectionnée'); ok(/clôturée/.test(await p.locator('#pH option:checked').innerText()), 'libellé « clôturée »'); eq(await p.locator('#pH option').count(), 2, 'position détenue + position clôturée');
+    await p.fill('#pPay', '2025-07-02'); await p.fill('#pGross', '34'); await p.click('#pSave'); await p.waitForTimeout(400);
+    const st = await storeOf(p); eq(st.payments.map((x) => [x.holdingId, x.payDate, x.gross, x.verified]), [['tte', '2025-07-02', 34, true]], 'versement enregistré sur la position clôturée'); eq(p.errors, [], 'aucune erreur JS');
+    await p.evaluate(() => { view.divTab = 'history'; go('dividends'); }); await p.waitForTimeout(400); ok(/TotalEnergies/.test(await p.locator('#page').innerText()), 'visible dans l\'historique');
+  });
+
   await test('fiche « Achats » : achats importés en EUR sur une position cotée en DKK affichés en EUR (pas « DKK »)', async () => {
     const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'n', ticker: 'NOVO', displayTicker: 'NOVO', isin: '', name: 'Novo Nordisk A/S', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'DKK', quantity: 40, avgCost: 413, price: 300, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
       transactions: [{ id: 't1', holdingId: 'n', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'a' }, { id: 't2', holdingId: 'n', date: '2025-04-07', type: 'buy', qty: 10, price: 56.94, fees: 1, currency: 'EUR', amountAcct: 570.4, acctCur: 'EUR', source: 'csv', extId: 'b' }] });

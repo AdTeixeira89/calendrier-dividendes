@@ -333,9 +333,11 @@ function openPaymentModal(id, preset) {
   const ex = id ? state.payments.find((p) => p.id === id) : null;
   const p = ex ? clone(ex) : Object.assign({ id: uid(), holdingId: (view.account !== 'all' ? (visibleHoldings()[0] || {}).id : (state.holdings[0] || {}).id) || '', exDate: '', payDate: todayISO(), qty: null, perShare: null, gross: null, tax: null, fees: null, net: null, currency: 'EUR', source: 'manual', verified: true }, preset || {}, preset || {});
   if (!state.holdings.length && !ex) { toast("Ajoutez d'abord un actif.", { error: true }); return; }
-  const hs = state.holdings.slice().sort((a, b) => (a.name || a.ticker).localeCompare(b.name || b.ticker));
+  // positions détenues ET positions clôturées (une position vendue a pu verser des dividendes pendant sa détention) ; les « relevé seul » restent exclues sauf si le versement en dépend
+  const arch = (state.archive || []).filter((a) => !a.statementOnly || a.id === p.holdingId), nm_ = (h) => (h.name || h.ticker || h.displayTicker || '');
+  const hs = state.holdings.slice().sort((a, b) => nm_(a).localeCompare(nm_(b))).concat(arch.slice().sort((a, b) => nm_(a).localeCompare(nm_(b))));
   const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' un versement</h2><div class="sub">Dividende effectivement reçu. Le net est calculé : brut − retenue − frais.</div>' + (ex ? provenanceHtml(ex) : '') +
-    fld('Actif', '<select id="pH">' + hs.map((h) => opt(h.id, (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker) + ')', h.id === p.holdingId)).join('') + (ex && !holdingById(p.holdingId) ? opt(p.holdingId, (p.name || p.ticker) + ' (position supprimée)', true) : '') + '</select>', '', 'pH') +
+    fld('Actif', '<select id="pH">' + hs.map((h) => opt(h.id, (h.name || h.displayTicker || h.ticker) + ' (' + (h.displayTicker || h.ticker) + ')' + (state.holdings.includes(h) ? '' : ' — clôturée'), h.id === p.holdingId)).join('') + (ex && !instrumentById(p.holdingId) ? opt(p.holdingId, (p.name || p.ticker) + ' (position supprimée)', true) : '') + '</select>', '', 'pH') +
     '<div class="row2">' + fld('Date de paiement', '<input type="date" id="pPay" value="' + esc(p.payDate || '') + '">', '', 'pPay') + fld('Date de détachement (facultatif)', '<input type="date" id="pEx" value="' + esc(p.exDate || '') + '">', '', 'pEx') + '</div>' +
     '<div class="row2">' + fld('Quantité détenue', '<input type="number" id="pQty" step="any" inputmode="decimal" value="' + esc(p.qty === null ? '' : p.qty) + '">', 'Par défaut : quantité à la date', 'pQty') + fld('Montant par titre', '<input type="number" id="pPer" step="any" inputmode="decimal" value="' + esc(p.perShare === null || p.perShare === undefined ? '' : p.perShare) + '">', '', 'pPer') + '</div>' +
     '<div class="row2">' + fld('Montant brut', '<input type="number" id="pGross" step="any" inputmode="decimal" value="' + esc(p.gross === null ? '' : p.gross) + '">', '', 'pGross') + fld('Retenue à la source / impôt', '<input type="number" id="pTax" step="any" inputmode="decimal" value="' + esc(p.tax === null || p.tax === undefined ? '' : Math.abs(p.tax)) + '">', '', 'pTax') + '</div>' +
@@ -352,7 +354,7 @@ function openPaymentModal(id, preset) {
   ['pQty', 'pPer', 'pGross', 'pTax', 'pFees'].forEach((i) => $('#' + i, m).addEventListener('input', recalc));
   $('#pNet', m).addEventListener('input', () => { netTouched = $('#pNet', m).value !== ''; });
   const fillFromHolding = () => {
-    const h = holdingById($('#pH', m).value); if (!h) return;
+    const h = instrumentById($('#pH', m).value); if (!h) return;
     $('#pCur', m).value = h.currency;
     if (!$('#pQty', m).value) $('#pQty', m).value = Engine.quantityAt(state, h, $('#pPay', m).value || $('#pEx', m).value || todayISO());
     if (!$('#pPer', m).value && h.dividend && h.dividend.lastAmount && !ex) $('#pPer', m).value = h.dividend.lastAmount;
@@ -363,7 +365,7 @@ function openPaymentModal(id, preset) {
   if (!ex && !p.qty) fillFromHolding();
   if (ex) $('#pDel', m).onclick = () => { closeModal(); confirmDeletePayments([ex.id]); };
   $('#pSave', m).onclick = async () => {
-    const h = holdingById($('#pH', m).value), gross = g('pGross');
+    const h = instrumentById($('#pH', m).value), gross = g('pGross');
     const payDate = $('#pPay', m).value || null, exDate = $('#pEx', m).value || null;
     if (!payDate && !exDate) { toast('Indiquez au moins une date.', { error: true }); return; }
     if (gross === null || gross < 0) { toast('Indiquez le montant brut.', { error: true }); return; }
