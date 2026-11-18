@@ -132,6 +132,8 @@
       const p = byId.get(id); if (!p) return;
       p.revisions = (p.revisions || []).concat([{ at: now, importId, before: { gross: p.gross, tax: p.tax, net: p.net, payDate: p.payDate, holdingId: p.holdingId } }]);
       p.gross = r2(num(item.gross)); p.tax = item.tax == null ? null : r2(Math.abs(num(item.tax))); p.net = item.net == null ? null : r2(num(item.net)); p.payDate = item.payDate; p.extId = item.extId;
+      // même versement (même identifiant du courtier) mais position différente : il suit la position désignée par le fichier (ex. opérations replacées dans le bon portefeuille)
+      if (diff.indexOf('holdingId') >= 0) { p.holdingId = item.holdingId; if (item.account) p.account = item.account; if (item.ticker) p.ticker = item.ticker; if (item.name) p.name = item.name; }
     });
     return { fresh: res.fresh.length, known: res.known.length, updated: res.updated.length, adopted: res.adopted.length, ignored: res.ignored.length, anomalies: res.anomalies.length };
   }

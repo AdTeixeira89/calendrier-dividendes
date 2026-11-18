@@ -391,6 +391,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); st = await storeOf(p); eq([st.archive[0].account, st.payments[0].account], ['dg', 'dg'], 'annulation : retour à DEGIRO'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('import Trade Republic : les dividendes déjà enregistrés sur la position d\'un AUTRE portefeuille (même titre) suivent la position du PEA, sans doublon', async () => {
+    const H = 'datetime,date,account_type,category,type,asset_class,name,symbol,shares,price,amount,fee,tax,currency,original_amount,original_currency,fx_rate,description,transaction_id\n';
+    const csv = H + '2025-01-30T13:41:51Z,2025-01-30,PEA,TRADING,BUY,STOCK,TotalEnergies,FR0000120271,40,55.88,-2235.20,-1.00,,EUR,,,,Buy,buy-1\n2025-07-02T08:13:43Z,2025-07-02,PEA,CASH,DIVIDEND,STOCK,TotalEnergies,FR0000120271,40,,34.00,,,EUR,,,,Cash Dividend,div-1\n2026-04-08T05:30:02Z,2026-04-08,PEA,TRADING,SELL,STOCK,TotalEnergies,FR0000120271,-40,73.63,2945.20,-1.00,,EUR,,,,Sell,sell-1\n';
+    const mk = (id, acc) => ({ id, ticker: 'TTE.PA', displayTicker: 'TTE.PA', isin: 'FR0000120271', name: 'TotalEnergies', currency: 'EUR', account: acc, source: 'import-tx', closedAt: '2026-04-08' });
+    const seed = Object.assign(SEED(0), { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }], holdings: [], archive: [mk('tdg', 'dg'), mk('tpea', 'pea')],
+      transactions: [{ id: 'a1', holdingId: 'tpea', date: '2025-01-30', type: 'buy', qty: 40, price: 55.88, fees: 1, currency: 'EUR', amountAcct: 2236.2, acctCur: 'EUR', source: 'csv', extId: 'buy-1' }, { id: 'a2', holdingId: 'tpea', date: '2026-04-08', type: 'sell', qty: 40, price: 73.63, fees: 1, currency: 'EUR', amountAcct: 2945.2, acctCur: 'EUR', source: 'csv', extId: 'sell-1' }],
+      payments: [{ id: 'p1', holdingId: 'tdg', account: 'dg', ticker: 'TTE.PA', name: 'TotalEnergies', payDate: '2025-07-02', qty: 40, gross: 34, net: null, currency: 'EUR', source: 'csv', verified: true, extId: 'div-1' }] });
+    const p = await device({ guest: true, seed }); await p.open();
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.evaluate(() => { openImportTransactions(); })]); await fc.setFiles(csvFile('tr.csv', csv)); await p.waitForSelector('#xGo'); await p.click('#xGo'); await p.waitForTimeout(1200);
+    const st = await storeOf(p); eq(st.payments.map((x) => [x.holdingId, x.account, x.payDate, x.gross]), [['tpea', 'pea', '2025-07-02', 34]], 'le dividende est maintenant sur la position du PEA (un seul versement)'); eq(st.transactions.length, 2, 'aucune opération en double'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('fiche « Achats » : achats importés en EUR sur une position cotée en DKK affichés en EUR (pas « DKK »)', async () => {
     const seed = Object.assign(SEED(0), { accounts: [{ id: 'pea', name: 'PEA Trade Republic' }], holdings: [{ id: 'n', ticker: 'NOVO', displayTicker: 'NOVO', isin: '', name: 'Novo Nordisk A/S', type: 'stock', instrumentType: 'EQUITY', currency: 'DKK', costCurrency: 'DKK', quantity: 40, avgCost: 413, price: 300, account: 'pea', logo: null, source: 'import-tx', addedAt: '2025-01-30', dividend: { none: true } }],
       transactions: [{ id: 't1', holdingId: 'n', date: '2025-01-30', type: 'buy', qty: 30, price: 81.11, fees: 1, currency: 'EUR', amountAcct: 2434.3, acctCur: 'EUR', source: 'csv', extId: 'a' }, { id: 't2', holdingId: 'n', date: '2025-04-07', type: 'buy', qty: 10, price: 56.94, fees: 1, currency: 'EUR', amountAcct: 570.4, acctCur: 'EUR', source: 'csv', extId: 'b' }] });
