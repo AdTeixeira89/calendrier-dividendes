@@ -229,10 +229,10 @@ function cashCountedLabel(cash) { return cash.included >= cash.amount - 0.005 ? 
 function cashBarHtml(titres, cash) {
   if (!(cash.amount > 0)) return '';
   const tot = Math.max(0, titres) + cash.amount, pT = tot > 0 ? Math.max(0, titres) / tot : 0, pC = 1 - pT, pc = (x) => fmtPct(x, x < 0.1 && x > 0 ? 1 : 0);
-  return '<div class="cash-bar" style="margin:10px 0 2px"><div style="display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--border)" role="img" aria-label="Répartition titres et liquidités">' +
+  return '<div class="cash-bar" style="margin:12px 0 4px"><div style="display:flex;height:14px;border-radius:8px;overflow:hidden;background:var(--border)" role="img" aria-label="Répartition titres et liquidités">' +
     '<span style="width:' + (pT * 100).toFixed(2) + '%;background:var(--chart-1)"></span><span style="width:' + (pC * 100).toFixed(2) + '%;background:var(--chart-3)"></span></div>' +
-    '<div class="muted" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;margin-top:4px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-1);margin-right:5px"></i>Titres <span class="sens">' + money(Math.max(0, titres), 0) + '</span> (' + pc(pT) + ')</span>' +
-    '<span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-3);margin-right:5px"></i>Liquidités <span class="sens">' + money(cash.amount, 0) + '</span> (' + pc(pC) + ') · ' + esc(cashScopeLabel(cash)) + '</span></div></div>';
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:14px;margin-top:6px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-1);margin-right:5px"></i>Titres <b class="sens">' + money(Math.max(0, titres), 0) + '</b> (' + pc(pT) + ')</span>' +
+    '<span><i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--chart-3);margin-right:5px"></i>Liquidités <b class="sens">' + money(cash.amount, 0) + '</b> (' + pc(pC) + ')</span></div></div>';
 }
 function portfolioSummaryHtml(perf) {
   const ids = visibleIds(), pv = Engine.portfolioValue(state, convert, ids), inv = Engine.investedTotal(state, convert, ids);
