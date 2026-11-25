@@ -1,0 +1,71 @@
+/* Tests de attrib.js : attribution d'actions gratuites Air Liquide, prime de fidélité, rompus, doublons.
+   Résultats attendus tirés des EXEMPLES OFFICIELS du Guide de l'actionnaire Air Liquide 2026 (fiches pratiques n° 3 et n° 5).
+   Lancer :  node tests/attrib.test.js */
+const assert = require('assert');
+const A = require('../attrib.js');
+const L = require('../ledger.js');
+let n = 0, failed = 0; const t = (name, fn) => { try { fn(); n++; console.log('ok  ', name); } catch (e) { failed++; console.log('FAIL', name, '\n   ', e.stack.split('\n').slice(0, 3).join(' | ')); process.exitCode = 1; } };
+const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, (m || '') + ' : ' + a + ' ≠ ' + b);
+let u = 0; const deps = { uid: () => 'u' + (++u), today: '2026-11-25' };
+const ISIN = 'FR0000120073';
+const OP24 = { id: 'T-2024', isin: ISIN, name: 'Air Liquide', N: 10, bonusPct: 10, exDate: '2024-06-03', creditDate: '2024-06-05', exConfirmed: true, creditConfirmed: true, source: 'test' };
+const buy = (id, h, date, qty, price, extra) => Object.assign({ id, holdingId: h, date, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'manual' }, extra || {});
+const mk = (mode, qty, txs, extra) => ({ holdings: [Object.assign({ id: 'h', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: ISIN, name: 'Air Liquide', currency: 'EUR', costCurrency: 'EUR', account: 'a', quantity: qty, avgCost: 100, holdMode: mode, addedAt: '2019-01-01' }, extra || {})], archive: [], corp: [], attributions: [OP24], transactions: txs });
+
+t('ancienneté : les inscriptions à partir du 29 décembre comptent l\'année suivante ; éligible à partir de Y + 3', () => {
+  assert.strictEqual(A.effYear('2021-12-31'), 2022); assert.strictEqual(A.effYear('2021-12-28'), 2021); assert.strictEqual(A.effYear('2020-03-01'), 2020);
+});
+t('exemple officiel n° 1 (au nominatif) : 100 actions éligibles → 10 gratuites + 1 de prime de fidélité = 11', () => {
+  const st = mk('registered', 100, [buy('t1', 'h', '2020-03-01', 100, 100)]); const c = A.compute(st, st.holdings[0], OP24);
+  assert.deepStrictEqual([c.held, c.eligible, c.base, c.bonus, c.free, c.after], [100, 100, 10, 1, 11, 111]); near(c.rompuQty, 0); assert.deepStrictEqual(c.reasons, [], 'données fiables, opération confirmée');
+});
+t('exemple officiel n° 2 : 225 actions dont 112 éligibles → 22 + 1 ; rompus 0,5 + 0,12', () => {
+  const st = mk('registered', 225, [buy('t1', 'h', '2021-05-01', 112, 100), buy('t2', 'h', '2022-03-01', 113, 100)]); const c = A.compute(st, st.holdings[0], OP24);
+  assert.deepStrictEqual([c.held, c.eligible, c.base, c.bonus, c.free], [225, 112, 22, 1, 23]); near(c.rompuQty, 0.62, 'rompus : 0,5 + 0,12');
+});
+t('au porteur (compte-titres, PEA) : attribution de base, jamais de prime de fidélité ; rompus à part', () => {
+  const st = mk('bearer', 16, [buy('t1', 'h', '2019-05-01', 16, 100)]); const c = A.compute(st, st.holdings[0], OP24);
+  assert.deepStrictEqual([c.eligible, c.base, c.bonus, c.free], [0, 1, 0, 1]); near(c.rompuQty, 0.6);
+});
+t('actions achetées trop récemment ou transférées au nominatif tard : non éligibles à la prime (date d\'inscription au nominatif)', () => {
+  let st = mk('registered', 30, [buy('t1', 'h', '2023-02-10', 30, 100)]); assert.strictEqual(A.compute(st, st.holdings[0], OP24).eligible, 0, 'acheté en 2023 : prime à partir de 2026');
+  st = mk('registered', 30, [buy('t1', 'h', '2019-02-10', 30, 100, { nomSince: '2023-06-01' })]); assert.strictEqual(A.compute(st, st.holdings[0], OP24).eligible, 0, 'acheté en 2019 au porteur, inscrit au nominatif en 2023 : pas éligible');
+  st = mk('registered', 30, [buy('t1', 'h', '2019-02-10', 30, 100, { nomSince: '2021-06-01' })]); assert.strictEqual(A.compute(st, st.holdings[0], OP24).eligible, 30, 'inscrit au nominatif en 2021 : éligible en 2024');
+});
+t('mode de détention non indiqué, cessions, historique incomplet, date non confirmée : « à vérifier » avec les raisons (jamais d\'application silencieuse)', () => {
+  let st = mk(undefined, 10, [buy('t1', 'h', '2020-03-01', 10, 100)]); assert.ok(A.compute(st, st.holdings[0], OP24).reasons.some((r) => /mode de détention/.test(r)));
+  st = mk('registered', 8, [buy('t1', 'h', '2020-03-01', 10, 100), { id: 's1', holdingId: 'h', date: '2022-01-01', type: 'sell', qty: 2, price: 120, fees: 0, currency: 'EUR', amountAcct: 240, acctCur: 'EUR', source: 'manual' }]); assert.ok(A.compute(st, st.holdings[0], OP24).reasons.some((r) => /cessions/.test(r)));
+  st = mk('bearer', 10, []); assert.ok(A.compute(st, st.holdings[0], OP24).reasons.some((r) => /aucune opération/.test(r)));
+  const st26 = mk('registered', 30, [buy('t1', 'h', '2026-02-10', 30, 100)]); st26.attributions = []; const pr = A.proposals(st26, '2026-11-25'); assert.strictEqual(pr.length, 1); assert.strictEqual(pr[0].status, 'review'); assert.ok(pr[0].calc.reasons.some((r) => /détachement non confirmée/.test(r)));
+  assert.strictEqual(pr[0].calc.eligible, 0, 'actions achetées en 2026 : prime à partir de 2029'); assert.strictEqual(pr[0].calc.free, 3, '30 titres : 3 gratuites');
+});
+t('application : livraison gratuite (quantité + gratuites, coût total inchangé, PRU recalculé), trace, jamais deux fois, annulable, rompus à part', () => {
+  const st = mk('registered', 100, [buy('t1', 'h', '2020-03-01', 100, 100)]); st.holdings[0].avgCost = 100; const r = A.apply(st, 'T-2024', 'h', deps); assert.ok(r.ok, r.error);
+  near(st.holdings[0].quantity, 111); near(st.holdings[0].avgCost, 100 * 100 / 111, 'PRU : coût total inchangé / 111'); assert.strictEqual(r.rec.free, 11); assert.strictEqual(r.rec.bonus, 1);
+  const tx = st.transactions.find((x) => x.id === r.rec.txId); assert.ok(tx.corp && tx.amountAcct === 0 && tx.attribId === 'T-2024', 'livraison gratuite sans montant, rattachée à l\'opération');
+  assert.ok(!A.apply(st, 'T-2024', 'h', deps).ok, 'deuxième application refusée'); near(st.holdings[0].quantity, 111, 'quantité inchangée au second essai'); assert.strictEqual(st.transactions.length, 2);
+  assert.strictEqual(A.proposals(st, '2026-11-25')[0].status, 'applied');
+  assert.ok(A.setRompuCash(st, r.rec.id, 12.34).ok); assert.strictEqual(st.attribApplied[0].rompuCash, 12.34); assert.strictEqual((st.payments || []).length, 0, 'l\'indemnité de rompus n\'est pas un dividende');
+  const rv = A.revert(st, r.rec.id); assert.ok(rv.ok); near(st.holdings[0].quantity, 100); near(st.holdings[0].avgCost, 100); assert.strictEqual(st.attribApplied.length, 0);
+  // la mise à jour du grand livre reste cohérente
+  const st2 = mk('bearer', 16, [buy('t1', 'h', '2019-05-01', 16, 100)]); A.apply(st2, 'T-2024', 'h', deps); const led = L.run(L.entriesFor(st2, st2.holdings[0]).entries); near(led.qty, 17); near(led.pru, st2.holdings[0].avgCost, 'grand livre : PRU identique');
+});
+t('doublons : une livraison gratuite déjà saisie ou importée à la même période = « déjà appliquée » (jamais appliquée une seconde fois)', () => {
+  const st = mk('bearer', 17, [buy('t1', 'h', '2019-05-01', 16, 100), buy('g1', 'h', '2024-06-05', 1, 0, { corp: true, price: null, amountAcct: 0 })]); const pr = A.proposals(st, '2026-11-25'); assert.strictEqual(pr[0].status, 'applied'); assert.strictEqual(pr[0].applied.by, 'ledger');
+  assert.ok(!A.apply(st, 'T-2024', 'h', deps).ok);
+});
+t('chaque compte reste distinct : DEGIRO (porteur) et nominatif pur calculés séparément, les autres positions ne sont jamais modifiées', () => {
+  const st = { holdings: [{ id: 'dg', ticker: 'AI.PA', isin: ISIN, name: 'Air Liquide', currency: 'EUR', costCurrency: 'EUR', account: 'degiro', quantity: 16, avgCost: 150, holdMode: 'bearer', addedAt: '2019-01-01' },
+    { id: 'nm', ticker: 'AI.PA', isin: ISIN, name: 'Air Liquide', currency: 'EUR', costCurrency: 'EUR', account: 'nom', quantity: 100, avgCost: 120, holdMode: 'registered', addedAt: '2019-01-01' },
+    { id: 'other', ticker: 'AAA', isin: 'FR0000000001', name: 'Autre', currency: 'EUR', quantity: 5, avgCost: 10, account: 'degiro' }], archive: [], corp: [], attributions: [OP24],
+    transactions: [buy('a1', 'dg', '2019-05-01', 16, 150, {}), buy('b1', 'nm', '2020-03-01', 100, 120, {})] }; st.transactions[0].holdingId = 'dg'; st.transactions[1].holdingId = 'nm';
+  const pr = A.proposals(st, '2026-11-25').filter((p) => p.op.id === 'T-2024'); assert.strictEqual(pr.length, 2); const by = {}; pr.forEach((p) => { by[p.h.id] = p.calc; });
+  assert.deepStrictEqual([by.dg.free, by.dg.bonus, by.nm.free, by.nm.bonus], [1, 0, 11, 1]); A.apply(st, 'T-2024', 'nm', deps); assert.strictEqual(st.holdings[0].quantity, 16, 'DEGIRO inchangé'); assert.strictEqual(st.holdings[2].quantity, 5, 'autre position inchangée'); assert.strictEqual(st.holdings[1].quantity, 111);
+});
+t('détection d\'après les données de marché : un fractionnement 1,1 inconnu = opération « à vérifier » ; connu du catalogue = ignoré', () => {
+  const st = mk('bearer', 16, [buy('t1', 'h', '2019-05-01', 16, 100)], { splits: [{ date: '2022-06-06', ratio: 1.1 }, { date: '2024-06-03', ratio: 1.1 }] });
+  const c = A.detectFromMarket(st, '2026-11-25'); assert.deepStrictEqual(c.map((x) => [x.id, x.N, x.exConfirmed]), [['AI-mkt-2022-06-06', 10, false]], 'le 3 juin 2024 est déjà connu');
+  assert.strictEqual(A.detectFromMarket(mk('bearer', 16, [], { splits: [{ date: '2026-06-08', ratio: 1.1 }] }), '2026-11-25').length, 0, 'opération du catalogue (2026-06-08)');
+});
+
+console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

@@ -196,8 +196,9 @@ function openBuysModal(id, startMode) {
       (sm.diff < 0 ? '<div class="btn-row" style="margin-top:8px"><button class="btn sm primary" type="button" id="byAlign">Mettre la position à jour d\'après ces achats (' + fmtNum(sm.ledgerQty) + ' titres)</button></div>' : '') + '</div>';
   const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Quantité détenue : <b>' + fmtNum(h.quantity) + '</b>' + (Number(h.avgCost) > 0 ? ' · prix de revient <b>' + fmtMoney(h.avgCost, costCur) + '</b>' : '') + '. Chaque achat (date + nombre d\'actions) alimente les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>.</div>' + status +
     (rows ? '<div class="tbl-wrap" style="max-height:220px;margin-top:8px"><table class="tbl"><thead><tr><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th>Source</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted" style="margin:8px 0">Aucun achat enregistré pour cette position.</div>') +
-    '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
+    (Attrib.isEligibleIsin(Ledger.holdingIsin(h)) ? attribSectionHtml(h) : '') + '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
     '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
+    (h.holdMode === 'registered' ? fld('Date d\'inscription au nominatif (si différente, ex. titres transférés d\'un compte-titres)', '<input type="date" id="byNom" max="' + todayISO() + '">', 'départ de l\'ancienneté pour la prime de fidélité ; vide = date d\'achat', 'byNom') : '') +
     (costCur !== cur ? '<div id="byCostRow">' + fld('Montant total payé en ' + costCur + ' (frais compris)', '<input type="text" inputmode="decimal" id="byCost" placeholder="montant débité" autocomplete="off">', 'le prix de revient est en ' + costCur + ' et le cours en ' + cur + ' : pas de taux de change inventé', 'byCost') + '</div>' : '') +
     '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div class="hint" id="byModeNote" style="margin:6px 0 0"></div><div id="byErr" class="notice err hide"></div>' +
     '<details class="hero-more" id="fsBox"' + (isAirLiquide ? ' open' : '') + '><summary>Actions gratuites reçues (attribution)</summary>' +
@@ -222,7 +223,7 @@ function openBuysModal(id, startMode) {
   const autoMode = (date, qty) => (sm.diff > 1e-6 && !sm.negative && date && added && date <= added && !(qty > sm.diff + 1e-6) ? 'history' : 'new');
   const val = (i) => { const e = $('#' + i, m); return e ? numOrNull(e.value) : null; };
   const modeNow = () => forced || autoMode($('#byDate', m).value, val('byQty'));
-  const read = () => ({ mode: modeNow(), date: $('#byDate', m).value, qty: val('byQty'), price: val('byPrice'), fees: val('byFees') || 0, amountCost: val('byCost') });
+  const read = () => ({ mode: modeNow(), date: $('#byDate', m).value, qty: val('byQty'), price: val('byPrice'), fees: val('byFees') || 0, amountCost: val('byCost'), nomSince: ($('#byNom', m) || {}).value || undefined });
   const refresh = () => {
     const mode = modeNow(), why = mode === 'history' ? (forced ? '' : ' (daté du ' + fmtDate($('#byDate', m).value) + ', avant ou le jour de l\'ajout de la position)') : '';
     $('#byModeNote', m).innerHTML = (mode === 'new' ? 'Nouvel achat : la quantité détenue et le prix de revient sont recalculés (moyenne pondérée, frais compris).' : 'Achat déjà compté dans votre quantité' + esc(why) + ' : il complète l\'historique, la quantité et le prix de revient ne changent pas.') +
@@ -244,6 +245,7 @@ function openBuysModal(id, startMode) {
   };
   m.addEventListener('input', refresh);
   refresh();
+  if (Attrib.isEligibleIsin(Ledger.holdingIsin(h))) wireAttrib(m, h, id);
   /* Actions gratuites : calcul facultatif (1 pour N détenues, prime de fidélité) puis enregistrement (quantité + PRU mis à jour) */
   const fsCalc = () => {
     const d = $('#fsDate', m).value, N = val('fsN'), E = val('fsElig') || 0, box = $('#fsPrev', m), qIn = $('#fsQty', m);
@@ -1111,6 +1113,118 @@ function positionNotices() {
     accept: { label: 'Compléter…', run: () => openPositionsToComplete(), ack: false } }];
 }
 /* Rappel du plan d'épargne : notification quand les exécutions de la dernière date du plan ne sont pas encore importées (aucun achat créé automatiquement). */
+
+/* ===============================================================
+   OPÉRATIONS SUR TITRES — attributions d'actions gratuites (Air Liquide) : droits, prime de fidélité, rompus (attrib.js)
+   La fiche (Achats) affiche, par position (compte), l'historique des opérations et propose celles qui restent à appliquer. Rien n'est appliqué sans validation,
+   sauf si l'utilisateur active l'application automatique ET que l'opération est entièrement vérifiée (aucune réserve).
+   =============================================================== */
+const ATT_MODE = { bearer: 'Au porteur (compte-titres, PEA)', registered: 'Au nominatif (pur chez Air Liquide / Uptevia, ou administré)' };
+function attribHoldingsAI() { return (state.holdings || []).filter((h) => Attrib.isEligibleIsin(Ledger.holdingIsin(h))); }
+function attribBadge(st, reasons) {
+  return st === 'applied' ? '<span class="badge received">Déjà appliquée</span>' : st === 'proposed' ? '<span class="badge info">Vérifiée — à appliquer</span>' : '<span class="badge warn" title="' + esc((reasons || []).join(' ; ')) + '">En attente de vérification</span>';
+}
+function attribSectionHtml(h) {
+  const today = todayISO(), cur = h.costCurrency || h.currency || 'EUR', props = Attrib.proposals(state, today).filter((p) => p.h.id === h.id);
+  const opsDone = state.attribApplied.filter((a) => a.holdingId === h.id);
+  const mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : '';
+  const modeSel = '<div class="row2">' + fld('Mode de détention de cette position', '<select id="atMode"><option value=""' + (mode ? '' : ' selected') + '>À indiquer…</option><option value="bearer"' + (mode === 'bearer' ? ' selected' : '') + '>' + esc(ATT_MODE.bearer) + '</option><option value="registered"' + (mode === 'registered' ? ' selected' : '') + '>' + esc(ATT_MODE.registered) + '</option></select>', 'sans cette information, aucune prime de fidélité n\'est supposée', 'atMode') + '</div>';
+  const lastOp = Attrib.operations(state).filter((o) => (o.creditDate || o.exDate) <= today).pop();
+  let elig = '';
+  if (mode === 'registered' && lastOp) {
+    const c = Attrib.compute(state, h, lastOp);
+    elig = '<div class="hint" style="margin:2px 0 6px">Éligibles à la prime de fidélité pour l\'opération du ' + esc(fmtDate(lastOp.creditDate || lastOp.exDate)) + ' : <b>' + fmtNum(c.eligible) + '</b> titre(s) sur ' + fmtNum(c.held) + ' détenus (plus de deux années civiles pleines au nominatif). ' +
+      (c.lots.length ? c.lots.map((l) => fmtNum(l.qty) + ' inscrit(s) le ' + (l.since ? fmtDate(l.since) : '?') + ' → éligible(s) ' + (l.since ? 'à partir de ' + (Attrib.effYear(l.since) + 3) : '—')).join(' · ') : '') + '</div>';
+  }
+  const rows = props.map((p) => {
+    const op = p.op, d = op.creditDate || op.exDate;
+    if (p.status === 'applied') {
+      const r = p.applied.rec;
+      if (!r) { const tx = p.applied.tx; return '<tr><td>' + esc(fmtDate(tx.date)) + '</td><td class="r">—</td><td class="r">' + fmtNum(tx.qty) + '</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>' + attribBadge('applied') + '<div class="dg-note">livraison gratuite déjà enregistrée (saisie ou import)</div></td></tr>'; }
+      return '<tr><td>' + esc(fmtDate(r.date)) + '</td><td class="r">' + fmtNum(r.before) + '</td><td class="r">' + fmtNum(r.base) + '</td><td class="r">' + (r.mode === 'registered' ? fmtNum(r.bonus) : '—') + '</td><td class="r">' + fmtNum(r.rompuQty, 3) + ' titre' + '<div><input type="text" inputmode="decimal" class="at-rc" data-rc="' + esc(r.id) + '" placeholder="indemnité (' + esc(cur) + ')" value="' + (r.rompuCash == null ? '' : r.rompuCash) + '" style="width:110px"></div></td><td class="r"><b>' + fmtNum(r.after) + '</b></td><td>' + attribBadge('applied') + '<div><button type="button" class="link-btn" data-atrv="' + esc(r.id) + '">Annuler cette opération</button></div></td></tr>';
+    }
+    const c = p.calc;
+    return '<tr><td>' + esc(fmtDate(d)) + '<div class="dg-note">1 pour ' + op.N + '</div></td><td class="r">' + fmtNum(c.held) + '</td><td class="r">' + fmtNum(c.base) + '</td><td class="r">' + (c.mode === 'registered' ? fmtNum(c.bonus) + '<div class="dg-note">' + fmtNum(c.eligible) + ' éligible(s)</div>' : '—') + '</td><td class="r">' + fmtNum(c.rompuQty, 3) + ' titre</td><td class="r"><b>' + fmtNum(c.after) + '</b></td><td>' + attribBadge(p.status, c.reasons) +
+      (c.mode === 'registered' ? '<div><input type="text" inputmode="decimal" class="at-el" data-elig="' + esc(op.id) + '" placeholder="éligibles (si connu)" style="width:130px"></div>' : '') + '<div class="btn-row" style="margin-top:4px"><button type="button" class="btn sm primary" data-atap="' + esc(op.id) + '">' + (p.status === 'proposed' ? 'Appliquer' : 'Vérifier et appliquer') + '</button></div></td></tr>';
+  }).join('');
+  const none = !props.length && !opsDone.length;
+  return '<div class="sec">Opérations sur titres</div>' + modeSel + elig +
+    (rows ? '<div class="tbl-wrap" style="margin-top:6px"><table class="tbl"><thead><tr><th>Date</th><th class="r">Avant</th><th class="r">Gratuites</th><th class="r">Bonus fidélité (+10 %)</th><th class="r">Rompus</th><th class="r">Après</th><th>Statut</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '') +
+    (none ? '<div class="muted" style="margin:4px 0">Aucune opération d\'attribution en attente pour cette position.</div>' : '') +
+    '<div class="hint" style="margin:6px 0">Attribution compte par compte : le porteur et le nominatif sont calculés séparément, les rompus aussi (valeur versée en espèces, à saisir quand vous la connaissez : elle n\'est jamais comptée comme dividende). Le prix de revient baisse, la somme investie ne change pas.</div>' +
+    '<label class="chk" style="margin:4px 0"><input type="checkbox" id="atAuto"' + (state.settings.attribAuto ? ' checked' : '') + '><span>Appliquer automatiquement les attributions entièrement vérifiées (sinon : proposition à valider). Un cas incertain n\'est jamais appliqué sans validation.</span></label>' +
+    '<div class="btn-row" style="margin-bottom:6px"><button class="btn sm" type="button" id="atCons">Vue consolidée Air Liquide (tous comptes)</button></div>';
+}
+function wireAttrib(m, h, id) {
+  const reopen = () => { saveState(); renderPage(); openBuysModal(id); };
+  if ($('#atMode', m)) $('#atMode', m).onchange = () => { const v = $('#atMode', m).value; if (v) h.holdMode = v; else delete h.holdMode; reopen(); };
+  if ($('#atCons', m)) $('#atCons', m).onclick = () => openAttribConsolidated();
+  if ($('#atAuto', m)) $('#atAuto', m).onchange = () => { if ($('#atAuto', m).checked) state.settings.attribAuto = true; else delete state.settings.attribAuto; saveState(); };
+  $$('[data-atap]', m).forEach((b) => b.onclick = async () => {
+    const opId = b.dataset.atap, p = Attrib.proposals(state, todayISO()).find((x) => x.h.id === h.id && x.op.id === opId); if (!p || p.status === 'applied') return;
+    const elEl = $('[data-elig="' + opId + '"]', m), ov = elEl && elEl.value !== '' ? numOrNull(elEl.value) : null;
+    const c = p.calc;
+    if (p.status === 'review') {
+      const ok = await confirmDialog({ title: 'Appliquer cette attribution ?', body: 'Quelques points ne sont pas confirmés :<ul style="margin:6px 0 6px 18px">' + c.reasons.map((r) => '<li>' + esc(r) + '</li>').join('') + '</ul>Résultat proposé : <b>' + c.free + '</b> action(s) gratuite(s) (dont ' + c.bonus + ' de prime de fidélité) ; la quantité passe de <b>' + fmtNum(c.held) + '</b> à <b>' + fmtNum(c.after) + '</b>. Le nombre de votre relevé fait foi : s\'il diffère, annulez et utilisez « Actions gratuites reçues ».', confirmLabel: 'Appliquer' });
+      if (!ok.ok) return;
+    }
+    const prevUndo = state.undo; snapshotForUndo('attribution d\'actions gratuites ' + (h.name || h.ticker));
+    const r = Attrib.apply(state, opId, h.id, { uid, today: todayISO() }, ov != null ? { eligibleOverride: ov } : {});
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true, ms: 9000 }); return; }
+    saveState(); renderPage(); openBuysModal(id);
+    toast('Attribution appliquée : +' + r.rec.free + ' action(s) gratuite(s) → ' + fmtNum(r.rec.after) + ' titre(s).', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  });
+  $$('[data-atrv]', m).forEach((b) => b.onclick = async () => {
+    const ok = await confirmDialog({ title: 'Annuler cette opération ?', body: 'La livraison gratuite est retirée : la quantité et le prix de revient reviennent à leur valeur d\'avant.', confirmLabel: 'Annuler l\'opération', danger: true }); if (!ok.ok) return;
+    const prevUndo = state.undo; snapshotForUndo('annulation d\'une attribution'); const r = Attrib.revert(state, b.dataset.atrv);
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true }); return; } reopen();
+  });
+  $$('.at-rc', m).forEach((i) => i.onchange = () => { const r = Attrib.setRompuCash(state, i.dataset.rc, i.value === '' ? null : numOrNull(i.value)); if (r.ok) { saveState(); toast('Indemnité de rompus enregistrée (hors dividendes).', { ms: 3000 }); } else toast(r.error, { error: true }); });
+}
+/* Vue consolidée : chaque compte reste distinct, le total est calculé en plus. */
+function openAttribConsolidated() {
+  const hs = attribHoldingsAI(), today = todayISO(), lastOp = Attrib.operations(state).filter((o) => (o.creditDate || o.exDate) <= today).pop();
+  if (!hs.length) { toast('Aucune position Air Liquide.'); return; }
+  const cols = hs.map((h) => {
+    const mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : null, c = lastOp ? Attrib.compute(state, h, lastOp) : null, rec = lastOp ? state.attribApplied.find((a) => a.opId === lastOp.id && a.holdingId === h.id) : null;
+    const rompuCash = state.attribApplied.filter((a) => a.holdingId === h.id && a.rompuCash != null).reduce((s, a) => s + a.rompuCash, 0), hasCash = state.attribApplied.some((a) => a.holdingId === h.id && a.rompuCash != null);
+    return { h, mode, qty: Number(h.quantity) || 0, eligible: mode === 'registered' && c ? c.eligible : (mode === 'bearer' ? 0 : null), bonus: rec ? rec.bonus : (c && mode ? c.bonus : null), free: rec ? rec.free : (c && mode ? c.free : null), rompu: rec ? rec.rompuQty : (c ? c.rompuQty : null), cash: hasCash ? rompuCash : null, applied: !!rec };
+  });
+  const sum = (k) => cols.every((c) => c[k] != null) ? cols.reduce((s, c) => s + c[k], 0) : null, cell = (v, d) => (v == null ? '<span class="muted">—</span>' : fmtNum(v, d || 0));
+  const head = cols.map((c) => '<th class="r">' + esc(accountName(c.h.account)) + '<div class="dg-note">' + esc(c.mode ? ATT_MODE[c.mode].split(' (')[0] : 'mode à indiquer') + '</div></th>').join('') + '<th class="r">Total consolidé</th>';
+  const line = (lbl, key, d) => '<tr><td>' + lbl + '</td>' + cols.map((c) => '<td class="r">' + cell(c[key], d) + '</td>').join('') + '<td class="r"><b>' + cell(sum(key), d) + '</b></td></tr>';
+  const m = openModal('<h2>Air Liquide — vue consolidée</h2><div class="sub">Chaque compte et chaque mode de détention restent <b>distincts</b> (positions, historiques, prime de fidélité, rompus) ; le total est seulement une vue d\'ensemble.' + (lastOp ? ' Dernière opération : <b>' + esc(fmtDate(lastOp.creditDate || lastOp.exDate)) + '</b> (1 pour ' + lastOp.N + ').' : '') + '</div>' +
+    '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + head + '</tr></thead><tbody>' + line('Actions détenues', 'qty') + line('Éligibles à la prime de fidélité', 'eligible') + line('Bonus fidélité (+10 %)', 'bonus') + line('Actions gratuites (dernière opération)', 'free') + line('Rompus (fraction de titre)', 'rompu', 3) +
+    '<tr><td>Indemnité de rompus saisie</td>' + cols.map((c) => '<td class="r">' + (c.cash == null ? '<span class="muted">—</span>' : esc(fmtMoney(c.cash, c.h.costCurrency || c.h.currency || 'EUR'))) + '</td>').join('') + '<td class="r muted">—</td></tr></tbody></table></div>' +
+    '<div class="hint" style="margin-top:6px">« — » : information non disponible (mode de détention à indiquer, ou opération non appliquée). Rien n\'est estimé.</div>' +
+    '<div class="modal-actions"><span></span><div class="btn-row"><button class="btn primary" type="button" data-close>Fermer</button></div></div>', { wide: true });
+}
+/* Cloche : opérations à valider + vérification tous les 6 mois (les attributions Air Liquide ont lieu environ tous les 2 ans ; la vérification est périodique). */
+function attribNotices() {
+  const hs = attribHoldingsAI(); if (!hs.length) return [];
+  const pend = Attrib.proposals(state, todayISO()).filter((p) => p.status !== 'applied'); if (!pend.length) return [];
+  return [{ id: 'attrib:' + pend.map((p) => p.op.id + p.h.id).sort().join(','), level: 'info', title: 'Attribution d\'actions gratuites à valider',
+    body: pend.slice(0, 3).map((p) => '<b>' + esc(accountName(p.h.account)) + '</b> : ' + p.calc.free + ' gratuite(s) (1 pour ' + p.op.N + ', ' + esc(fmtDate(p.op.creditDate || p.op.exDate)) + ')' + (p.status === 'review' ? ' — à vérifier' : '')).join('<br>') + (pend.length > 3 ? '<br>…' : ''),
+    accept: { label: 'Ouvrir la fiche', run: () => { openBuysModal(pend[0].h.id); }, ack: false } }];
+}
+/* Au démarrage : (1) application automatique, si activée, des opérations ENTIÈREMENT vérifiées ; (2) vérification périodique (6 mois) des opérations Air Liquide. */
+function attribAutoRun() {
+  const hs = attribHoldingsAI(); if (!hs.length) return;
+  const today = todayISO(), last = state.settings.attribCheckAt, due = !last || (Date.parse(today) - Date.parse(last)) / 86400000 >= 183;
+  let applied = 0;
+  if (state.settings.attribAuto) Attrib.proposals(state, today).filter((p) => p.status === 'proposed').forEach((p) => {
+    const prevUndo = state.undo; snapshotForUndo('attribution automatique ' + (p.h.name || ''));
+    const r = Attrib.apply(state, p.op.id, p.h.id, { uid, today });
+    if (r.ok) applied++; else if (prevUndo) state.undo = prevUndo; else delete state.undo;
+  });
+  if (applied) { saveState(); Notify.push({ level: 'info', title: applied + ' attribution(s) d\'actions gratuites appliquée(s)', body: 'Opérations Air Liquide entièrement vérifiées : quantité et prix de revient mis à jour, trace conservée dans la fiche (Opérations sur titres).', accept: { label: 'Annuler', run: () => undoLastImport(), ack: false } }); }
+  if (due) {
+    state.settings.attribCheckAt = today; saveState();
+    const pend = Attrib.proposals(state, today).filter((p) => p.status !== 'applied').length;
+    Notify.push({ level: 'info', title: 'Vérification des opérations Air Liquide', body: pend ? pend + ' attribution(s) à valider dans la fiche Air Liquide (Opérations sur titres).' : 'Aucune attribution d\'actions gratuites en attente. (Air Liquide en distribue environ tous les deux ans, en juin des années paires.)' });
+  }
+}
+
 function dcaNotices() {
   const r = Engine.dcaDue(state, todayISO()); if (!r) return [];
   return [{ id: 'dca:' + r.due, level: 'info', title: 'Plan d\'épargne : relevé à importer',

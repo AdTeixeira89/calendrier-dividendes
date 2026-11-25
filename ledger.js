@@ -702,7 +702,7 @@
     const qty = Number(p.qty), price = p.price == null || p.price === '' ? null : Number(p.price), fees = Number(p.fees) || 0;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) || p.date > deps.today) return err('Date d\'achat invalide (vide ou dans le futur).');
     if (!(qty > 0)) return err('Indiquez le nombre d\'actions achetées.'); if (price !== null && !(price > 0)) return err('Prix par action invalide (laissez vide si inconnu).'); if (fees < 0) return err('Frais invalides.');
-    const cur = h.currency || 'EUR'; const tx = { id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: price === null ? null : r2(qty * price + fees), acctCur: cur, source: 'manual', ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
+    const cur = h.currency || 'EUR'; const tx = { id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: price === null ? null : r2(qty * price + fees), acctCur: cur, source: 'manual', nomSince: /^\d{4}-\d{2}-\d{2}$/.test(String(p.nomSince || '')) ? p.nomSince : undefined, ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
     state.transactions = state.transactions || []; state.transactions.push(tx); return { ok: true, id: tx.id };
   }
   /* NOUVEL ACHAT d'une position détenue (fiche de l'action › Achats › « Nouvel achat ») : l'opération est enregistrée ET la position est mise à jour à la source :
@@ -739,7 +739,7 @@
     let avgAfter = null;
     if (qBefore <= EPS) avgAfter = amount / qAfter; else if (avgBefore !== null) avgAfter = (qBefore * avgBefore + amount) / qAfter;
     if (avgAfter !== null) avgAfter = Math.round(avgAfter * 1e6) / 1e6;
-    const tx = Object.assign({ id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: r2(amount), acctCur: costCur, source: 'manual', stored: { qty, cost: r2(amount) } }, ids);
+    const tx = Object.assign({ id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: r2(amount), acctCur: costCur, source: 'manual', stored: { qty, cost: r2(amount) }, nomSince: /^\d{4}-\d{2}-\d{2}$/.test(String(p.nomSince || '')) ? p.nomSince : undefined }, ids);
     state.transactions = state.transactions || []; if (opening) state.transactions.push(opening); state.transactions.push(tx);
     h.quantity = qAfter; if (avgAfter !== null) h.avgCost = avgAfter;
     return { ok: true, id: tx.id, qBefore, qAfter, avgBefore, avgAfter, cur: costCur, warnings, openingAdded: !!opening };

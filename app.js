@@ -69,7 +69,7 @@ function hydrateState(parsed) {
     s.holdings = Array.isArray(s.holdings) ? s.holdings : [];
     s.payments = Array.isArray(s.payments) ? s.payments : [];
     s.transactions = Array.isArray(s.transactions) ? s.transactions : [];
-    s.corp = Array.isArray(s.corp) ? s.corp : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {}; if (!s.ignored || typeof s.ignored !== 'object' || Array.isArray(s.ignored)) s.ignored = {};
+    s.corp = Array.isArray(s.corp) ? s.corp : []; s.attributions = Array.isArray(s.attributions) ? s.attributions : []; s.attribApplied = Array.isArray(s.attribApplied) ? s.attribApplied : []; s.imports = Array.isArray(s.imports) ? s.imports : []; if (!s.isinAlias || typeof s.isinAlias !== 'object') s.isinAlias = {}; if (!s.ignored || typeof s.ignored !== 'object' || Array.isArray(s.ignored)) s.ignored = {};
     s.archive = Array.isArray(s.archive) ? s.archive : [];  if (!s.notices || typeof s.notices !== 'object') s.notices = { handled: {} }; if (!s.notices.handled || typeof s.notices.handled !== 'object') s.notices.handled = {}; s.estimates = Array.isArray(s.estimates) ? s.estimates : []; s.migrations = Array.isArray(s.migrations) ? s.migrations : []; s.dividendImports = Array.isArray(s.dividendImports) ? s.dividendImports : [];            // positions entièrement vendues (leurs opérations restent dans l'historique)
     if (!s.undo || typeof s.undo !== 'object') delete s.undo;
     if (!Array.isArray(s.accounts) || !s.accounts.length) s.accounts = defaultState().accounts;
@@ -274,6 +274,7 @@ function autoDivAnalysisIfDue() {
   const last = Number(state.meta.lastDivAnalysisAt) || 0;
   if ((navigator.webdriver && !window.__divAutoTest) || !state.settings.relayUrl || !navigator.onLine || !state.holdings.length || Date.now() - last < DIV_ANALYSIS_EVERY_DAYS * 86400000 || (typeof lastDivAutoTry !== 'undefined' && Date.now() - lastDivAutoTry < 3600000)) return;
   lastDivAutoTry = Date.now();
+  try { attribAutoRun(); } catch (e) { console.error(e); }
   runDividendAnalysis({ auto: true, ids: null }).then(() => { state.meta.lastDivAnalysisAt = Date.now(); saveState(); }).catch((e) => console.error(e));
 }
 let lastDivAutoTry = 0;
@@ -758,13 +759,13 @@ function openCsvExport() {
 /* Retour arrière d'un import d'historique : photographie des données juste avant la modification (chiffrée avec le reste si un code est défini). */
 function snapshotForUndo(label) {
   state.undo = { at: new Date().toISOString(), label: label, holdings: clone(state.holdings), payments: clone(state.payments), transactions: clone(state.transactions), archive: clone(state.archive || []), accounts: clone(state.accounts),
-    corp: clone(state.corp || []), estimates: clone(state.estimates || []), migrations: clone(state.migrations || []), isinAlias: clone(state.isinAlias || {}), imports: clone(state.imports || []).map((x) => { delete x.raw; return x; }), reference: state.reference ? clone(state.reference) : null };
+    corp: clone(state.corp || []), attributions: clone(state.attributions || []), attribApplied: clone(state.attribApplied || []), estimates: clone(state.estimates || []), migrations: clone(state.migrations || []), isinAlias: clone(state.isinAlias || {}), imports: clone(state.imports || []).map((x) => { delete x.raw; return x; }), reference: state.reference ? clone(state.reference) : null };
 }
 async function undoLastImport() {
   const u = state.undo; if (!u) return;
   const c = await confirmDialog({ title: 'Annuler la dernière modification ?', body: 'Les positions, opérations, opérations sur titres et versements reviennent à leur état d\'avant « ' + esc(u.label) + ' » (' + esc(fmtDate(u.at.slice(0, 10))) + '). <b>Les modifications faites depuis seront perdues.</b>', confirmLabel: 'Annuler', danger: true });
   if (!c.ok) return;
-  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; state.estimates = u.estimates || []; state.migrations = u.migrations || []; state.corp = u.corp || []; state.isinAlias = u.isinAlias || {}; if (u.imports) { const rawById = {}; (state.imports || []).forEach((x) => { if (x.raw) rawById[x.id] = x.raw; }); state.imports = u.imports.map((x) => Object.assign(x, rawById[x.id] ? { raw: rawById[x.id] } : {})); } if (u.reference) state.reference = u.reference; else delete state.reference; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
+  state.holdings = u.holdings; state.payments = u.payments; state.transactions = u.transactions; state.archive = u.archive || []; state.estimates = u.estimates || []; state.migrations = u.migrations || []; state.corp = u.corp || []; state.attributions = u.attributions || []; state.attribApplied = u.attribApplied || []; state.isinAlias = u.isinAlias || {}; if (u.imports) { const rawById = {}; (state.imports || []).forEach((x) => { if (x.raw) rawById[x.id] = x.raw; }); state.imports = u.imports.map((x) => Object.assign(x, rawById[x.id] ? { raw: rawById[x.id] } : {})); } if (u.reference) state.reference = u.reference; else delete state.reference; if (u.accounts) state.accounts = u.accounts; if (view.account !== 'all' && !state.accounts.some((x) => x.id === view.account)) view.account = 'all'; delete state.undo;
   saveState(); renderPage(); toast('Import annulé : données restaurées.');
 }
 function importBackup(file) {
@@ -842,7 +843,7 @@ boot();
 /* Contrôle d'intégrité au démarrage : si une partie de l'application manque (fichiers de versions mélangées après une mise à jour interrompue, mauvais réseau),
    le cache est vidé et la page rechargée UNE fois ; si le problème persiste, un message l'explique au lieu d'une page cassée. */
 (function integrityCheck() {
-  const need = ['holdingByNameAny', 'openActionList', 'runDividendAnalysis', 'openDelistModal', 'openLiquidationModal', 'notifyDuplicates', 'openManualFx', 'Pdf', 'Sync', 'Dividends', 'Ledger', 'Engine', 'Market', 'Notify', 'positionNotices', 'continuityNotices'];
+  const need = ['holdingByNameAny', 'openActionList', 'runDividendAnalysis', 'openDelistModal', 'openLiquidationModal', 'notifyDuplicates', 'openManualFx', 'Pdf', 'Sync', 'Dividends', 'Attrib', 'Ledger', 'Engine', 'Market', 'Notify', 'positionNotices', 'continuityNotices'];
   const missing = need.filter((n) => { try { return new Function('return typeof ' + n)() === 'undefined'; } catch (e) { return true; } });
   if (!missing.length) { try { sessionStorage.removeItem('sp_heal'); } catch (e) { /* ignoré */ } return; }
   let tried = false; try { tried = sessionStorage.getItem('sp_heal') === '1'; sessionStorage.setItem('sp_heal', '1'); } catch (e) { /* ignoré */ }

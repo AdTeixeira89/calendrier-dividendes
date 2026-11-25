@@ -1,9 +1,9 @@
 /* Service worker — hors-ligne + rappels de versement */
 importScripts('payouts.js');
 
-const SHELL = 'dividendes-shell-v102';
+const SHELL = 'dividendes-shell-v103';
 const DATA = 'dividendes-data';
-const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'ledger.js', 'dividends.js', 'sync.js', 'audit.js', 'pdf.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'notify.js', 'pages.js', 'dashboard.js', 'forms.js', 'analysis.js', 'history.js', 'check.js', 'refresh.js', 'settings.js', 'app.js', 'vendor/papaparse.min.js', 'vendor/xlsx.full.min.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
+const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'payouts.js', 'ledger.js', 'dividends.js', 'sync.js', 'audit.js', 'attrib.js', 'pdf.js', 'engine.js', 'market.js', 'vault.js', 'cloud.js', 'ui.js', 'notify.js', 'pages.js', 'dashboard.js', 'forms.js', 'analysis.js', 'history.js', 'check.js', 'refresh.js', 'settings.js', 'app.js', 'vendor/papaparse.min.js', 'vendor/xlsx.full.min.js', 'manifest.json', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 
 /* Installation ATOMIQUE : tous les fichiers de la version ou rien (si l'un échoue, l'ancienne version reste en place, complète). */
 self.addEventListener('install', (e) => {
