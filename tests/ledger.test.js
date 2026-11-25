@@ -551,4 +551,35 @@ t('versements en double (import du courtier + saisie à la main) : détectés, f
   const big = mk(); big.payments[1].gross = 30; assert.strictEqual(L.findDuplicatePayments(big).length, 0, 'montants incompatibles : pas associés');
 });
 
+/* ---------- nouvel achat : la quantité et le PRU de la position sont recalculés à la source ---------- */
+t('nouvel achat (recordBuy) : quantité et PRU recalculés, achats successifs, grand livre cohérent, suppression qui défait', () => {
+  let u = 0; const deps = { uid: () => 'id' + (++u), today: '2026-11-25' };
+  const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, (m || '') + ' : ' + a + ' ≠ ' + b);
+  const T = (id, date, type, qty, price, fees) => ({ id, holdingId: 'h', date, type, qty, price, fees: fees || 0, currency: 'EUR', amountAcct: type === 'buy' ? qty * price + (fees || 0) : qty * price - (fees || 0), acctCur: 'EUR', source: 'csv', extId: id });
+  const mk = () => ({ holdings: [{ id: 'h', ticker: 'AAA', displayTicker: 'AAA', isin: 'FR0000000001', name: 'Alpha', currency: 'EUR', costCurrency: 'EUR', account: 'a', quantity: 10, avgCost: 50 }], archive: [], corp: [], transactions: [T('t1', '2025-01-10', 'buy', 10, 50)] });
+  const led = (st) => { const e = L.entriesFor(st, st.holdings[0]); const r = L.run(e.entries); return { q: r.qty, pru: r.pru }; };
+  // 1) un achat : 5 × 60 + 2 de frais → PRU = (10×50 + 302) / 15
+  let st = mk(); let r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 5, price: 60, fees: 2 }, deps);
+  assert.ok(r.ok, r.error); near(st.holdings[0].quantity, 15, 'quantité'); near(st.holdings[0].avgCost, (500 + 302) / 15, 'PRU'); assert.strictEqual(st.transactions.length, 2, 'l\'historique précédent est conservé, l\'achat est ajouté');
+  near(led(st).q, 15, 'grand livre : quantité'); near(led(st).pru, st.holdings[0].avgCost, 'grand livre : PRU identique');
+  // 2) plusieurs achats successifs
+  r = L.recordBuy(st, 'h', { date: '2026-03-01', qty: 3, price: 70, fees: 1 }, deps); assert.ok(r.ok); r = L.recordBuy(st, 'h', { date: '2026-04-01', qty: 2, price: 40 }, deps); assert.ok(r.ok);
+  near(st.holdings[0].quantity, 20, 'quantité après 3 achats'); near(st.holdings[0].avgCost, (500 + 302 + 211 + 80) / 20, 'PRU après 3 achats'); near(led(st).q, 20); near(led(st).pru, st.holdings[0].avgCost);
+  assert.strictEqual(st.transactions.length, 4); assert.strictEqual(new Set(st.transactions.map((x) => x.id)).size, 4, 'aucun doublon');
+  // 3) position sans historique : la quantité détenue au PRU saisi est inscrite comme ouverture, le grand livre reste cohérent
+  st = mk(); st.transactions = []; r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 5, price: 60, fees: 1 }, deps); assert.ok(r.ok && r.openingAdded);
+  near(st.holdings[0].quantity, 15); near(st.holdings[0].avgCost, (500 + 301) / 15); near(led(st).q, 15); near(led(st).pru, st.holdings[0].avgCost); assert.strictEqual(st.transactions.length, 2);
+  // 4) la suppression de l'achat défait la mise à jour
+  const buyId = r.id; const rm = L.removePurchase(st, buyId); assert.ok(rm.ok && rm.reverted); near(st.holdings[0].quantity, 10, 'quantité remise'); near(st.holdings[0].avgCost, 50, 'PRU remis');
+  // 5) achat « déjà compté » : rien n'est modifié sur la position
+  st = mk(); st.transactions = []; r = L.recordBuy(st, 'h', { mode: 'history', date: '2025-01-10', qty: 10, price: 50 }, deps); assert.ok(r.ok); near(st.holdings[0].quantity, 10); near(st.holdings[0].avgCost, 50); assert.strictEqual(st.transactions.length, 1);
+  // 6) erreurs : prix manquant, date future, devise du PRU différente sans montant
+  st = mk(); assert.ok(!L.recordBuy(st, 'h', { date: '2026-02-01', qty: 5 }, deps).ok, 'prix obligatoire pour recalculer le PRU'); assert.ok(!L.recordBuy(st, 'h', { date: '2027-01-01', qty: 5, price: 1 }, deps).ok);
+  near(st.holdings[0].quantity, 10); assert.strictEqual(st.transactions.length, 1, 'rien n\'est modifié en cas d\'erreur');
+  st = mk(); st.holdings[0].currency = 'USD'; r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 5, price: 60 }, deps); assert.ok(!r.ok && /EUR/.test(r.error), 'devise du PRU différente : montant demandé');
+  r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 5, price: 60, amountCost: 280 }, deps); assert.ok(r.ok, r.error); near(st.holdings[0].avgCost, (500 + 280) / 15);
+  // 7) premier achat d'une position vide
+  st = mk(); st.holdings[0].quantity = 0; st.holdings[0].avgCost = null; st.transactions = []; r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 4, price: 25, fees: 1 }, deps); assert.ok(r.ok); near(st.holdings[0].quantity, 4); near(st.holdings[0].avgCost, 101 / 4);
+});
+
 console.log('\n' + n + ' tests réussis');

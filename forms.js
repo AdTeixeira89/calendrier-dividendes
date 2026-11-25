@@ -182,26 +182,54 @@ function saveHoldingForm(m, ex) {
    =============================================================== */
 /* ---------------------------------------------------------------
    ACHATS D'UNE POSITION (plusieurs achats : date + nombre d'actions ; prix et frais facultatifs)
-   Alimente le calcul des dividendes réellement éligibles et de la performance. La quantité et le PRU actuels de la position ne sont jamais modifiés.
+   Alimente le calcul des dividendes réellement éligibles et de la performance. « Nouvel achat » met à jour la quantité et le PRU de la position (Ledger.recordBuy) ; « Achat déjà compté » complète seulement l'historique.
    --------------------------------------------------------------- */
-function openBuysModal(id) {
+function openBuysModal(id, startMode) {
   const h = holdingById(id); if (!h) return;
-  const cur = h.currency || 'EUR', sm = Ledger.purchaseSummary(state, h), lbl = { buy: 'Achat', sell: 'Vente', grant: 'Livraison gratuite', retire: 'Retrait' };
+  const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, sm = Ledger.purchaseSummary(state, h), lbl = { buy: 'Achat', sell: 'Vente', grant: 'Livraison gratuite', retire: 'Retrait' };
   const rows = sm.rows.map((r) => '<tr><td>' + esc(fmtDate(r.date)) + '</td><td>' + (r.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : esc(lbl[r.type] || r.type)) + '</td><td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + (r.price == null ? '<span class="muted" title="Prix non saisi">—</span>' : fmtMoney(r.price, r.cur || cur, { d: 4 })) + '</td><td class="muted">' + esc({ degiro: 'DEGIRO', csv: 'Import CSV', manual: 'Saisie' }[r.source] || r.source) + '</td><td class="r">' + (r.manual && (r.type === 'buy') ? '<button class="btn sm ghost" type="button" data-rm="' + esc(r.id) + '" aria-label="Supprimer cet achat">' + icon('trash') + '</button>' : '') + '</td></tr>').join('');
   const status = sm.negative ? '<div class="notice warn"><span>Les ventes dépassent les achats connus : historique incomplet.</span></div>'
     : sm.consistent ? '<div class="notice info"><span>✓ <b>' + fmtNum(sm.ledgerQty) + '</b> titre(s) d\'après les achats : cohérent avec la quantité détenue.' + (sm.pruCalc != null ? ' Prix de revient d\'après ces achats : <b>' + fmtMoney(sm.pruCalc, sm.pruCur || cur) + '</b>' + (Number(h.avgCost) > 0 ? ' (saisi : ' + fmtMoney(h.avgCost, h.costCurrency || cur) + ' — non modifié)' : '') + '.' : ' Au moins un prix manque : le coût et la performance de ce titre ne sont pas calculés précisément.') + '</span></div>'
     : '<div class="notice warn"><span>Achats saisis : <b>' + fmtNum(sm.ledgerQty) + '</b> sur <b>' + fmtNum(sm.holdingQty) + '</b> titre(s) détenu(s) — ' + (sm.diff > 0 ? '<b>il manque ' + fmtNum(sm.diff) + ' titre(s)</b> (achat manquant ?)' : 'les achats dépassent de ' + fmtNum(-sm.diff) + ' (vente manquante ?)') + '. Tant que ce n\'est pas cohérent, les dividendes et la performance ne sont pas calculés d\'après ces achats.</span></div>';
-  const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Ajoutez chaque achat (date + nombre d\'actions) : ils servent à calculer les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>. Votre quantité actuelle (' + fmtNum(h.quantity) + ') et votre prix de revient ne sont <b>pas modifiés</b>.</div>' + status +
+  const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Quantité détenue : <b>' + fmtNum(h.quantity) + '</b>' + (Number(h.avgCost) > 0 ? ' · prix de revient <b>' + fmtMoney(h.avgCost, costCur) + '</b>' : '') + '. Chaque achat (date + nombre d\'actions) alimente les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>.</div>' + status +
     (rows ? '<div class="tbl-wrap" style="max-height:220px;margin-top:8px"><table class="tbl"><thead><tr><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th>Source</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted" style="margin:8px 0">Aucun achat enregistré pour cette position.</div>') +
-    '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5"' + (sm.diff > 0 ? ' value="' + sm.diff + '"' : '') + ' autocomplete="off">', sm.diff > 0 ? 'prérempli avec les titres manquants' : '', 'byQty') + '</div>' +
+    '<div class="sec">Ajouter un achat</div><div class="seg" id="byMode" role="group" aria-label="Type d\'achat" style="margin-bottom:6px"><button type="button" data-m="new">Nouvel achat</button><button type="button" data-m="history">Achat déjà compté dans ma quantité</button></div><div class="hint" id="byModeNote" style="margin:0 0 8px"></div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', '', 'byQty') + '</div>' +
     '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
-    '<div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
-  $$('[data-rm]', m).forEach((b) => b.onclick = () => { const r = Ledger.removePurchase(state, b.dataset.rm); if (r.ok) { saveState(); openBuysModal(id); } });
+    (costCur !== cur ? '<div id="byCostRow">' + fld('Montant total payé en ' + costCur + ' (frais compris)', '<input type="text" inputmode="decimal" id="byCost" placeholder="montant débité" autocomplete="off">', 'le prix de revient est en ' + costCur + ' et le cours en ' + cur + ' : pas de taux de change inventé', 'byCost') + '</div>' : '') +
+    '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
+  $$('[data-rm]', m).forEach((b) => b.onclick = () => {
+    const prevUndo = state.undo; snapshotForUndo('suppression d\'un achat');
+    const r = Ledger.removePurchase(state, b.dataset.rm);
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true }); return; }
+    saveState(); renderPage(); openBuysModal(id, mode); if (r.reverted) toast('Achat supprimé : quantité et prix de revient remis à leur valeur d\'avant.', { ms: 9000, action: { label: 'Annuler', fn: undoLastImport } });
+  });
+  /* Deux usages : « Nouvel achat » (titres achetés EN PLUS : la quantité et le prix de revient de la position sont recalculés) ou « Achat déjà compté » (complète l\'historique d\'une
+     quantité déjà enregistrée : rien n\'est modifié). Par défaut : « Nouvel achat » (le cas courant). */
+  let mode = startMode === 'history' ? 'history' : 'new';
+  const val = (i) => { const e = $('#' + i, m); return e ? numOrNull(e.value) : null; };
+  const read = () => ({ mode, date: $('#byDate', m).value, qty: val('byQty'), price: val('byPrice'), fees: val('byFees') || 0, amountCost: val('byCost') });
+  const refresh = () => {
+    $$('#byMode [data-m]', m).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+    $('#byModeNote', m).textContent = mode === 'new' ? 'Titres achetés en plus de ceux que vous détenez : la quantité détenue et le prix de revient sont recalculés (moyenne pondérée, frais compris).' + (sm.diff > 1e-6 && !sm.negative ? ' Il manque ' + fmtNum(sm.diff) + ' titre(s) dans l\'historique : si l\'achat est déjà inclus dans votre quantité, choisissez « Achat déjà compté ».' : '') : 'Cet achat est déjà inclus dans la quantité détenue (' + fmtNum(h.quantity) + ') : il complète seulement l\'historique ; la quantité et le prix de revient ne sont pas modifiés.';
+    const cr = $('#byCostRow', m); if (cr) cr.classList.toggle('hide', mode !== 'new');
+    const x = read(), box = $('#byPrev', m), qB = Number(h.quantity) || 0, aB = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+    if (mode === 'history') { box.innerHTML = sm.diff > 1e-6 ? '<span class="muted">Il manque <b>' + fmtNum(sm.diff) + '</b> titre(s) dans l\'historique : saisissez les achats correspondants.</span>' : '<span class="muted">L\'historique est déjà complet : un achat « déjà compté » le ferait dépasser la quantité détenue.</span>'; return; }
+    if (!(x.qty > 0) || !(x.price > 0)) { box.innerHTML = '<span class="muted">Indiquez le nombre d\'actions et le prix pour voir la nouvelle quantité et le nouveau prix de revient.</span>'; return; }
+    const amount = costCur === cur ? x.qty * x.price + (x.fees || 0) : x.amountCost, qA = qB + x.qty, aA = !(amount > 0) ? null : qB <= 1e-9 ? amount / qA : aB !== null ? (qB * aB + amount) / qA : null;
+    box.innerHTML = '<ul><li>Quantité : <b>' + fmtNum(qB) + '</b> → <b>' + fmtNum(qA) + '</b></li><li>Prix de revient : ' + (aB !== null ? '<b>' + fmtMoney(aB, costCur) + '</b>' : '<b>inconnu</b>') + ' → ' + (aA !== null ? '<b>' + fmtMoney(aA, costCur) + '</b>' : '<b>à renseigner</b>') + '</li></ul>';
+  };
+  $$('#byMode [data-m]', m).forEach((b) => b.onclick = () => { mode = b.dataset.m; if (mode === 'history' && sm.diff > 1e-6 && !$('#byQty', m).value) $('#byQty', m).value = String(sm.diff); refresh(); });
+  m.addEventListener('input', refresh);
+  if (mode === 'history' && sm.diff > 1e-6) $('#byQty', m).value = String(sm.diff);       // on enchaîne les achats d'historique : titres manquants préremplis
+  refresh();
   $('#byAdd', m).onclick = () => {
-    const x = { date: $('#byDate', m).value, qty: numOrNull($('#byQty', m).value), price: numOrNull($('#byPrice', m).value), fees: numOrNull($('#byFees', m).value) || 0 };
-    const r = Ledger.addPurchase(state, id, x, { uid, today: todayISO() });
-    if (!r.ok) { const e = $('#byErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
-    saveState(); openBuysModal(id); toast('Achat ajouté.', { ms: 2000 });
+    const btn = $('#byAdd', m); if (btn.disabled) return; btn.disabled = true;           // pas de double validation (l\'achat ne peut pas être enregistré deux fois)
+    const x = read(), prevUndo = state.undo; snapshotForUndo('achat de ' + (h.name || h.ticker));
+    const r = Ledger.recordBuy(state, id, x, { uid, today: todayISO() });
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; btn.disabled = false; const e = $('#byErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); renderPage(); openBuysModal(id, mode);
+    if (mode === 'new') toast('Achat ajouté : ' + fmtNum(r.qAfter) + ' titre(s)' + (r.avgAfter != null ? ', prix de revient ' + fmtMoney(r.avgAfter, r.cur) : '') + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+    else toast('Achat ajouté à l\'historique (quantité et prix de revient inchangés).', { ms: 4000 });
   };
   setTimeout(() => $('#byDate', m).focus(), 50);
 }

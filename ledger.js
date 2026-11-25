@@ -685,8 +685,8 @@
 
   /* ---------------------------------------------------------------
      ACHATS SAISIS À LA MAIN (plusieurs achats pour une même action : date + nombre d'actions, prix et frais facultatifs)
-     Ils alimentent le grand livre : quantité détenue à chaque date (dividendes réellement éligibles), coût et performance. Ils ne modifient JAMAIS la quantité
-     ni le prix de revient actuels de la position ; un écart avec la quantité détenue est signalé, pas corrigé.
+     Ils alimentent le grand livre : quantité détenue à chaque date (dividendes réellement éligibles), coût et performance. addPurchase (achat DÉJÀ compté, complète l'historique)
+     ne modifie PAS la quantité ni le prix de revient de la position : un écart est signalé, pas corrigé. recordBuy (nouvel achat) les met à jour.
      --------------------------------------------------------------- */
   function purchaseSummary(state, h) {
     const { entries, cur, txs } = entriesFor(state, h), led = run(entries), cq = Number(h.quantity) || 0;
@@ -705,10 +705,59 @@
     const cur = h.currency || 'EUR'; const tx = { id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: price === null ? null : r2(qty * price + fees), acctCur: cur, source: 'manual', ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
     state.transactions = state.transactions || []; state.transactions.push(tx); return { ok: true, id: tx.id };
   }
+  /* NOUVEL ACHAT d'une position détenue (fiche de l'action › Achats › « Nouvel achat ») : l'opération est enregistrée ET la position est mise à jour à la source :
+       quantité = quantité détenue + quantité achetée ;
+       PRU = (quantité détenue × PRU actuel + montant de l'achat, frais compris) / nouvelle quantité  (moyenne pondérée, même règle que le grand livre).
+     Sans historique d'opérations, la quantité détenue au PRU saisi est d'abord inscrite comme opération d'ouverture (comme pour une vente), pour que le grand livre
+     reste cohérent avec la quantité enregistrée. Prix de revient en devise différente de la cotation : le montant payé dans la devise du PRU est demandé (jamais de taux inventé).
+     L'opération porte p.stored = { qty, cost } : sa suppression défait la mise à jour. Mode « history » : achat DÉJÀ compté dans la quantité détenue (complète l'historique), rien n'est modifié. */
+  function recordBuy(state, id, p, deps) {
+    if (p && p.mode === 'history') return addPurchase(state, id, p, deps);
+    const err = (error) => ({ ok: false, error });
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return err('Position introuvable.');
+    const qty = Number(p.qty), price = Number(p.price), fees = Number(p.fees) || 0;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) || p.date > deps.today) return err('Date d\'achat invalide (vide ou dans le futur).');
+    if (!(qty > 0)) return err('Indiquez le nombre d\'actions achetées.'); if (!(price > 0)) return err('Indiquez le prix par action : il sert à recalculer le prix de revient.'); if (fees < 0) return err('Frais invalides.');
+    const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, warnings = [];
+    let amount;                                                         // coût de l'achat dans la devise du prix de revient, frais compris
+    if (costCur === cur) amount = qty * price + fees;
+    else if (Number(p.amountCost) > 0) amount = Number(p.amountCost);
+    else return err('Le prix de revient de cette position est en ' + costCur + ' et le cours en ' + cur + ' : indiquez le montant total payé en ' + costCur + ' (frais compris).');
+    const qBefore = Number(h.quantity) || 0, avgBefore = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+    const txs = (state.transactions || []).filter((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell'));
+    const ids = { ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
+    let opening = null;
+    if (!txs.length && qBefore > EPS) {
+      const added = h.addedAt ? String(h.addedAt).slice(0, 10) : '', od = added && added < p.date ? added : p.date;
+      opening = Object.assign({ id: deps.uid(), holdingId: h.id, date: od, time: '', type: 'buy', qty: qBefore, price: avgBefore, fees: 0, currency: costCur, amountAcct: avgBefore === null ? null : r2(qBefore * avgBefore), acctCur: costCur, source: 'manual', opening: true, approx: true }, ids);
+      if (avgBefore === null) warnings.push('Prix de revient actuel inconnu : la quantité est mise à jour, le prix de revient reste à renseigner.');
+    } else if (txs.length) {
+      const led = run(entriesFor(state, h).entries);
+      if (Math.abs(led.qty - qBefore) > 1e-6 * Math.max(1, qBefore)) warnings.push('L\'historique d\'opérations (' + led.qty + ' titre(s)) ne correspondait pas déjà à la quantité enregistrée (' + qBefore + ') : à contrôler dans « Contrôle de l\'historique ».');
+    }
+    const qAfter = r8(qBefore + qty);
+    let avgAfter = null;
+    if (qBefore <= EPS) avgAfter = amount / qAfter; else if (avgBefore !== null) avgAfter = (qBefore * avgBefore + amount) / qAfter;
+    if (avgAfter !== null) avgAfter = Math.round(avgAfter * 1e6) / 1e6;
+    const tx = Object.assign({ id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', qty, price, fees, currency: cur, amountAcct: r2(amount), acctCur: costCur, source: 'manual', stored: { qty, cost: r2(amount) } }, ids);
+    state.transactions = state.transactions || []; if (opening) state.transactions.push(opening); state.transactions.push(tx);
+    h.quantity = qAfter; if (avgAfter !== null) h.avgCost = avgAfter;
+    return { ok: true, id: tx.id, qBefore, qAfter, avgBefore, avgAfter, cur: costCur, warnings, openingAdded: !!opening };
+  }
   function removePurchase(state, txId) {
     const i = (state.transactions || []).findIndex((t) => t.id === txId); if (i < 0) return { ok: false, error: 'Opération introuvable.' };
     const t = state.transactions[i]; if ((t.source || 'manual') !== 'manual' && !t.opening) return { ok: false, error: 'Opération importée du courtier : elle ne se supprime pas ici.' };
-    state.transactions.splice(i, 1); return { ok: true };
+    // achat enregistré comme « nouvel achat » : sa suppression défait la mise à jour de la quantité et du prix de revient
+    if (t.stored && t.stored.qty > 0) {
+      const h = (state.holdings || []).find((x) => x.id === t.holdingId);
+      if (h) {
+        const q = Number(h.quantity) || 0, avg = Number(h.avgCost) > 0 ? Number(h.avgCost) : null, qNew = r8(q - t.stored.qty);
+        if (qNew < -1e-6) return { ok: false, error: 'La quantité actuelle (' + q + ') est inférieure à celle de cet achat (' + t.stored.qty + ') : supprimez-le après avoir corrigé la position.' };
+        h.quantity = Math.max(0, qNew);
+        if (avg !== null && qNew > EPS) h.avgCost = Math.round(Math.max(0, (q * avg - t.stored.cost) / qNew) * 1e6) / 1e6;
+      }
+    }
+    state.transactions.splice(i, 1); return { ok: true, reverted: !!(t.stored && t.stored.qty > 0) };
   }
 
   /* Archive → position actuelle sur décision de l'utilisateur (quantité et PRU recalculés). */
@@ -1081,6 +1130,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
+    purchaseSummary, addPurchase, recordBuy, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);
