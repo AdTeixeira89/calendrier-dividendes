@@ -186,6 +186,7 @@ function saveHoldingForm(m, ex) {
    --------------------------------------------------------------- */
 function openBuysModal(id, startMode) {
   const h = holdingById(id); if (!h) return;
+  const isAirLiquide = Ledger.holdingIsin(h) === 'FR0000120073';
   const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, sm = Ledger.purchaseSummary(state, h), lbl = { buy: 'Achat', sell: 'Vente', grant: 'Livraison gratuite', retire: 'Retrait' };
   const rows = sm.rows.map((r) => '<tr><td>' + esc(fmtDate(r.date)) + '</td><td>' + (r.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : esc(lbl[r.type] || r.type)) + '</td><td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + (r.price == null ? '<span class="muted" title="Prix non saisi">—</span>' : fmtMoney(r.price, r.cur || cur, { d: 4 })) + '</td><td class="muted">' + esc({ degiro: 'DEGIRO', csv: 'Import CSV', manual: 'Saisie' }[r.source] || r.source) + '</td><td class="r">' + (r.manual && (r.type === 'buy') ? '<button class="btn sm ghost" type="button" data-rm="' + esc(r.id) + '" aria-label="Supprimer cet achat">' + icon('trash') + '</button>' : '') + '</td></tr>').join('');
   const status = sm.negative ? '<div class="notice warn"><span>Les ventes dépassent les achats connus : historique incomplet.</span></div>'
@@ -197,7 +198,14 @@ function openBuysModal(id, startMode) {
     '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
     '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
     (costCur !== cur ? '<div id="byCostRow">' + fld('Montant total payé en ' + costCur + ' (frais compris)', '<input type="text" inputmode="decimal" id="byCost" placeholder="montant débité" autocomplete="off">', 'le prix de revient est en ' + costCur + ' et le cours en ' + cur + ' : pas de taux de change inventé', 'byCost') + '</div>' : '') +
-    '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div class="hint" id="byModeNote" style="margin:6px 0 0"></div><div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
+    '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div class="hint" id="byModeNote" style="margin:6px 0 0"></div><div id="byErr" class="notice err hide"></div>' +
+    '<details class="hero-more" id="fsBox"' + (isAirLiquide ? ' open' : '') + '><summary>Actions gratuites reçues (attribution)</summary>' +
+    '<div class="hint" style="margin:4px 0 8px">Une attribution d\'actions gratuites s\'ajoute à votre quantité <b>sans coût</b> : le prix de revient baisse, la somme investie ne change pas.' + (isAirLiquide ? ' Chez Air Liquide, l\'attribution (1 pour 10) est la même <b>au porteur</b> (compte-titres, PEA) <b>et au nominatif</b> ; seule la <b>prime de fidélité</b> (+ 10 % d\'actions gratuites) est réservée aux actions au nominatif détenues depuis plus de 2 années civiles pleines. Elle se calcule compte par compte : les rompus sont versés en espèces.' : '') + '</div>' +
+    (isAirLiquide ? '<div class="btn-row" style="margin-bottom:6px"><button type="button" class="btn sm" id="fsAL">Remplir : attribution Air Liquide du 10 juin 2026 (1 pour 10)</button></div>' : '') +
+    '<div class="row2">' + fld('Date d\'attribution', '<input type="date" id="fsDate" max="' + todayISO() + '">', '', 'fsDate') + fld('1 gratuite pour … détenues', '<input type="text" inputmode="decimal" id="fsN" placeholder="ex : 10" autocomplete="off">', 'pour calculer le nombre reçu', 'fsN') + '</div>' +
+    '<div class="row2">' + fld('dont éligibles à la prime de fidélité', '<input type="text" inputmode="decimal" id="fsElig" placeholder="0 (nominatif depuis plus de 2 ans)" autocomplete="off">', 'facultatif : titres au nominatif', 'fsElig') + fld('Actions gratuites reçues', '<input type="text" inputmode="decimal" id="fsQty" placeholder="nombre reçu" autocomplete="off">', 'saisissez le nombre exact de votre relevé, ou laissez le calcul', 'fsQty') + '</div>' +
+    '<div id="fsPrev" class="dg-summary" style="margin-top:6px"></div><div id="fsErr" class="notice err hide"></div>' +
+    '<div class="btn-row" style="margin-top:6px"><button class="btn" type="button" id="fsAdd">' + icon('plus') + 'Ajouter les actions gratuites</button></div></details><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
   $$('[data-rm]', m).forEach((b) => b.onclick = () => {
     const prevUndo = state.undo; snapshotForUndo('suppression d\'un achat');
     const r = Ledger.removePurchase(state, b.dataset.rm);
@@ -235,6 +243,28 @@ function openBuysModal(id, startMode) {
   };
   m.addEventListener('input', refresh);
   refresh();
+  /* Actions gratuites : calcul facultatif (1 pour N détenues, prime de fidélité) puis enregistrement (quantité + PRU mis à jour) */
+  const fsCalc = () => {
+    const d = $('#fsDate', m).value, N = val('fsN'), E = val('fsElig') || 0, box = $('#fsPrev', m), qIn = $('#fsQty', m);
+    if (d && N > 0) {
+      const held = Engine.quantityAt(state, h, d), base = Math.floor(held / N + 1e-9), bonus = E > 0 ? Math.floor(E / N * 0.1 + 1e-9) : 0;
+      if (document.activeElement !== qIn && !qIn.dataset.touched) qIn.value = String(base + bonus);
+      box.innerHTML = '<span class="muted">' + fmtNum(held) + ' titre(s) détenu(s) à cette date → ' + base + ' gratuite(s)' + (bonus ? ' + ' + bonus + ' (prime de fidélité)' : '') + ' ; le reste (rompu) est versé en espèces. À corriger avec le nombre de votre relevé si différent.</span>';
+    }
+    const q = val('fsQty'), qB = Number(h.quantity) || 0, aB = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+    if (q > 0) box.innerHTML += '<ul><li>Quantité : <b>' + fmtNum(qB) + '</b> → <b>' + fmtNum(qB + q) + '</b></li><li>Prix de revient : ' + (aB !== null ? '<b>' + fmtMoney(aB, costCur) + '</b> → <b>' + fmtMoney(qB * aB / (qB + q), costCur) + '</b> (coût total inchangé)' : '<b>inconnu</b>') + '</li></ul>';
+  };
+  $('#fsQty', m).addEventListener('input', () => { $('#fsQty', m).dataset.touched = '1'; });
+  ['fsDate', 'fsN', 'fsElig', 'fsQty'].forEach((i) => $('#' + i, m).addEventListener('input', fsCalc));
+  if ($('#fsAL', m)) $('#fsAL', m).onclick = () => { $('#fsDate', m).value = '2026-06-10'; $('#fsN', m).value = '10'; delete $('#fsQty', m).dataset.touched; fsCalc(); };
+  $('#fsAdd', m).onclick = () => {
+    const btn = $('#fsAdd', m); if (btn.disabled) return; btn.disabled = true;
+    const prevUndo = state.undo; snapshotForUndo('actions gratuites de ' + (h.name || h.ticker));
+    const r = Ledger.recordFreeShares(state, id, { date: $('#fsDate', m).value, qty: val('fsQty') }, { uid, today: todayISO() });
+    if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; btn.disabled = false; const e = $('#fsErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); renderPage(); openBuysModal(id);
+    toast('Actions gratuites ajoutées : ' + fmtNum(r.qAfter) + ' titre(s)' + (r.avgAfter != null ? ', prix de revient ' + fmtMoney(r.avgAfter, r.cur) : '') + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
   $('#byAdd', m).onclick = () => {
     const btn = $('#byAdd', m); if (btn.disabled) return; btn.disabled = true;           // pas de double validation (l\'achat ne peut pas être enregistré deux fois)
     const x = read(), prevUndo = state.undo; snapshotForUndo('achat de ' + (h.name || h.ticker));

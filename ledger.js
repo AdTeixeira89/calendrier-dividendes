@@ -744,6 +744,34 @@
     h.quantity = qAfter; if (avgAfter !== null) h.avgCost = avgAfter;
     return { ok: true, id: tx.id, qBefore, qAfter, avgBefore, avgAfter, cur: costCur, warnings, openingAdded: !!opening };
   }
+  /* ACTIONS GRATUITES REÇUES (attribution d'actions gratuites, ex. Air Liquide 1 pour 10) : livraison sans montant. L'opération est enregistrée (type « livraison gratuite »,
+     coût nul) ET la position est mise à jour : quantité + actions reçues, prix de revient = coût total inchangé / nouvelle quantité (le PRU baisse, l'investi ne bouge pas).
+     Sans historique d'opérations, la quantité détenue au PRU saisi est d'abord inscrite comme opération d'ouverture (comme pour un achat). Supprimable : défait la mise à jour. */
+  function recordFreeShares(state, id, p, deps) {
+    const err = (error) => ({ ok: false, error });
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return err('Position introuvable.');
+    const qty = Number(p.qty);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) || p.date > deps.today) return err('Date d\'attribution invalide (vide ou dans le futur).');
+    if (!(qty > 0)) return err('Indiquez le nombre d\'actions gratuites reçues.');
+    const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, warnings = [];
+    const qBefore = Number(h.quantity) || 0, avgBefore = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+    const txs = (state.transactions || []).filter((t) => t.holdingId === h.id && (t.type === 'buy' || t.type === 'sell'));
+    const ids = { ticker: h.displayTicker || h.ticker, name: h.name || '', isin: h.isin || '' };
+    let opening = null;
+    if (!txs.length && qBefore > EPS) {
+      const added = h.addedAt ? String(h.addedAt).slice(0, 10) : '', od = added && added < p.date ? added : p.date;
+      opening = Object.assign({ id: deps.uid(), holdingId: h.id, date: od, time: '', type: 'buy', qty: qBefore, price: avgBefore, fees: 0, currency: costCur, amountAcct: avgBefore === null ? null : r2(qBefore * avgBefore), acctCur: costCur, source: 'manual', opening: true, approx: true }, ids);
+      if (avgBefore === null) warnings.push('Prix de revient actuel inconnu : la quantité est mise à jour, le prix de revient reste à renseigner.');
+    } else if (txs.length) {
+      const led = run(entriesFor(state, h).entries);
+      if (Math.abs(led.qty - qBefore) > 1e-6 * Math.max(1, qBefore)) warnings.push('L\'historique d\'opérations (' + led.qty + ' titre(s)) ne correspondait pas déjà à la quantité enregistrée (' + qBefore + ') : à contrôler dans « Contrôle de l\'historique ».');
+    }
+    const qAfter = r8(qBefore + qty), avgAfter = avgBefore === null ? null : Math.round((qBefore * avgBefore / qAfter) * 1e6) / 1e6;
+    const tx = Object.assign({ id: deps.uid(), holdingId: h.id, date: p.date, time: '', type: 'buy', corp: true, freeShares: true, qty, price: null, fees: 0, currency: costCur, amountAcct: 0, acctCur: costCur, source: 'manual', stored: { qty, cost: 0 }, note: p.note || undefined }, ids);
+    state.transactions = state.transactions || []; if (opening) state.transactions.push(opening); state.transactions.push(tx);
+    h.quantity = qAfter; if (avgAfter !== null) h.avgCost = avgAfter;
+    return { ok: true, id: tx.id, qBefore, qAfter, avgBefore, avgAfter, cur: costCur, warnings, openingAdded: !!opening };
+  }
   /* ALIGNER LA POSITION SUR SES ACHATS (sur décision de l'utilisateur, depuis la fiche › Achats) : quand les achats saisis dépassent la quantité enregistrée (achat ajouté avant que
      « Nouvel achat » ne mette la position à jour), la quantité et le PRU enregistrés deviennent ceux du grand livre. Refusé si le grand livre est incohérent, si un coût manque
      ou si le PRU enregistré est dans une autre devise (aucun taux inventé). */
@@ -1144,6 +1172,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, recordBuy, alignToLedger, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
+    purchaseSummary, addPurchase, recordBuy, recordFreeShares, alignToLedger, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

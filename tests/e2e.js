@@ -1337,6 +1337,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.fill('#byPrice', '60'); await p.click('#byAdd'); await p.waitForTimeout(500); const st = await storeOf(p), h = st.holdings[0]; eq([h.quantity, Math.round(h.avgCost * 1e4) / 1e4], [14, 52.8571], 'achat forcé en « nouvel achat » : quantité et PRU recalculés'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('fiche › Achats › Actions gratuites : Air Liquide (1 pour 10, prime de fidélité), nombre calculé ou saisi, quantité et PRU mis à jour, visible comme « Livraison gratuite », annulable', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'al', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 225, avgCost: 150, price: 170, account: 'main', logo: null, source: 'manual', addedAt: '2024-01-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1200 } }); await p.open(); await p.evaluate(() => openBuysModal('al')); await p.waitForSelector('#fsAL');
+    ok(/au porteur/.test(await p.locator('#fsBox').innerText()) && /nominatif/.test(await p.locator('#fsBox').innerText()), 'explication : même attribution au porteur et au nominatif, prime de fidélité réservée au nominatif');
+    await p.click('#fsAL'); eq(await p.inputValue('#fsDate'), '2026-06-10', 'date préremplie'); eq(await p.inputValue('#fsQty'), '22', '225 détenues : 22 gratuites (rompu 0,5 versé en espèces)');
+    await p.fill('#fsElig', '112'); await p.waitForTimeout(100); eq(await p.inputValue('#fsQty'), '23', '112 éligibles à la prime de fidélité : 22 + 1 = 23 (exemple officiel Air Liquide)');
+    await p.fill('#fsQty', '23'); await p.waitForTimeout(100); ok(/225\s*→\s*248/.test((await p.locator('#fsPrev').innerText()).replace(/\s+/g, ' ')), 'aperçu quantité 225 → 248');
+    await p.click('#fsAdd'); await p.waitForTimeout(500); let st = await storeOf(p), h = st.holdings[0]; eq([h.quantity, Math.round(h.avgCost * 1e4) / 1e4], [248, Math.round(150 * 225 / 248 * 1e4) / 1e4], 'quantité 248, PRU = coût total inchangé / 248');
+    ok(/Livraison gratuite/.test(await p.locator('.modal').innerText()), 'ligne « Livraison gratuite » dans la liste'); eq(st.transactions.filter((x) => x.holdingId === 'al').length, 2, 'ouverture + attribution');
+    await p.reload(); await p.waitForTimeout(800); st = await storeOf(p); eq([st.holdings[0].quantity, st.transactions.filter((x) => x.holdingId === 'al').length], [248, 2], 'après rechargement : inchangé, sans doublon'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };

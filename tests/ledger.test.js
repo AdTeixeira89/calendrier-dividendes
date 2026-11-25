@@ -592,4 +592,23 @@ t('aligner la position sur ses achats (achat ajouté avant la mise à jour autom
   st = mk(); st.holdings[0].costCurrency = 'EUR'; assert.ok(!L.alignToLedger(st, 'h').ok, 'PRU enregistré en EUR et achats en USD : refusé');
 });
 
+t('actions gratuites reçues (recordFreeShares) : quantité +, coût inchangé, PRU recalculé, grand livre cohérent, suppression qui défait', () => {
+  let u = 0; const deps = { uid: () => 'id' + (++u), today: '2026-11-25' };
+  const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, (m || '') + ' : ' + a + ' ≠ ' + b);
+  const T = (id, date, qty, price) => ({ id, holdingId: 'h', date, type: 'buy', qty, price, fees: 0, currency: 'EUR', amountAcct: qty * price, acctCur: 'EUR', source: 'manual' });
+  const mk = () => ({ holdings: [{ id: 'h', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide', currency: 'EUR', costCurrency: 'EUR', account: 'a', quantity: 27, avgCost: 150 }], archive: [], corp: [], transactions: [T('t1', '2024-02-01', 17, 140), T('t2', '2025-03-01', 10, 165)] });
+  const led = (st) => { const r = L.run(L.entriesFor(st, st.holdings[0]).entries); return { q: r.qty, pru: r.pru }; };
+  let st = mk(); st.holdings[0].avgCost = (17 * 140 + 10 * 165) / 27;
+  const pruBefore = st.holdings[0].avgCost, r = L.recordFreeShares(st, 'h', { date: '2026-06-10', qty: 3 }, deps); assert.ok(r.ok, r.error);
+  near(st.holdings[0].quantity, 30, 'quantité'); near(st.holdings[0].avgCost, pruBefore * 27 / 30, 'PRU : coût total inchangé / 30'); near(led(st).q, 30, 'grand livre : quantité'); near(led(st).pru, st.holdings[0].avgCost, 'grand livre : PRU identique');
+  assert.strictEqual(st.transactions.length, 3); const g = st.transactions[2]; assert.ok(g.corp && g.type === 'buy' && g.amountAcct === 0, 'livraison gratuite sans montant');
+  assert.strictEqual(L.purchaseSummary(st, st.holdings[0]).rows.pop().type, 'grant', 'affichée comme livraison gratuite'); assert.strictEqual(L.purchaseSummary(st, st.holdings[0]).consistent, true);
+  // erreurs : date future, quantité nulle
+  assert.ok(!L.recordFreeShares(st, 'h', { date: '2027-01-01', qty: 3 }, deps).ok); assert.ok(!L.recordFreeShares(st, 'h', { date: '2026-06-10', qty: 0 }, deps).ok); near(st.holdings[0].quantity, 30);
+  // suppression : retour arrière exact
+  const rm = L.removePurchase(st, r.id); assert.ok(rm.ok && rm.reverted); near(st.holdings[0].quantity, 27); near(st.holdings[0].avgCost, pruBefore, 'PRU remis');
+  // sans historique : ouverture inscrite
+  st = mk(); st.transactions = []; const r2 = L.recordFreeShares(st, 'h', { date: '2026-06-10', qty: 3 }, deps); assert.ok(r2.ok && r2.openingAdded); near(st.holdings[0].avgCost, 150 * 27 / 30); near(led(st).q, 30); near(led(st).pru, st.holdings[0].avgCost);
+});
+
 console.log('\n' + n + ' tests réussis');
