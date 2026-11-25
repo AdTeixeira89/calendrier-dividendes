@@ -1350,6 +1350,25 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.reload(); await p.waitForTimeout(800); st = await storeOf(p); eq([st.holdings[0].quantity, st.transactions.filter((x) => x.holdingId === 'al').length], [248, 2], 'après rechargement : inchangé, sans doublon'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('dividendes calculés : case « enregistrer automatiquement » (position sans relevé, ex. nominatif pur) → versements calculés d\'après la date d\'achat, la quantité et le dividende de marché ; badge « calculé », idempotent ; bouton « tout enregistrer » dans les dividendes dus', async () => {
+    RELAY.old = false;
+    const mk = (id, nm, acc) => ({ id, ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: nm, type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 30, avgCost: 170, price: 175, account: acc, logo: null, source: 'manual', addedAt: '2026-02-10', dividend: { lastAmount: 3.7, frequency: 'annual', none: false },
+      divHist: { at: new Date().toISOString(), symbol: 'AI.PA', currency: 'EUR', items: [['2025-05-14', 3.5], ['2026-05-18', 3.7], ['2026-11-23', 1]] } });
+    const seed = SEED(0); seed.accounts = [{ id: 'main', name: 'Mon portefeuille' }, { id: 'nom', name: 'Air Liquide Nominatif Pur' }]; seed.holdings = [mk('al', "L'Air Liquide S.A.", 'nom'), mk('al2', 'Air Liquide CTO', 'main')];
+    const tx = (id, h) => ({ id, holdingId: h, date: '2026-02-10', type: 'buy', qty: 30, price: 170, fees: 0, currency: 'EUR', amountAcct: 5100, acctCur: 'EUR', source: 'manual' }); seed.transactions = [tx('t1', 'al'), tx('t2', 'al2')];
+    const p = await device({ guest: true, seed, viewport: { width: 1100, height: 1200 } }); await p.open();
+    await p.evaluate(() => openHoldingModal('al')); await p.waitForSelector('#hAutoDiv'); await p.check('#hAutoDiv'); await p.click('#hSave'); await p.waitForTimeout(500);
+    eq((await storeOf(p)).holdings.find((x) => x.id === 'al').autoDividends, true, 'case enregistrée sur la position');
+    const n1 = await p.evaluate(() => autoRecordDividends(null)); eq(n1, 1, 'un seul dividende : détachement du 18/05/2026 (celui de 2025 est avant l\'achat, celui de novembre est trop récent)');
+    let st = await storeOf(p); eq(st.payments.map((x) => [x.holdingId, x.exDate, x.gross, x.calculated, x.verified]), [['al', '2026-05-18', 111, true, true]], '30 titres × 3,70 € = 111 € brut, marqué calculé, perçu'); eq(await p.evaluate(() => autoRecordDividends(null)), 0, 'idempotent : rien de plus au second passage');
+    eq((await storeOf(p)).payments.length, 1, 'pas de doublon'); eq(p.errors, [], 'aucune erreur JS (1)');
+    // liste des dividendes dus : « tout enregistrer » pour une position non cochée
+    await p.evaluate(() => { openDividendReview(Engine.dividendProposals(state, new Date(), uid, { ids: new Set(['al2']) }), []); }); await p.waitForSelector('#drAll'); ok(/Enregistrer ces 1 dividende/.test(await p.locator('#drAll').innerText()), 'bouton « Enregistrer ces 1 dividende(s) » (le récent est exclu)');
+    await p.click('#drAll'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(500); st = await storeOf(p); eq(st.payments.filter((x) => x.holdingId === 'al2').map((x) => [x.exDate, x.gross, x.calculated]), [['2026-05-18', 111, true]], 'versement calculé enregistré pour la seconde position');
+    await p.evaluate(() => { view.divTab = 'history'; view.account = 'all'; go('dividends'); }); await p.waitForTimeout(500); ok(/calculé/.test(await p.locator('#page').innerText()), 'badge « calculé » dans l\'historique');
+    eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };

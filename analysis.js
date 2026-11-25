@@ -67,6 +67,20 @@ function analyseInstrument(h, closed, props) {
   return res;
 }
 
+/* Positions « dividendes automatiques » (case cochée dans la fiche, ex. nominatif pur sans relevé) : les dividendes dus sont enregistrés tout seuls, marqués « calculé ».
+   Idempotent ; jamais pour les montants récents (< 45 j) ni atypiques ; annulable depuis le message. */
+function autoRecordDividends(ids) {
+  const flagged = (state.holdings || []).concat(state.archive || []).filter((h) => h.autoDividends && (!ids || ids.has(h.id)));
+  if (!flagged.length) return 0;
+  const props = Engine.dividendProposals(state, new Date(), uid, { ids: new Set(flagged.map((h) => h.id)) }), rows = props.proposals.filter((r) => !r.atypical && !r.pending);
+  if (!rows.length) return 0;
+  const prevUndo = state.undo; snapshotForUndo('dividendes calculés (automatique)'); const r = Dividends.recordDue(state, rows, { uid, today: todayISO() });
+  if (!r.added) { if (prevUndo) state.undo = prevUndo; else delete state.undo; return 0; }
+  saveState(); renderPageSoft();
+  Notify.push({ level: 'info', title: r.added + ' dividende(s) enregistré(s) automatiquement', body: 'Calculés d\'après vos achats et ventes datés × le dividende de marché (' + Array.from(new Set(rows.map((x) => esc(x.name)))).slice(0, 3).join(', ') + '). Marqués « calculé » dans l\'historique.', accept: { label: 'Annuler', run: () => undoLastImport(), ack: false } });
+  return r.added;
+}
+
 function computeDividendAnalysis(ids) {
   const list = dividendInstruments(ids), set = new Set(list.map((x) => x.h.id)), props = Engine.dividendProposals(state, new Date(), uid, { ids: set });
   return { results: list.map((x) => analyseInstrument(x.h, x.closed, props)), props };
@@ -87,6 +101,7 @@ async function runDividendAnalysis(o) {
   const errors = await fetchDivHistories(list, (i, n, h) => { if (!m) return; const msg = $('#anMsg', m), bar = $('#anBar', m); if (msg && h) msg.textContent = (h.name || h.displayTicker || h.ticker) + ' (' + (i + 1) + ' / ' + n + ')…'; if (bar) bar.style.width = Math.round(100 * i / n) + '%'; }, () => cancelled);
   if (cancelled) return;
   state.meta.lastDivAnalysisAt = Date.now(); saveState(); if (m) closeModal();
+  autoRecordDividends(new Set(list.map((x) => x.h.id)));
   const { results } = computeDividendAnalysis(new Set(list.map((x) => x.h.id))), issues = results.filter((r) => analysisIssues(r) > 0);
   view.lastDivAnalysis = { at: Date.now(), ids: new Set(list.map((x) => x.h.id)), errors };
   if (o.auto) {

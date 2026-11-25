@@ -54,6 +54,7 @@ function openHoldingModal(id) {
     '<div id="hDivBox"><div class="sec">Dividende</div>' +
     '<div class="btn-row" style="margin-bottom:10px"><button class="btn sm" type="button" id="hFetch">' + icon('refresh') + 'Récupérer automatiquement</button><span class="hint" id="hFetchMsg"></span></div>' +
     fld('Distribution', '<select id="hPays"><option value="1"' + (payer ? ' selected' : '') + '>Verse un dividende</option><option value="0"' + (!payer ? ' selected' : '') + '>Ne verse pas de dividende</option></select>', 'Aucun dividende n\'est jamais inventé : sans données, l\'actif reste « données manquantes ».', 'hPays') +
+    '<label class="chk" style="margin:2px 0 8px" title="Pour une position sans relevé du courtier (ex. actions au nominatif pur)"><input type="checkbox" id="hAutoDiv"' + (d.autoDividends ? ' checked' : '') + '><span>Enregistrer automatiquement les dividendes de cette position (calculés d\'après mes achats et ventes datés et le dividende de marché ; marqués « calculé »)</span></label>' +
     '<div id="hDivFields"><div class="row2">' + fld('Dividende par titre (dernier)', '<input type="number" id="hDiv" step="any" inputmode="decimal" value="' + esc(dv.lastAmount === null || dv.lastAmount === undefined ? '' : dv.lastAmount) + '">', '', 'hDiv') +
     fld('Fréquence', '<select id="hFreq">' + ['monthly', 'quarterly', 'semiannual', 'annual'].map((f) => opt(f, FREQ_LABEL[f], dv.frequency === f)).join('') + '</select>', '', 'hFreq') + '</div>' +
     fld('Devise du dividende', '<select id="hDivCur"><option value=""' + (!dv.currency ? ' selected' : '') + '>Même devise que le cours (' + esc(d.currency || '') + ')</option>' + CURRENCIES.filter((c) => c !== d.currency).map((c) => opt(c, c, dv.currency === c)).join('') + '</select>', 'À choisir si la société verse son dividende dans une autre devise que celle de la cotation (ex. HKD pour une action de Hong Kong cotée en euros). Le montant saisi est alors conservé et converti au taux du jour.', 'hDivCur') +
@@ -152,7 +153,7 @@ function saveHoldingForm(m, ex) {
   const dv = d.dividend = d.dividend || {};
   const dvBefore = ex ? JSON.stringify([ex.dividend && ex.dividend.lastAmount, ex.dividend && ex.dividend.frequency, ex.dividend && ex.dividend.anchorMonth]) : null;
   const none = d.type === 'etf_acc' || $('#hPays', m).value === '0';
-  dv.none = none;
+  dv.none = none; if ($('#hAutoDiv', m)) { if ($('#hAutoDiv', m).checked) d.autoDividends = true; else delete d.autoDividends; }
   if (none) { dv.lastAmount = null; dv.anchorMonth = null; dv.frequency = 'none'; }
   else {
     dv.lastAmount = numOrNull($('#hDiv', m).value); dv.frequency = $('#hFreq', m).value;
@@ -384,6 +385,7 @@ const SOURCE_LABEL = { manual: 'Saisie manuelle', csv: 'Import CSV', degiro: 'Re
 function provenanceHtml(p) {
   const o = p.origin || {}, h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId), imp = (state.imports || []).find((x) => x.id === o.importId);
   const rows = [['Courtier / compte', accountName(h && h.account)], ['Source', SOURCE_LABEL[p.source] || p.source || '—'], ['Fichier importé', o.file || (imp && imp.name) || '—'], ['Ligne(s) du fichier', o.line || '—'], ['Importé le', (o.at || (imp && imp.at)) ? fmtDate(String(o.at || imp.at).slice(0, 10)) : '—'], ['Identifiant', p.extId || '—']];
+  if (p.calculated) rows.push(['Calcul', 'versement calculé : quantité détenue la veille du détachement (' + (p.basis && p.basis.qty != null ? p.basis.qty : '—') + ') × dividende de marché (' + (p.basis && p.basis.perShare != null ? p.basis.perShare : '—') + ' par titre) — pas un relevé du courtier ; un relevé importé le remplacera']);
   if (p.revisions && p.revisions.length) rows.push(['Révisions', p.revisions.map((r) => fmtDate(String(r.at).slice(0, 10)) + ' (brut ' + r.before.gross + ')').join(' ; ')]);
   return '<details class="dg-cols" style="margin:8px 0"><summary>Provenance du versement</summary><div class="tbl-wrap"><table class="tbl"><tbody>' + rows.map((r) => '<tr><td class="muted">' + esc(r[0]) + '</td><td>' + esc(String(r[1])) + '</td></tr>').join('') + '</tbody></table></div></details>';
 }
@@ -503,7 +505,7 @@ async function runDividendHistory() {
 }
 
 function openDividendReview(res, errors) {
-  const rows = res.proposals, cur = (r) => r.currency || 'EUR';
+  const rows = res.proposals, cur = (r) => r.currency || 'EUR', batch = rows.filter((r) => !r.atypical && !r.pending);
   const skipped = res.unverifiable.length + res.noData.length + res.accumulating.length + res.notFetched.length + (errors ? errors.length : 0);
   const chip = (n, label, cls) => '<div class="card stat-chip"><span>' + label + '</span><b class="' + (n ? cls : '') + '">' + n + '</b></div>';
   const flag = (r) => r.atypical ? '<span class="badge warn">Montant atypique</span>' : r.pending ? '<span class="badge warn">Récent</span><div class="dg-note">détaché il y a ' + r.ageDays + ' j : paiement peut-être pas encore reçu</div>' : '<span class="badge info">Détachement passé</span><div class="dg-note">il y a ' + r.ageDays + ' j</div>';
@@ -516,7 +518,13 @@ function openDividendReview(res, errors) {
   const m = openModal('<h2>Dividendes dus non enregistrés</h2><div class="sub">Pour chaque titre, l\'application reprend vos <b>achats et ventes datés</b> pour connaître la quantité détenue <b>la veille de chaque détachement</b>, puis le dividende versé par titre (données de marché). C\'est ce à quoi vous aviez <b>théoriquement droit</b> : <b>ces montants ne sont jamais ajoutés à vos dividendes perçus</b>. Retrouvez le versement réel dans votre relevé (import) ou saisissez-le : seul un versement réel compte.</div>' +
     '<div class="chips-row">' + chip(rows.length, 'Dus non enregistrés', 'warn-t') + chip(res.already.length, 'Correspondent à un versement réel', 'pos') + chip(res.notEligible, 'Non éligibles (non détenus)', '') + chip(skipped, 'Titres non calculables', 'warn-t') + '</div>' + body +
     (skipTxt ? '<details class="dg-cols" open><summary>Titres non calculables ou ignorés (' + skipped + ')</summary><ul style="margin:8px 0 0 18px;max-height:150px;overflow:auto">' + skipTxt + '</ul><div class="hint">Importez l\'historique de transactions (ou saisissez les achats) pour qu\'un titre sans opérations devienne calculable : sa date d\'acquisition n\'est jamais supposée.</div></details>' : '') +
-    '<div class="modal-actions"><span class="hint">Lecture seule : rien n\'est enregistré.</span><div class="btn-row"><button class="btn primary" type="button" data-close>Fermer</button></div></div>', { wide: true });
+    '<div class="modal-actions"><span class="hint">Rien n\'est enregistré sans votre accord.</span><div class="btn-row">' + (batch.length ? '<button class="btn" type="button" id="drAll">Enregistrer ces ' + batch.length + ' dividende(s) comme reçus (calculés)</button>' : '') + '<button class="btn primary" type="button" data-close>Fermer</button></div></div>', { wide: true });
+  if ($('#drAll', m)) $('#drAll', m).onclick = async () => {
+    const c = await confirmDialog({ title: 'Enregistrer ces dividendes comme reçus ?', body: batch.length + ' versement(s) seront ajoutés à vos <b>dividendes perçus</b>, <b>calculés</b> d\'après la quantité détenue la veille de chaque détachement × le dividende par titre des données de marché. Ils sont marqués « calculé », modifiables et supprimables, et un relevé du courtier importé ensuite les remplacera. Les montants récents ou atypiques ne sont pas inclus. Annulable.', confirmLabel: 'Enregistrer' });
+    if (!c.ok) return;
+    const prevUndo = state.undo; snapshotForUndo('dividendes calculés'); const r = Dividends.recordDue(state, batch, { uid, today: todayISO() });
+    saveState(); closeModal(); renderPage(); toast(r.added + ' dividende(s) enregistré(s) (calculés).', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+  };
   $$('[data-buys]', m).forEach((b) => b.onclick = () => { closeModal(); openBuysModal(b.dataset.buys); });
   $$('[data-rec]', m).forEach((b) => b.onclick = () => { const r = rows[Number(b.dataset.rec)]; closeModal(); openPaymentModal(null, { holdingId: r.holdingId, ticker: r.ticker, name: r.name, exDate: r.exDate, payDate: '', qty: r.qty, currency: r.currency }); });
 }

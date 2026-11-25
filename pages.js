@@ -443,7 +443,7 @@ function paymentColumns() {
     { key: 'net', label: 'Net', essential: true, align: 'r', sort: (p) => p.net, html: (p) => p.net == null ? '<span class="muted" title="Net inconnu">—</span>' : '<b class="pos">' + c(p, p.net) + '</b>' },
     { key: 'ex', label: 'Détachement', sort: (p) => p.exDate || '', html: (p) => esc(fmtDate(p.exDate)) },
     { key: 'currency', label: 'Devise', sort: (p) => p.currency, html: (p) => esc(p.currency) },
-    { key: 'broker', label: 'Courtier / compte', essential: true, sort: (p) => accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account), html: (p) => esc(accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account)) },
+    { key: 'broker', label: 'Courtier / compte', essential: true, sort: (p) => accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account), html: (p) => esc(accountName((holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {}).account)) + (p.calculated ? ' <span class="badge info" title="Calculé d\'après vos achats et le dividende de marché, pas issu d\'un relevé">calculé</span>' : '') },
     { key: 'source', label: 'Source', sort: (p) => p.source, html: (p) => esc({ manual: 'Saisie', csv: 'Import CSV', degiro: 'Relevé DEGIRO' }[p.source] || p.source || '—') + (p.origin && p.origin.file ? '<div class="muted" style="font-size:11px">' + esc(p.origin.file) + '</div>' : '') }
   ];
 }

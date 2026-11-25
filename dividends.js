@@ -110,14 +110,35 @@
       if (!ex && opts.legacyIds) for (const id of opts.legacyIds(it)) { ex = byExt.get(id); if (ex) break; }
       let how = 'id';
       if (!ex) { ex = real.find((p) => !used.has(p.id) && !p.extId && p.holdingId === it.holdingId && p.payDate === it.payDate && (p.currency || '') === (it.currency || '') && cents(p.gross) === cents(it.gross)); how = 'adopt'; }
+      if (!ex) {       // versement CALCULÉ (sans relevé) de la même position, même période : le relevé réel le remplace
+        const dd = (s) => Date.parse(s) / 86400000, ref = dd(it.payDate);
+        ex = real.find((p) => p.calculated && !used.has(p.id) && p.holdingId === it.holdingId && (p.currency || '') === (it.currency || '') && dateOf(p) && Math.abs(dd(dateOf(p)) - ref) <= 45); if (ex) how = 'calc';
+      }
       if (ex && used.has(ex.id)) { res.anomalies.push({ item: it, reason: 'versement déjà rapproché d\'une autre ligne du fichier' }); ex = null; how = ''; }
       if (!ex) { res.fresh.push(it); return; }
       used.add(ex.id);
-      const diff = []; if (cents(ex.gross) !== cents(it.gross)) diff.push('gross'); if ((ex.tax == null) !== (it.tax == null) || (it.tax != null && cents(ex.tax) !== cents(it.tax))) diff.push('tax');
+      const diff = []; if (how === 'calc') diff.push('calculated'); if (cents(ex.gross) !== cents(it.gross)) diff.push('gross'); if ((ex.tax == null) !== (it.tax == null) || (it.tax != null && cents(ex.tax) !== cents(it.tax))) diff.push('tax');
       if (ex.payDate !== it.payDate) diff.push('payDate'); if (ex.holdingId !== it.holdingId) diff.push('holdingId');
       if (how === 'adopt') res.adopted.push({ id: ex.id, item: it }); else if (!diff.length) res.known.push({ id: ex.id, item: it }); else res.updated.push({ id: ex.id, item: it, diff });
     });
     return res;
+  }
+  /* DIVIDENDES CALCULÉS (position sans relevé du courtier, ex. actions au nominatif pur) : les « dus » (quantité détenue la veille du détachement × dividende par titre de marché,
+     Engine.dividendProposals) sont enregistrés comme versements reçus, marqués « calculé » (calculated:true + base du calcul), modifiables et supprimables.
+     Idempotent : un détachement déjà couvert par un versement réel n'est jamais enregistré une seconde fois. Quand un relevé réel du courtier arrive ensuite (import), il REMPLACE le
+     versement calculé du même détachement (reconcile) : jamais de double compte. */
+  function recordDue(state, rows, deps) {
+    deps = deps || {}; const now = deps.today || new Date().toISOString().slice(0, 10); let added = 0; const ids = [];
+    state.payments = state.payments || []; const known = state.payments.filter(isReal);
+    (rows || []).forEach((r) => {
+      if (!r || !r.holdingId || !(num(r.gross) > 0) || !r.exDate) return;
+      if (known.some((p) => p.holdingId === r.holdingId && p.exDate === r.exDate)) return;
+      const p = { id: deps.uid(), holdingId: r.holdingId, ticker: r.ticker || '', name: r.name || '', exDate: r.exDate, payDate: null, qty: r.qty == null ? null : r.qty, perShare: r.perShare == null ? null : r.perShare,
+        gross: r2(num(r.gross)), tax: r.tax == null ? null : r2(num(r.tax)), fees: null, net: r.net == null ? null : r2(num(r.net)), currency: r.currency || 'EUR', source: 'manual', verified: true,
+        calculated: true, basis: { perShare: r.perShare == null ? null : r.perShare, qty: r.qty == null ? null : r.qty, from: 'market-history', at: now }, origin: { broker: deps.broker || '', file: 'calculé : quantité détenue × dividende de marché', at: now } };
+      state.payments.push(p); known.push(p); added++; ids.push(p.id);
+    });
+    return { added, ids };
   }
   /* Applique un rapprochement : ajoute les nouveaux, met à jour les modifiés (révision conservée), donne l'identifiant aux adoptés. Retourne le compte rendu. */
   function applyReconcile(state, res, ctx) {
@@ -133,6 +154,7 @@
       p.revisions = (p.revisions || []).concat([{ at: now, importId, before: { gross: p.gross, tax: p.tax, net: p.net, payDate: p.payDate, holdingId: p.holdingId } }]);
       p.gross = r2(num(item.gross)); p.tax = item.tax == null ? null : r2(Math.abs(num(item.tax))); p.net = item.net == null ? null : r2(num(item.net)); p.payDate = item.payDate; p.extId = item.extId;
       // même versement (même identifiant du courtier) mais position différente : il suit la position désignée par le fichier (ex. opérations replacées dans le bon portefeuille)
+      if (diff.indexOf('calculated') >= 0) { delete p.calculated; delete p.basis; }
       if (diff.indexOf('holdingId') >= 0) { p.holdingId = item.holdingId; if (item.account) p.account = item.account; if (item.ticker) p.ticker = item.ticker; if (item.name) p.name = item.name; }
     });
     return { fresh: res.fresh.length, known: res.known.length, updated: res.updated.length, adopted: res.adopted.length, ignored: res.ignored.length, anomalies: res.anomalies.length };
@@ -219,6 +241,6 @@
     out.continuity = continuity(its.map((d) => d.ex), from, to);
     return out;
   }
-  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
+  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, recordDue, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

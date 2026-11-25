@@ -273,4 +273,22 @@ t('20. Analyse des dividendes : droits à chaque détachement (quantité de la v
   assert.deepStrictEqual(D.analyse([], '2021-01-01', '2024-01-01', () => 1, '2025-01-01').rows, [], 'aucun dividende connu'); assert.strictEqual(D.analyse([['2019-03-10', 1]], '2021-01-01', '2024-01-01', () => 1, '2025-01-01').pays, false, 'dernier dividende trop ancien : ne verse plus');
 });
 
+/* ---------- dividendes calculés (position sans relevé) ---------- */
+(function () {
+  let u = 0; const uid = () => 'p' + (++u);
+  const rows = [{ holdingId: 'h', ticker: 'AI.PA', name: 'Air Liquide', exDate: '2026-05-18', qty: 30, perShare: 3.7, gross: 111, tax: null, net: null, currency: 'EUR' }];
+  t('dividendes calculés : enregistrés comme reçus et marqués « calculé », idempotent, remplacés par le relevé réel du courtier sans double compte', () => {
+    const st = { holdings: [{ id: 'h', name: 'Air Liquide' }], archive: [], payments: [], transactions: [] };
+    let r = D.recordDue(st, rows, { uid, today: '2026-11-25' }); assert.strictEqual(r.added, 1); const p = st.payments[0];
+    assert.ok(D.isReal(p) && p.calculated && p.gross === 111 && p.exDate === '2026-05-18' && p.basis.qty === 30, 'versement perçu, marqué calculé, base du calcul conservée');
+    assert.strictEqual(D.recordDue(st, rows, { uid, today: '2026-11-25' }).added, 0, 'idempotent : jamais deux fois le même détachement'); assert.strictEqual(st.payments.length, 1);
+    // relevé du courtier : 20 mai, brut 111 → remplace le versement calculé
+    const inc = [{ account: 'a', holdingId: 'h', isin: 'FR0000120073', name: 'Air Liquide', ticker: 'AI.PA', payDate: '2026-05-20', currency: 'EUR', gross: 122.1, tax: 14.26, net: 107.84, qty: 30, source: 'csv', brokerId: 'brk-1' }]; D.stableIds(inc, 'csv');
+    const rec = D.reconcile(st, inc, {}); assert.deepStrictEqual([rec.fresh.length, rec.updated.length], [0, 1], 'remplacement, pas de nouveau versement'); D.applyReconcile(st, rec, { uid, importId: 'i1' });
+    assert.strictEqual(st.payments.length, 1, 'pas de double compte'); const q = st.payments[0]; assert.ok(!q.calculated && !q.basis && q.gross === 122.1 && q.extId === 'brk-1', 'versement réel : brut du relevé, plus marqué calculé');
+    // sans versement calculé : un relevé reste un nouveau versement
+    const st2 = { holdings: [{ id: 'h' }], archive: [], payments: [], transactions: [] }; const rec2 = D.reconcile(st2, inc, {}); assert.strictEqual(rec2.fresh.length, 1);
+  });
+})();
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));
