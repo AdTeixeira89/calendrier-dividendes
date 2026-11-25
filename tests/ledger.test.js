@@ -582,4 +582,14 @@ t('nouvel achat (recordBuy) : quantité et PRU recalculés, achats successifs, g
   st = mk(); st.holdings[0].quantity = 0; st.holdings[0].avgCost = null; st.transactions = []; r = L.recordBuy(st, 'h', { date: '2026-02-01', qty: 4, price: 25, fees: 1 }, deps); assert.ok(r.ok); near(st.holdings[0].quantity, 4); near(st.holdings[0].avgCost, 101 / 4);
 });
 
+t('aligner la position sur ses achats (achat ajouté avant la mise à jour automatique) : quantité et PRU du grand livre, refus sans coût / devise différente', () => {
+  const near = (a, b, m) => assert.ok(Math.abs(a - b) < 1e-6, (m || '') + ' : ' + a + ' ≠ ' + b);
+  const T = (id, date, qty, price) => ({ id, holdingId: 'h', date, type: 'buy', qty, price, fees: 0, currency: 'USD', amountAcct: qty * price, acctCur: 'USD', source: 'manual' });
+  const mk = () => ({ holdings: [{ id: 'h', ticker: 'IONQ', displayTicker: 'IONQ', name: 'IonQ', currency: 'USD', costCurrency: 'USD', account: 'a', quantity: 20, avgCost: 33.09 }], archive: [], corp: [], transactions: [T('t1', '2026-10-28', 20, 33.09), T('t2', '2026-11-25', 10, 23.195)] });
+  let st = mk(); assert.strictEqual(L.purchaseSummary(st, st.holdings[0]).diff, -10, 'les achats dépassent de 10');
+  const r = L.alignToLedger(st, 'h'); assert.ok(r.ok, r.error); near(st.holdings[0].quantity, 30); near(st.holdings[0].avgCost, (20 * 33.09 + 10 * 23.195) / 30, 'PRU'); assert.strictEqual(L.purchaseSummary(st, st.holdings[0]).consistent, true);
+  st = mk(); st.transactions[1].price = null; st.transactions[1].amountAcct = null; assert.ok(!L.alignToLedger(st, 'h').ok, 'un prix manque : refusé'); assert.strictEqual(st.holdings[0].quantity, 20, 'rien modifié');
+  st = mk(); st.holdings[0].costCurrency = 'EUR'; assert.ok(!L.alignToLedger(st, 'h').ok, 'PRU enregistré en EUR et achats en USD : refusé');
+});
+
 console.log('\n' + n + ' tests réussis');

@@ -744,6 +744,20 @@
     h.quantity = qAfter; if (avgAfter !== null) h.avgCost = avgAfter;
     return { ok: true, id: tx.id, qBefore, qAfter, avgBefore, avgAfter, cur: costCur, warnings, openingAdded: !!opening };
   }
+  /* ALIGNER LA POSITION SUR SES ACHATS (sur décision de l'utilisateur, depuis la fiche › Achats) : quand les achats saisis dépassent la quantité enregistrée (achat ajouté avant que
+     « Nouvel achat » ne mette la position à jour), la quantité et le PRU enregistrés deviennent ceux du grand livre. Refusé si le grand livre est incohérent, si un coût manque
+     ou si le PRU enregistré est dans une autre devise (aucun taux inventé). */
+  function alignToLedger(state, id) {
+    const err = (error) => ({ ok: false, error });
+    const h = (state.holdings || []).find((x) => x.id === id); if (!h) return err('Position introuvable.');
+    const { entries, cur } = entriesFor(state, h), led = run(entries), qBefore = Number(h.quantity) || 0, avgBefore = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
+    if (led.negative) return err('Les ventes dépassent les achats connus : corrigez d\'abord l\'historique.');
+    if (led.qty <= EPS) return err('Les achats saisis ne laissent aucun titre en portefeuille.');
+    if (led.costUnknown > 0 || led.pru == null) return err('Un prix d\'achat manque : le prix de revient ne peut pas être calculé.');
+    if (cur !== (h.costCurrency || h.currency || 'EUR')) return err('Les achats sont en ' + cur + ' et le prix de revient enregistré en ' + (h.costCurrency || h.currency || 'EUR') + ' : pas de conversion inventée.');
+    h.quantity = r8(led.qty); h.avgCost = Math.round(led.pru * 1e6) / 1e6;
+    return { ok: true, qBefore, qAfter: h.quantity, avgBefore, avgAfter: h.avgCost, cur };
+  }
   function removePurchase(state, txId) {
     const i = (state.transactions || []).findIndex((t) => t.id === txId); if (i < 0) return { ok: false, error: 'Opération introuvable.' };
     const t = state.transactions[i]; if ((t.source || 'manual') !== 'manual' && !t.opening) return { ok: false, error: 'Opération importée du courtier : elle ne se supprime pas ici.' };
@@ -1130,6 +1144,6 @@
   }
 
   root.Ledger = { norm, isISIN, inferDecimal, parseNumber, parseDate, parseTime, inferDateOrder, roleOf, detect, parseOps, assignIds, fingerprint, run, splitFactor, plan, apply, orderKey, otherKind, qtyEq,
-    purchaseSummary, addPurchase, recordBuy, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
+    purchaseSummary, addPurchase, recordBuy, alignToLedger, removePurchase, txAmount, recordSale, groupDividends, statementDividends, legacyStatementId, auditPayments, applyAudit, holdingIsin, canon, entriesFor, corpEntries, referenceOf, verdict, reevaluate, addCorp, mergeInstruments, demote, archiveKept, liquidateArchived, promote, parsePositions, diagnose, previewMove, moveTransactions, findDuplicateTx, removeDuplicateTx, qtyNear, pruNear, marginOf, findSplitPairs, applySplitPair, findDuplicatePayments, mergeDuplicatePayments };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Ledger;
 })(typeof self !== 'undefined' ? self : this);

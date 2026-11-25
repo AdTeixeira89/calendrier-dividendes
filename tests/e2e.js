@@ -1315,6 +1315,16 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('fiche › Achats : achats saisis au-delà de la quantité enregistrée → bouton « Mettre la position à jour d\'après ces achats » (quantité et PRU du grand livre), annulable', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'i1', ticker: 'IONQ', displayTicker: 'IONQ', name: 'IonQ, Inc.', type: 'stock', instrumentType: 'EQUITY', currency: 'USD', costCurrency: 'USD', quantity: 20, avgCost: 33.09, price: 30, account: 'main', logo: null, source: 'manual', addedAt: '2026-10-28', dividend: { none: true } }];
+    const tx = (id, d, q, pr) => ({ id, holdingId: 'i1', date: d, type: 'buy', qty: q, price: pr, fees: 0, currency: 'USD', amountAcct: q * pr, acctCur: 'USD', source: 'manual' }); seed.transactions = [tx('t1', '2026-10-28', 20, 33.09), tx('t2', '2026-11-25', 10, 23.195)];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1000 } }); await p.open(); await p.evaluate(() => openBuysModal('i1')); await p.waitForSelector('#byAlign');
+    ok(/dépassent de 10/.test(await p.locator('.modal').innerText()), 'écart signalé'); await p.click('#byAlign'); await p.waitForTimeout(500);
+    let st = await storeOf(p), h = st.holdings[0]; eq([h.quantity, Math.round(h.avgCost * 1e4) / 1e4], [30, 29.7917], 'quantité 30, PRU (20×33,09 + 10×23,195) / 30'); eq(await p.locator('#byAlign').count(), 0, 'plus d\'écart : cohérent');
+    await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); st = await storeOf(p); eq([st.holdings[0].quantity, st.holdings[0].avgCost], [20, 33.09], 'annulation : valeurs d\'avant'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
