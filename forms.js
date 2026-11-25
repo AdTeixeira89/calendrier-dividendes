@@ -194,24 +194,31 @@ function openBuysModal(id, startMode) {
       (sm.diff < 0 ? '<div class="btn-row" style="margin-top:8px"><button class="btn sm primary" type="button" id="byAlign">Mettre la position à jour d\'après ces achats (' + fmtNum(sm.ledgerQty) + ' titres)</button></div>' : '') + '</div>';
   const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Quantité détenue : <b>' + fmtNum(h.quantity) + '</b>' + (Number(h.avgCost) > 0 ? ' · prix de revient <b>' + fmtMoney(h.avgCost, costCur) + '</b>' : '') + '. Chaque achat (date + nombre d\'actions) alimente les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>.</div>' + status +
     (rows ? '<div class="tbl-wrap" style="max-height:220px;margin-top:8px"><table class="tbl"><thead><tr><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th>Source</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted" style="margin:8px 0">Aucun achat enregistré pour cette position.</div>') +
-    '<div class="sec">Ajouter un achat</div><div class="seg" id="byMode" role="group" aria-label="Type d\'achat" style="margin-bottom:6px"><button type="button" data-m="new">Nouvel achat</button><button type="button" data-m="history">Achat déjà compté dans ma quantité</button></div><div class="hint" id="byModeNote" style="margin:0 0 8px"></div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', '', 'byQty') + '</div>' +
+    '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
     '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
     (costCur !== cur ? '<div id="byCostRow">' + fld('Montant total payé en ' + costCur + ' (frais compris)', '<input type="text" inputmode="decimal" id="byCost" placeholder="montant débité" autocomplete="off">', 'le prix de revient est en ' + costCur + ' et le cours en ' + cur + ' : pas de taux de change inventé', 'byCost') + '</div>' : '') +
-    '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
+    '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div class="hint" id="byModeNote" style="margin:6px 0 0"></div><div id="byErr" class="notice err hide"></div><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
   $$('[data-rm]', m).forEach((b) => b.onclick = () => {
     const prevUndo = state.undo; snapshotForUndo('suppression d\'un achat');
     const r = Ledger.removePurchase(state, b.dataset.rm);
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true }); return; }
-    saveState(); renderPage(); openBuysModal(id, mode); if (r.reverted) toast('Achat supprimé : quantité et prix de revient remis à leur valeur d\'avant.', { ms: 9000, action: { label: 'Annuler', fn: undoLastImport } });
+    saveState(); renderPage(); openBuysModal(id); if (r.reverted) toast('Achat supprimé : quantité et prix de revient remis à leur valeur d\'avant.', { ms: 9000, action: { label: 'Annuler', fn: undoLastImport } });
   });
-  /* Deux usages : « Nouvel achat » (titres achetés EN PLUS : la quantité et le prix de revient de la position sont recalculés) ou « Achat déjà compté » (complète l\'historique d\'une
-     quantité déjà enregistrée : rien n\'est modifié). Par défaut : « Nouvel achat » (le cas courant). */
-  let mode = startMode === 'history' ? 'history' : 'new';
+  /* Un seul bouton « Ajouter cet achat » : c'est la DATE qui décide.
+       - achat daté après l'ajout de la position dans l'application, ou historique déjà complet → NOUVEL achat : la quantité et le prix de revient sont recalculés ;
+       - achat daté au plus tard le jour de l'ajout de la position, et dans la limite des titres manquants de l'historique → achat DÉJÀ COMPTÉ : il complète l'historique, rien d'autre ne change.
+     L'interprétation est affichée avant validation, avec un lien pour la corriger. */
+  const added = h.addedAt ? String(h.addedAt).slice(0, 10) : '';
+  let forced = startMode === 'history' || startMode === 'new' ? startMode : null;
+  const autoMode = (date, qty) => (sm.diff > 1e-6 && !sm.negative && date && added && date <= added && !(qty > sm.diff + 1e-6) ? 'history' : 'new');
   const val = (i) => { const e = $('#' + i, m); return e ? numOrNull(e.value) : null; };
-  const read = () => ({ mode, date: $('#byDate', m).value, qty: val('byQty'), price: val('byPrice'), fees: val('byFees') || 0, amountCost: val('byCost') });
+  const modeNow = () => forced || autoMode($('#byDate', m).value, val('byQty'));
+  const read = () => ({ mode: modeNow(), date: $('#byDate', m).value, qty: val('byQty'), price: val('byPrice'), fees: val('byFees') || 0, amountCost: val('byCost') });
   const refresh = () => {
-    $$('#byMode [data-m]', m).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
-    $('#byModeNote', m).textContent = mode === 'new' ? 'Titres achetés en plus de ceux que vous détenez : la quantité détenue et le prix de revient sont recalculés (moyenne pondérée, frais compris).' + (sm.diff > 1e-6 && !sm.negative ? ' Il manque ' + fmtNum(sm.diff) + ' titre(s) dans l\'historique : si l\'achat est déjà inclus dans votre quantité, choisissez « Achat déjà compté ».' : '') : 'Cet achat est déjà inclus dans la quantité détenue (' + fmtNum(h.quantity) + ') : il complète seulement l\'historique ; la quantité et le prix de revient ne sont pas modifiés.';
+    const mode = modeNow(), why = mode === 'history' ? (forced ? '' : ' (daté du ' + fmtDate($('#byDate', m).value) + ', avant ou le jour de l\'ajout de la position)') : '';
+    $('#byModeNote', m).innerHTML = (mode === 'new' ? 'Nouvel achat : la quantité détenue et le prix de revient sont recalculés (moyenne pondérée, frais compris).' : 'Achat déjà compté dans votre quantité' + esc(why) + ' : il complète l\'historique, la quantité et le prix de revient ne changent pas.') +
+      ' <button type="button" class="link-btn" id="byFlip">' + (mode === 'new' ? 'C\'est un achat déjà compté dans ma quantité' : 'C\'est un nouvel achat') + '</button>';
+    $('#byFlip', m).onclick = () => { forced = mode === 'new' ? 'history' : 'new'; refresh(); };
     const cr = $('#byCostRow', m); if (cr) cr.classList.toggle('hide', mode !== 'new');
     const x = read(), box = $('#byPrev', m), qB = Number(h.quantity) || 0, aB = Number(h.avgCost) > 0 ? Number(h.avgCost) : null;
     if (mode === 'history') { box.innerHTML = sm.diff > 1e-6 ? '<span class="muted">Il manque <b>' + fmtNum(sm.diff) + '</b> titre(s) dans l\'historique : saisissez les achats correspondants.</span>' : '<span class="muted">L\'historique est déjà complet : un achat « déjà compté » le ferait dépasser la quantité détenue.</span>'; return; }
@@ -223,20 +230,18 @@ function openBuysModal(id, startMode) {
     const prevUndo = state.undo; snapshotForUndo('mise à jour de ' + (h.name || h.ticker) + ' d\'après ses achats');
     const r = Ledger.alignToLedger(state, id);
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true, ms: 9000 }); return; }
-    saveState(); renderPage(); openBuysModal(id, mode);
+    saveState(); renderPage(); openBuysModal(id);
     toast(fmtNum(r.qBefore) + ' → ' + fmtNum(r.qAfter) + ' titre(s), prix de revient ' + (r.avgBefore != null ? fmtMoney(r.avgBefore, r.cur) : '—') + ' → ' + fmtMoney(r.avgAfter, r.cur) + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
   };
-  $$('#byMode [data-m]', m).forEach((b) => b.onclick = () => { mode = b.dataset.m; if (mode === 'history' && sm.diff > 1e-6 && !$('#byQty', m).value) $('#byQty', m).value = String(sm.diff); refresh(); });
   m.addEventListener('input', refresh);
-  if (mode === 'history' && sm.diff > 1e-6) $('#byQty', m).value = String(sm.diff);       // on enchaîne les achats d'historique : titres manquants préremplis
   refresh();
   $('#byAdd', m).onclick = () => {
     const btn = $('#byAdd', m); if (btn.disabled) return; btn.disabled = true;           // pas de double validation (l\'achat ne peut pas être enregistré deux fois)
     const x = read(), prevUndo = state.undo; snapshotForUndo('achat de ' + (h.name || h.ticker));
     const r = Ledger.recordBuy(state, id, x, { uid, today: todayISO() });
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; btn.disabled = false; const e = $('#byErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
-    saveState(); renderPage(); openBuysModal(id, mode);
-    if (mode === 'new') toast('Achat ajouté : ' + fmtNum(r.qAfter) + ' titre(s)' + (r.avgAfter != null ? ', prix de revient ' + fmtMoney(r.avgAfter, r.cur) : '') + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
+    const wasNew = x.mode === 'new'; saveState(); renderPage(); openBuysModal(id);
+    if (wasNew) toast('Achat ajouté : ' + fmtNum(r.qAfter) + ' titre(s)' + (r.avgAfter != null ? ', prix de revient ' + fmtMoney(r.avgAfter, r.cur) : '') + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
     else toast('Achat ajouté à l\'historique (quantité et prix de revient inchangés).', { ms: 4000 });
   };
   setTimeout(() => $('#byDate', m).focus(), 50);

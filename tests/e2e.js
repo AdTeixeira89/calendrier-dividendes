@@ -1266,13 +1266,13 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
 
   await test('achats multiples saisis à la main (date + nombre d\'actions) : position inchangée, écart signalé, dividendes éligibles selon chaque date, performance de la seule sélection (sans les autres actifs)', async () => {
     RELAY.old = false;
-    const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'manual', addedAt: '2026-01-01', account: 'main', dividend: { none: true } };
+    const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'manual', addedAt: '2026-05-01', account: 'main', dividend: { none: true } };
     const seed = SEED(0); seed.holdings = [Object.assign({}, base, { id: 'a1', ticker: 'AAPL', displayTicker: 'AAPL', name: 'Alpha', quantity: 10, avgCost: 110, price: 100, hist: { from: '2026-01', c: Array(10).fill(100) } }), Object.assign({}, base, { id: 'b1', ticker: 'AI.PA', displayTicker: 'AI.PA', name: 'Beta', quantity: 5, avgCost: 100, price: 200, hist: { from: '2026-01', c: [100, 110, 120, 130, 140, 150, 160, 170, 180, 200] } })];
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); p.setDefaultTimeout(25000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
     ok(!/Rendement annuel moyen/i.test(await p.locator('#page').innerText()), 'pas de rendement annuel');
-    await p.evaluate(() => openHoldingModal('a1')); await p.click('#hBuys'); await p.waitForSelector('#byDate'); await p.click('#byMode [data-m=history]');
+    await p.evaluate(() => openHoldingModal('a1')); await p.click('#hBuys'); await p.waitForSelector('#byDate');
     await p.waitForTimeout(300); const fillOk = async (sel, v) => { for (let i = 0; i < 4; i++) { await p.fill(sel, v); await p.waitForTimeout(60); if ((await p.inputValue(sel)) === v) return; } }; await fillOk('#byDate', '2026-01-15'); await fillOk('#byQty', '4'); await fillOk('#byPrice', '100'); await p.click('#byAdd'); await p.waitForFunction(() => /il manque 6/.test((document.querySelector('.modal') || {}).innerText || '')).catch(async (e) => { throw new Error('modale : ' + (await p.evaluate(() => ((document.querySelector('.modal') || {}).innerText || 'aucune modale').replace(/\\s+/g, ' ').slice(0, 500))) + ' | tx : ' + JSON.stringify((await storeOf(p)).transactions.map((t) => [t.holdingId, t.date, t.qty, t.price])) + ' | erreurs : ' + JSON.stringify(p.errors)); });
-    ok(/Achats saisis : 4 sur 10/.test((await p.locator('.modal').innerText()).replace(/\s+/g, ' ')) && /il manque 6/.test(await p.locator('.modal').innerText()), 'écart signalé : il manque 6 titres'); eq(await p.inputValue('#byQty'), '6', 'quantité manquante préremplie');
+    ok(/Achats saisis : 4 sur 10/.test((await p.locator('.modal').innerText()).replace(/\s+/g, ' ')) && /il manque 6/.test(await p.locator('.modal').innerText()), 'écart signalé : il manque 6 titres'); ok(/manquants dans l.historique : 6/.test(await p.locator('.modal').innerText()), 'titres manquants indiqués sous la quantité'); await p.fill('#byQty', '6');
     await p.fill('#byDate', '2026-04-01'); await p.fill('#byPrice', '120'); await p.click('#byAdd'); await p.waitForTimeout(500); await p.waitForSelector('#byDate'); await shot(p, 'buys'); ok(/cohérent avec la quantité détenue/.test(await p.locator('.modal').innerText()), 'cohérent avec la quantité détenue'); await p.click('.modal [data-close]'); await p.waitForTimeout(300);
     let st = await storeOf(p); const a1 = st.holdings.find((x) => x.id === 'a1'); eq([a1.quantity, a1.avgCost], [10, 110], 'quantité et PRU de la position inchangés'); eq(st.transactions.filter((t) => t.holdingId === 'a1').map((t) => [t.date, t.qty, t.price]).sort(), [['2026-01-15', 4, 100], ['2026-04-01', 6, 120]], 'deux achats datés');
     // performance de la seule sélection
@@ -1296,7 +1296,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); p.setDefaultTimeout(25000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
     const add = async (date, qty, price, fees) => { await p.fill('#byDate', date); await p.fill('#byQty', String(qty)); await p.fill('#byPrice', String(price)); await p.fill('#byFees', String(fees)); await p.click('#byAdd'); await p.waitForSelector('#byDate'); await p.waitForTimeout(250); };
     await p.evaluate(() => openHoldingModal('a1')); await p.click('#hBuys'); await p.waitForSelector('#byDate');
-    ok(await p.locator('#byMode [data-m=new].on').count() === 1, 'mode « Nouvel achat » par défaut');
+    await p.fill('#byDate', '2026-02-01'); await p.waitForTimeout(100); ok(/Nouvel achat/.test(await p.locator('#byModeNote').innerText()), 'achat daté après l\'ajout de la position : lu comme un nouvel achat');
     await p.fill('#byQty', '5'); await p.fill('#byPrice', '60'); await p.fill('#byFees', '2'); await p.waitForTimeout(150); const prev = (await p.locator('#byPrev').innerText()).replace(/\s+/g, ' '); ok(/10\s*→\s*15/.test(prev) && /53,47/.test(prev), 'aperçu : quantité 10 → 15, PRU 50 → 53,47 : ' + prev);
     await add('2026-02-01', 5, 60, 2); let st = await storeOf(p); let a1 = st.holdings.find((x) => x.id === 'a1'); eq([a1.quantity, Math.round(a1.avgCost * 1e4) / 1e4], [15, 53.4667], 'après un achat : (10×50 + 302) / 15');
     await add('2026-03-01', 3, 70, 1); await add('2026-04-01', 2, 40, 0); st = await storeOf(p); a1 = st.holdings.find((x) => x.id === 'a1'); eq([a1.quantity, Math.round(a1.avgCost * 1e4) / 1e4], [20, 54.65], 'après trois achats : (500 + 302 + 211 + 80) / 20');
@@ -1323,6 +1323,18 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     ok(/dépassent de 10/.test(await p.locator('.modal').innerText()), 'écart signalé'); await p.click('#byAlign'); await p.waitForTimeout(500);
     let st = await storeOf(p), h = st.holdings[0]; eq([h.quantity, Math.round(h.avgCost * 1e4) / 1e4], [30, 29.7917], 'quantité 30, PRU (20×33,09 + 10×23,195) / 30'); eq(await p.locator('#byAlign').count(), 0, 'plus d\'écart : cohérent');
     await p.evaluate(() => { undoLastImport(); }); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(400); st = await storeOf(p); eq([st.holdings[0].quantity, st.holdings[0].avgCost], [20, 33.09], 'annulation : valeurs d\'avant'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
+  await test('fiche › Achats : un seul bouton, la date décide (avant l\'ajout de la position et dans les titres manquants = déjà compté ; après = nouvel achat) ; lien pour corriger l\'interprétation', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.holdings = [{ id: 'x1', ticker: 'XXX', displayTicker: 'XXX', name: 'Xylo', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 10, avgCost: 50, price: 55, account: 'main', logo: null, source: 'manual', addedAt: '2026-05-01', dividend: { none: true } }];
+    const p = await device({ guest: true, seed, viewport: { width: 1000, height: 1000 } }); await p.open(); await p.evaluate(() => openBuysModal('x1')); await p.waitForSelector('#byDate');
+    eq(await p.locator('#byMode').count(), 0, 'plus de deux boutons de mode'); const note = async () => (await p.locator('#byModeNote').innerText()).replace(/\s+/g, ' ');
+    await p.fill('#byQty', '4'); await p.fill('#byDate', '2026-03-01'); await p.waitForTimeout(120); ok(/déjà compté/.test(await note()) && /avant ou le jour/.test(await note()), 'daté avant l\'ajout, dans les titres manquants : déjà compté : ' + await note());
+    await p.fill('#byDate', '2026-06-01'); await p.waitForTimeout(120); ok(/^Nouvel achat/.test(await note()), 'daté après l\'ajout : nouvel achat : ' + await note());
+    await p.fill('#byDate', '2026-03-01'); await p.fill('#byQty', '12'); await p.waitForTimeout(120); ok(/^Nouvel achat/.test(await note()), 'plus de titres que ceux qui manquent : nouvel achat');
+    await p.fill('#byQty', '4'); await p.waitForTimeout(120); await p.click('#byFlip'); await p.waitForTimeout(120); ok(/^Nouvel achat/.test(await note()), 'lien « C\'est un nouvel achat » : interprétation corrigée');
+    await p.fill('#byPrice', '60'); await p.click('#byAdd'); await p.waitForTimeout(500); const st = await storeOf(p), h = st.holdings[0]; eq([h.quantity, Math.round(h.avgCost * 1e4) / 1e4], [14, 52.8571], 'achat forcé en « nouvel achat » : quantité et PRU recalculés'); eq(p.errors, [], 'aucune erreur JS');
   });
 
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
@@ -1666,8 +1678,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     RELAY.old = false;
     const seed = SEED(0); seed.holdings = [H(0, { ticker: '3750.HK', displayTicker: '3750.HK', name: 'CATL', currency: 'HKD', quantity: 50, avgCost: 300, price: 373 })];
     const p = await device({ guest: true, seed }); await p.open();
-    await p.evaluate(() => openBuysModal('h0')); await p.waitForSelector('#byDate'); await p.click('#byMode [data-m=history]'); ok(/Prix par action \(HKD/.test(await p.locator('.modal').innerText()), 'libellé du prix en HKD');
-    await p.fill('#byDate', '2026-01-15'); await p.fill('#byQty', '10'); await p.fill('#byPrice', '373'); await p.click('#byAdd'); await p.waitForSelector('.modal tbody tr'); const row = (await p.locator('.modal tbody tr').first().innerText()).replace(/\s+/g, ' ');
+    await p.evaluate(() => openBuysModal('h0')); await p.waitForSelector('#byDate'); ok(/Prix par action \(HKD/.test(await p.locator('.modal').innerText()), 'libellé du prix en HKD');
+    await p.fill('#byDate', '2026-01-15'); await p.fill('#byQty', '10'); await p.fill('#byPrice', '373'); await p.click('#byAdd'); await p.waitForSelector('.modal tbody tr'); const row = (await p.locator('.modal tbody tr', { hasText: '373' }).first().innerText()).replace(/\s+/g, ' ');
     ok(/373,0000\s?HKD/.test(row) && !/\$/.test(row), 'le prix saisi s\'affiche en HKD, sans « $ » : ' + row);
     const fm = await p.evaluate(() => ({ eur: fmtMoney(1.5, 'EUR'), usd: fmtMoney(1.5, 'USD'), hkd: fmtMoney(1.5, 'HKD'), cad: fmtMoney(1.5, 'CAD'), dkk: fmtMoney(1.5, 'DKK'), jpy: fmtMoney(1500, 'JPY') }));
     ok(/€/.test(fm.eur) && /\$/.test(fm.usd) && /HKD/.test(fm.hkd) && !/\$/.test(fm.hkd) && /CAD/.test(fm.cad) && /DKK/.test(fm.dkk) && /JPY/.test(fm.jpy), 'formats : ' + JSON.stringify(fm));
