@@ -1140,7 +1140,7 @@ function attribSectionHtml(h) {
     const op = p.op, d = op.creditDate || op.exDate;
     if (p.status === 'applied') {
       const r = p.applied.rec;
-      if (!r) { const tx = p.applied.tx; return '<tr><td>' + esc(fmtDate(tx.date)) + '</td><td class="r">—</td><td class="r">' + fmtNum(tx.qty) + '</td><td class="r">—</td><td class="r">—</td><td class="r">—</td><td>' + attribBadge('applied') + '<div class="dg-note">livraison gratuite déjà enregistrée (saisie ou import)</div></td></tr>'; }
+      if (!r) { const tx = p.applied.tx; return '<tr><td>' + esc(fmtDate(tx.date)) + '</td><td class="r">—</td><td class="r">' + fmtNum(tx.qty) + '</td><td class="r">—</td><td class="r">rompus<div><input type="text" inputmode="decimal" class="at-rt" data-rt="' + esc(tx.id) + '" placeholder="indemnité (' + esc(cur) + ')" value="' + (tx.rompuCash == null ? '' : tx.rompuCash) + '" style="width:110px"></div></td><td class="r">—</td><td>' + attribBadge('applied') + '<div class="dg-note">livraison gratuite déjà enregistrée (saisie ou import)</div></td></tr>'; }
       return '<tr><td>' + esc(fmtDate(r.date)) + '</td><td class="r">' + fmtNum(r.before) + '</td><td class="r">' + fmtNum(r.base) + '</td><td class="r">' + (r.mode === 'registered' ? fmtNum(r.bonus) : '—') + '</td><td class="r">' + fmtNum(r.rompuQty, 3) + ' titre' + '<div><input type="text" inputmode="decimal" class="at-rc" data-rc="' + esc(r.id) + '" placeholder="indemnité (' + esc(cur) + ')" value="' + (r.rompuCash == null ? '' : r.rompuCash) + '" style="width:110px"></div></td><td class="r"><b>' + fmtNum(r.after) + '</b></td><td>' + attribBadge('applied') + '<div><button type="button" class="link-btn" data-atrv="' + esc(r.id) + '">Annuler cette opération</button></div></td></tr>';
     }
     const c = p.calc;
@@ -1179,6 +1179,11 @@ function wireAttrib(m, h, id) {
     const prevUndo = state.undo; snapshotForUndo('annulation d\'une attribution'); const r = Attrib.revert(state, b.dataset.atrv);
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true }); return; } reopen();
   });
+  $$('.at-rt', m).forEach((i) => i.onchange = () => {
+    const tx = state.transactions.find((x) => x.id === i.dataset.rt), v = i.value === '' ? null : numOrNull(i.value); if (!tx) return;
+    if (v !== null && !(v >= 0)) { toast('Montant invalide.', { error: true }); return; }
+    if (v === null) delete tx.rompuCash; else tx.rompuCash = Math.round(v * 100) / 100; saveState(); toast('Indemnité de rompus enregistrée (hors dividendes).', { ms: 3000 });
+  });
   $$('.at-rc', m).forEach((i) => i.onchange = () => { const r = Attrib.setRompuCash(state, i.dataset.rc, i.value === '' ? null : numOrNull(i.value)); if (r.ok) { saveState(); toast('Indemnité de rompus enregistrée (hors dividendes).', { ms: 3000 }); } else toast(r.error, { error: true }); });
 }
 /* Vue consolidée : chaque compte reste distinct, le total est calculé en plus. */
@@ -1187,7 +1192,7 @@ function openAttribConsolidated() {
   if (!hs.length) { toast('Aucune position Air Liquide.'); return; }
   const cols = hs.map((h) => {
     const mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : null, c = lastOp ? Attrib.compute(state, h, lastOp) : null, rec = lastOp ? state.attribApplied.find((a) => a.opId === lastOp.id && a.holdingId === h.id) : null;
-    const rompuCash = state.attribApplied.filter((a) => a.holdingId === h.id && a.rompuCash != null).reduce((s, a) => s + a.rompuCash, 0), hasCash = state.attribApplied.some((a) => a.holdingId === h.id && a.rompuCash != null);
+    const cashRows = state.attribApplied.filter((a) => a.holdingId === h.id && a.rompuCash != null).map((a) => a.rompuCash).concat(state.transactions.filter((t) => t.holdingId === h.id && t.corp && t.rompuCash != null && !state.attribApplied.some((a) => a.txId === t.id)).map((t) => t.rompuCash)), rompuCash = cashRows.reduce((s, v) => s + v, 0), hasCash = cashRows.length > 0;
     return { h, mode, qty: Number(h.quantity) || 0, eligible: mode === 'registered' && c ? c.eligible : (mode === 'bearer' ? 0 : null), bonus: rec ? rec.bonus : (c && mode ? c.bonus : null), free: rec ? rec.free : (c && mode ? c.free : null), rompu: rec ? rec.rompuQty : (c ? c.rompuQty : null), cash: hasCash ? rompuCash : null, applied: !!rec };
   });
   const sum = (k) => cols.every((c) => c[k] != null) ? cols.reduce((s, c) => s + c[k], 0) : null, cell = (v, d) => (v == null ? '<span class="muted">—</span>' : fmtNum(v, d || 0));

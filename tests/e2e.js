@@ -1403,6 +1403,17 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     eq(st.attribApplied.some((a) => a.opId === 'AI-2026-06'), false, 'l\'opération 2026 (détachement non confirmé) n\'est jamais appliquée automatiquement'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('Air Liquide : indemnité de rompus saisissable aussi pour une attribution déjà ajoutée à la main (livraison gratuite), enregistrée sur l\'opération, hors dividendes', async () => {
+    RELAY.old = false;
+    const h = { id: 'ai', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: 'FR0000120073', name: 'Air Liquide', type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 33, avgCost: 136, price: 170, account: 'main', logo: null, source: 'manual', addedAt: '2026-02-10', holdMode: 'registered', dividend: { none: true } };
+    const seed = SEED(0); seed.holdings = [h]; seed.transactions = [{ id: 't1', holdingId: 'ai', date: '2026-02-10', type: 'buy', qty: 30, price: 150, fees: 0, currency: 'EUR', amountAcct: 4500, acctCur: 'EUR', source: 'manual' },
+      { id: 'g1', holdingId: 'ai', date: '2026-06-10', type: 'buy', corp: true, freeShares: true, qty: 3, price: null, fees: 0, currency: 'EUR', amountAcct: 0, acctCur: 'EUR', source: 'manual' }];
+    const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => openBuysModal('ai')); await p.waitForSelector('.at-rt');
+    ok(/Déjà appliquée/.test(await p.locator('.modal').innerText()), 'attribution reconnue comme déjà appliquée'); await p.fill('.at-rt', '1,25'); await p.locator('.at-rt').press('Tab'); await p.waitForTimeout(300);
+    const st = await storeOf(p); eq([st.transactions.find((x) => x.id === 'g1').rompuCash, (st.payments || []).length, st.holdings[0].quantity], [1.25, 0, 33], 'indemnité enregistrée sur l\'opération, aucun dividende, position inchangée');
+    await p.click('#atCons'); await p.waitForSelector('text=vue consolidée'); ok(/1,25/.test(await p.locator('.modal').last().innerText()), 'reprise dans la vue consolidée'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
