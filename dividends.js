@@ -28,8 +28,22 @@
     if (!p || p.estimated || p.verified === false) return false;
     return p.source !== 'auto' && p.source !== 'market-history';
   }
+  /* Un versement est un DIVIDENDE sauf s'il porte une autre nature (kind) : l'indemnité de rompus d'une attribution d'actions gratuites est un revenu perçu,
+     compté dans les totaux et visible dans l'historique sous son vrai libellé, mais exclue des analyses propres aux dividendes (rapprochement, délais, dû, calendrier). */
+  const isDividend = (p) => isReal(p) && p.kind !== 'rompu';
   const knownIds = (state) => new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));
   /* Versements perçus rattachés à une position existante (un versement orphelin n'est jamais compté). */
+  /* INDEMNITÉ DE ROMPUS : une écriture par clé (opération × position) ; montant nul ou vide = écriture supprimée. Idempotent. */
+  function setRompu(state, spec, deps) {
+    state.payments = state.payments || [];
+    const i = state.payments.findIndex((p) => p.kind === 'rompu' && p.rompuKey === spec.key), amt = spec.amount == null || spec.amount === '' ? null : Number(spec.amount);
+    if (amt === null || !(amt > 0)) { if (i >= 0) state.payments.splice(i, 1); return { ok: true, removed: i >= 0 }; }
+    const h = (state.holdings || []).concat(state.archive || []).find((x) => x.id === spec.holdingId); if (!h) return { ok: false, error: 'Position introuvable.' };
+    const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker || '', name: h.name || '', exDate: null, payDate: spec.date || null, qty: null, perShare: null, gross: r2(amt), tax: null, fees: null, net: r2(amt),
+      currency: h.costCurrency || h.currency || 'EUR', source: 'manual', verified: true, kind: 'rompu', label: 'Indemnité de rompus (attribution d\'actions gratuites)', rompuKey: spec.key };
+    if (i >= 0) { state.payments[i] = Object.assign({}, state.payments[i], base); return { ok: true, updated: true, id: state.payments[i].id }; }
+    const p = Object.assign({ id: deps.uid(), origin: { broker: '', file: 'saisie : indemnité de rompus', at: (deps && deps.today) || '' } }, base); state.payments.push(p); return { ok: true, added: true, id: p.id };
+  }
   function realPayments(state) { const k = knownIds(state); return (state.payments || []).filter((p) => isReal(p) && k.has(p.holdingId)); }
   /* Anciennes estimations encore présentes dans les versements, ou déjà rangées dans state.estimates. */
   function estimatesOf(state) { return (state.payments || []).filter((p) => !isReal(p)).concat(state.estimates || []); }
@@ -164,7 +178,7 @@
      Les versements ne sont jamais modifiés : seule la prévision de date en profite. Sans versement réel, le délai par défaut (10 j) reste indicatif. */
   function learnPayLags(state, M, nowISO) {
     const today = nowISO || new Date().toISOString().slice(0, 10), dn = (s) => Date.parse(s) / 86400000; let changed = 0;
-    const real = realPayments(state).filter((p) => p.payDate);
+    const real = realPayments(state).filter((p) => p.payDate && p.kind !== 'rompu');
     (state.holdings || []).forEach((h) => {
       const dv = h.dividend; if (!dv || !Array.isArray(dv.history) || !dv.history.length) return;
       const hist = dv.history.map((x) => x.exDate).filter(Boolean).sort(), used = new Set(), lags = [];
@@ -241,6 +255,6 @@
     out.continuity = continuity(its.map((d) => d.ex), from, to);
     return out;
   }
-  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, recordDue, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
+  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, recordDue, setRompu, isDividend, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

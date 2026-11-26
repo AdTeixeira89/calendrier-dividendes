@@ -83,4 +83,17 @@ t('position SANS ISIN (nominatif pur saisi à la main) reconnue par son nom ; mo
   assert.strictEqual(by.d, undefined, 'les autres positions ne sont pas concernées');
 });
 
+t('indemnité de rompus : revenu perçu enregistré sous son vrai libellé, rattaché à la position, comptée dans les revenus mais jamais prise pour un dividende ; modifiable, supprimée avec l\'opération', () => {
+  const D = require('../dividends.js'), E = require('../engine.js');
+  const st = mk('registered', 100, [buy('t1', 'h', '2020-03-01', 100, 100)]); st.holdings[0].avgCost = 100; const r = A.apply(st, 'T-2024', 'h', deps); assert.ok(r.ok);
+  assert.ok(A.setRompuCash(st, r.rec.id, 3.2, deps).ok); let p = st.payments; assert.strictEqual(p.length, 1); assert.deepStrictEqual([p[0].kind, p[0].holdingId, p[0].gross, p[0].net, p[0].payDate, p[0].rompuKey, p[0].verified], ['rompu', 'h', 3.2, 3.2, '2024-06-05', 'attrib:' + r.rec.id, true]);
+  assert.ok(/rompus/i.test(p[0].label), 'libellé explicite'); assert.ok(D.isReal(p[0]) && !D.isDividend(p[0]), 'revenu perçu, mais pas un dividende');
+  assert.strictEqual(D.summary(st, { from: '2024-01-01', to: '2024-12-31', convert: (v) => v }).gross, 3.2, 'compté dans les revenus perçus');
+  A.setRompuCash(st, r.rec.id, 4.5, deps); assert.strictEqual(st.payments.length, 1, 'idempotent : une seule écriture'); assert.strictEqual(st.payments[0].gross, 4.5);
+  st.holdings[0].divHist = { at: '2026-11-01', currency: 'EUR', items: [['2024-06-03', 2]] }; const props = E.dividendProposals(st, new Date(2026, 10, 25), () => 'x', {}); assert.ok(props.proposals.some((q) => q.exDate === '2024-06-03') || props.already.length === 0, 'l\'indemnité n\'est pas prise pour le dividende du même mois');
+  A.setRompuCash(st, r.rec.id, null, deps); assert.strictEqual(st.payments.length, 0, 'montant vide : écriture supprimée'); A.setRompuCash(st, r.rec.id, 2, deps); assert.ok(A.revert(st, r.rec.id).ok); assert.strictEqual(st.payments.length, 0, 'annulation de l\'opération : l\'indemnité est retirée');
+  // attribution déjà enregistrée (livraison gratuite saisie / importée)
+  const st2 = mk('bearer', 17, [buy('t1', 'h', '2019-05-01', 16, 100), buy('g1', 'h', '2024-06-05', 1, 0, { corp: true, price: null, amountAcct: 0 })]); assert.ok(A.setRompuOnTx(st2, 'g1', 1.1, deps).ok); assert.deepStrictEqual([st2.payments.length, st2.payments[0].rompuKey, st2.transactions[1].rompuCash], [1, 'tx:g1', 1.1]);
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

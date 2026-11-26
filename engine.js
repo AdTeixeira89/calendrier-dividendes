@@ -130,7 +130,7 @@
     const events = [];
     const taken = new Set();   // holdingId|YYYY-MM déjà couverts par un versement réel
 
-    D.realPayments(state).forEach((p) => {            // uniquement les versements réellement perçus ; estimations et prévisions sont calculées à part
+    D.realPayments(state).filter((p) => p.kind !== 'rompu').forEach((p) => {            // uniquement les versements réellement perçus ; estimations et prévisions sont calculées à part
       [p.exDate, p.payDate].forEach((d) => { if (d) taken.add(p.holdingId + '|' + ym(d)); });
       const date = p.payDate || p.exDate;
       if (!date || date < fromISO || date > toISO_ || !keep(p.holdingId) || !byId[p.holdingId]) return;
@@ -151,7 +151,7 @@
       const rate = taxRate(h);
       // Dividendes DÉJÀ DÉTACHÉS (date de détachement passée, données de marché) mais pas encore reçus : paiement attendu à « détachement + délai » (délai appris de vos versements réels).
       // Le droit est acquis : c'est un dividende confirmé « à recevoir », pas une prévision. Rapproché de vos versements réels : dès que le versement est enregistré, il disparaît ici.
-      const dvd = h.dividend || {}, lag = Number(dvd.payLagDays) >= 0 && dvd.payLagDays !== null ? Number(dvd.payLagDays) : 10, mine = D.realPayments(state).filter((p) => p.holdingId === h.id), usedPay = new Set();
+      const dvd = h.dividend || {}, lag = Number(dvd.payLagDays) >= 0 && dvd.payLagDays !== null ? Number(dvd.payLagDays) : 10, mine = D.realPayments(state).filter((p) => p.holdingId === h.id && p.kind !== 'rompu'), usedPay = new Set();
       (Array.isArray(dvd.history) ? dvd.history.slice().sort((a, b) => (a.exDate < b.exDate ? -1 : 1)) : []).forEach((x) => {
         if (!x.exDate || x.exDate > todayISO || !(num(x.amount) > 0)) return;
         const exp = addDaysISO(x.exDate, lag), hi = addDaysISO(exp, 21);
@@ -786,7 +786,7 @@
   function dividendProposals(state, today, uid, opt) {
     opt = opt || {}; const todayS = toISO(today || new Date()), dN = (d) => Date.parse(d) / 86400000;
     const out = { proposals: [], already: [], notEligible: 0, unverifiable: [], noData: [], accumulating: [], notFetched: [], pending: 0, atypical: 0 };
-    const pays = (state.payments || []).filter(D.isReal);        // le « dû » se compare aux versements RÉELS uniquement
+    const pays = (state.payments || []).filter(D.isDividend);        // le « dû » se compare aux versements RÉELS de dividende uniquement (pas aux indemnités de rompus)
     const ymOf_ = (d) => d.slice(0, 7), nextYm = (d) => { const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7)); return m === 12 ? (y + 1) + '-01' : y + '-' + pad2(m + 1); };
     const insts = (state.holdings || []).map((h) => ({ h, closed: false })).concat(opt.noArchive ? [] : (state.archive || []).map((h) => ({ h, closed: true }))).filter((x) => !opt.ids || opt.ids.has(x.h.id));
     insts.forEach(({ h, closed }) => {

@@ -434,7 +434,7 @@ function paymentColumns() {
   const c = (p, v) => v === null || v === undefined ? '—' : fmtMoney(v, p.currency);
   return [
     { key: 'date', label: 'Date de paiement', essential: true, sort: (p) => p.payDate || p.exDate || '', html: (p) => p.payDate ? esc(fmtDate(p.payDate)) : '<span class="muted">' + esc(fmtDate(p.exDate)) + ' (détach.)</span>' },
-    { key: 'asset', label: 'Actif', essential: true, sort: (p) => (p.name || p.ticker || '').toLowerCase(), html: (p) => { const h = holdingById(p.holdingId); return '<button class="asset" type="button" data-open="' + esc(p.id) + '">' + avatar(p.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(p.name || p.ticker) + '</span><span class="tkr">' + esc(p.ticker) + '</span></span></button>'; } },
+    { key: 'asset', label: 'Actif', essential: true, sort: (p) => (p.name || p.ticker || '').toLowerCase(), html: (p) => { const h = holdingById(p.holdingId); return '<button class="asset" type="button" data-open="' + esc(p.id) + '">' + avatar(p.ticker, h && h.logo, 'sm', h && h.isin) + '<span><span class="nm">' + esc(p.name || p.ticker) + '</span><span class="tkr">' + esc(p.ticker) + (p.kind === 'rompu' ? ' · <b>Indemnité de rompus</b>' : '') + '</span></span></button>'; } },
     { key: 'qty', label: 'Quantité', align: 'r', sort: (p) => p.qty, html: (p) => fmtNum(p.qty) },
     { key: 'perShare', label: 'Par titre', align: 'r', sort: (p) => p.perShare, html: (p) => p.perShare ? fmtMoney(p.perShare, p.currency, { d: 4 }) : '—' },
     { key: 'gross', label: 'Brut', essential: true, align: 'r', sort: (p) => p.gross, html: (p) => c(p, p.gross) },

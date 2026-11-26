@@ -159,19 +159,31 @@
     return { ok: true, rec, result: r };
   }
   /* Indemnité de rompus (espèces) : enregistrée À PART, jamais dans les dividendes. */
-  function setRompuCash(state, appliedId, amount) {
+  function setRompuCash(state, appliedId, amount, deps) {
     const rec = (state.attribApplied || []).find((a) => a.id === appliedId); if (!rec) return { ok: false, error: 'Opération introuvable.' };
-    if (amount === null || amount === '' || amount === undefined) { rec.rompuCash = null; return { ok: true }; }
-    const v = Number(amount); if (!(v >= 0)) return { ok: false, error: 'Montant invalide.' }; rec.rompuCash = Math.round(v * 100) / 100; return { ok: true };
+    const D = (typeof require === 'function' && typeof module !== 'undefined' && !root.Dividends) ? require('./dividends.js') : root.Dividends;
+    if (amount === null || amount === '' || amount === undefined) { rec.rompuCash = null; if (D && deps) D.setRompu(state, { key: 'attrib:' + rec.id, holdingId: rec.holdingId }, deps); return { ok: true }; }
+    const v = Number(amount); if (!(v >= 0)) return { ok: false, error: 'Montant invalide.' }; rec.rompuCash = Math.round(v * 100) / 100;
+    if (D && deps) D.setRompu(state, { key: 'attrib:' + rec.id, holdingId: rec.holdingId, date: rec.date, amount: rec.rompuCash }, deps);
+    return { ok: true };
+  }
+  /* Même chose pour une attribution déjà enregistrée (livraison gratuite saisie ou importée) : l'indemnité est portée par l'opération. */
+  function setRompuOnTx(state, txId, amount, deps) {
+    const tx = (state.transactions || []).find((t) => t.id === txId); if (!tx) return { ok: false, error: 'Opération introuvable.' };
+    const D = (typeof require === 'function' && typeof module !== 'undefined' && !root.Dividends) ? require('./dividends.js') : root.Dividends;
+    const v = amount === null || amount === '' || amount === undefined ? null : Number(amount); if (v !== null && !(v >= 0)) return { ok: false, error: 'Montant invalide.' };
+    if (v === null) delete tx.rompuCash; else tx.rompuCash = Math.round(v * 100) / 100;
+    if (D && deps) D.setRompu(state, { key: 'tx:' + tx.id, holdingId: tx.holdingId, date: tx.date, amount: v }, deps);
+    return { ok: true };
   }
   /* Annulation d'une application : défait la livraison gratuite (quantité et PRU) et retire la trace. */
   function revert(state, appliedId) {
     const i = (state.attribApplied || []).findIndex((a) => a.id === appliedId); if (i < 0) return { ok: false, error: 'Opération introuvable.' };
     const rec = state.attribApplied[i], r = Ledger.removePurchase(state, rec.txId); if (!r.ok) return r;
-    state.attribApplied.splice(i, 1); return { ok: true };
+    state.attribApplied.splice(i, 1); state.payments = (state.payments || []).filter((p) => !(p.kind === 'rompu' && p.rompuKey === 'attrib:' + rec.id)); return { ok: true };
   }
 
-  const api = { allOps, CATALOGUE, isEligibleIsin, issuerOf, matches, modeOf, operations, effYear, lotsAt, compute, appliedOf, proposals, detectFromMarket, apply, setRompuCash, revert };
+  const api = { allOps, CATALOGUE, isEligibleIsin, issuerOf, matches, modeOf, operations, effYear, lotsAt, compute, appliedOf, proposals, detectFromMarket, apply, setRompuCash, setRompuOnTx, revert };
   root.Attrib = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

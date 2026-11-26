@@ -206,6 +206,7 @@ function openBuysModal(id, startMode) {
     (isAirLiquide ? '<div class="btn-row" style="margin-bottom:6px"><button type="button" class="btn sm" id="fsAL">Remplir : attribution Air Liquide du 10 juin 2026 (1 pour 10)</button></div>' : '') +
     '<div class="row2">' + fld('Date d\'attribution', '<input type="date" id="fsDate" max="' + todayISO() + '">', '', 'fsDate') + fld('1 gratuite pour … détenues', '<input type="text" inputmode="decimal" id="fsN" placeholder="ex : 10" autocomplete="off">', 'pour calculer le nombre reçu', 'fsN') + '</div>' +
     '<div class="row2">' + fld('dont éligibles à la prime de fidélité', '<input type="text" inputmode="decimal" id="fsElig" placeholder="0 (nominatif depuis plus de 2 ans)" autocomplete="off">', 'facultatif : titres au nominatif', 'fsElig') + fld('Actions gratuites reçues', '<input type="text" inputmode="decimal" id="fsQty" placeholder="nombre reçu" autocomplete="off">', 'saisissez le nombre exact de votre relevé, ou laissez le calcul', 'fsQty') + '</div>' +
+    '<div class="row2">' + fld('Indemnité de rompus reçue (' + esc(costCur) + ', facultatif)', '<input type="text" inputmode="decimal" id="fsRompu" placeholder="si connue" autocomplete="off">', 'versée en espèces pour la fraction de titre : enregistrée comme revenu, sous le libellé « Indemnité de rompus »', 'fsRompu') + '<div></div></div>' +
     '<div id="fsPrev" class="dg-summary" style="margin-top:6px"></div><div id="fsErr" class="notice err hide"></div>' +
     '<div class="btn-row" style="margin-top:6px"><button class="btn" type="button" id="fsAdd">' + icon('plus') + 'Ajouter les actions gratuites</button></div></details><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
   $$('[data-rm]', m).forEach((b) => b.onclick = () => {
@@ -264,6 +265,7 @@ function openBuysModal(id, startMode) {
     const btn = $('#fsAdd', m); if (btn.disabled) return; btn.disabled = true;
     const prevUndo = state.undo; snapshotForUndo('actions gratuites de ' + (h.name || h.ticker));
     const r = Ledger.recordFreeShares(state, id, { date: $('#fsDate', m).value, qty: val('fsQty') }, { uid, today: todayISO() });
+    if (r.ok && val('fsRompu') > 0) Attrib.setRompuOnTx(state, r.id, val('fsRompu'), { uid, today: todayISO() });
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; btn.disabled = false; const e = $('#fsErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
     saveState(); renderPage(); openBuysModal(id);
     toast('Actions gratuites ajoutées : ' + fmtNum(r.qAfter) + ' titre(s)' + (r.avgAfter != null ? ', prix de revient ' + fmtMoney(r.avgAfter, r.cur) : '') + (r.warnings.length ? ' · ' + r.warnings[0] : '') + '.', { ms: 12000, action: { label: 'Annuler', fn: undoLastImport } });
@@ -387,6 +389,7 @@ const SOURCE_LABEL = { manual: 'Saisie manuelle', csv: 'Import CSV', degiro: 'Re
 function provenanceHtml(p) {
   const o = p.origin || {}, h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId), imp = (state.imports || []).find((x) => x.id === o.importId);
   const rows = [['Courtier / compte', accountName(h && h.account)], ['Source', SOURCE_LABEL[p.source] || p.source || '—'], ['Fichier importé', o.file || (imp && imp.name) || '—'], ['Ligne(s) du fichier', o.line || '—'], ['Importé le', (o.at || (imp && imp.at)) ? fmtDate(String(o.at || imp.at).slice(0, 10)) : '—'], ['Identifiant', p.extId || '—']];
+  if (p.kind === 'rompu') rows.push(['Nature', 'indemnité de rompus : fraction de titre d\'une attribution d\'actions gratuites, versée en espèces (pas un dividende)']);
   if (p.calculated) rows.push(['Calcul', 'versement calculé : quantité détenue la veille du détachement (' + (p.basis && p.basis.qty != null ? p.basis.qty : '—') + ') × dividende de marché (' + (p.basis && p.basis.perShare != null ? p.basis.perShare : '—') + ' par titre) — pas un relevé du courtier ; un relevé importé le remplacera']);
   if (p.revisions && p.revisions.length) rows.push(['Révisions', p.revisions.map((r) => fmtDate(String(r.at).slice(0, 10)) + ' (brut ' + r.before.gross + ')').join(' ; ')]);
   return '<details class="dg-cols" style="margin:8px 0"><summary>Provenance du versement</summary><div class="tbl-wrap"><table class="tbl"><tbody>' + rows.map((r) => '<tr><td class="muted">' + esc(r[0]) + '</td><td>' + esc(String(r[1])) + '</td></tr>').join('') + '</tbody></table></div></details>';
@@ -1180,11 +1183,10 @@ function wireAttrib(m, h, id) {
     if (!r.ok) { if (prevUndo) state.undo = prevUndo; else delete state.undo; toast(r.error, { error: true }); return; } reopen();
   });
   $$('.at-rt', m).forEach((i) => i.onchange = () => {
-    const tx = state.transactions.find((x) => x.id === i.dataset.rt), v = i.value === '' ? null : numOrNull(i.value); if (!tx) return;
-    if (v !== null && !(v >= 0)) { toast('Montant invalide.', { error: true }); return; }
-    if (v === null) delete tx.rompuCash; else tx.rompuCash = Math.round(v * 100) / 100; saveState(); toast('Indemnité de rompus enregistrée (hors dividendes).', { ms: 3000 });
+    const r = Attrib.setRompuOnTx(state, i.dataset.rt, i.value === '' ? null : numOrNull(i.value), { uid, today: todayISO() });
+    if (!r.ok) { toast(r.error, { error: true }); return; } saveState(); renderPageSoft(); toast('Indemnité de rompus enregistrée : revenu perçu, visible dans l\'historique des versements sous « Indemnité de rompus ».', { ms: 5000 });
   });
-  $$('.at-rc', m).forEach((i) => i.onchange = () => { const r = Attrib.setRompuCash(state, i.dataset.rc, i.value === '' ? null : numOrNull(i.value)); if (r.ok) { saveState(); toast('Indemnité de rompus enregistrée (hors dividendes).', { ms: 3000 }); } else toast(r.error, { error: true }); });
+  $$('.at-rc', m).forEach((i) => i.onchange = () => { const r = Attrib.setRompuCash(state, i.dataset.rc, i.value === '' ? null : numOrNull(i.value), { uid, today: todayISO() }); if (r.ok) { saveState(); renderPageSoft(); toast('Indemnité de rompus enregistrée : revenu perçu, visible dans l\'historique des versements sous « Indemnité de rompus ».', { ms: 5000 }); } else toast(r.error, { error: true }); });
 }
 /* Vue consolidée : chaque compte reste distinct, le total est calculé en plus. */
 function openAttribConsolidated() {
