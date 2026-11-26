@@ -1458,6 +1458,20 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.reload(); await p.waitForTimeout(800); st = await storeOf(p); eq([st.payments.length, st.payments[0].gross], [1, 99.37], 'après rechargement : une seule écriture'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('Indemnisation de rompus seule depuis la fiche (attribution déjà comptée) : bouton « montant seulement » et formulaire sans nombre d\'actions ; quantité et PRU inchangés', async () => {
+    RELAY.old = false;
+    const seed = SEED(0); seed.accounts = [{ id: 'nom', name: 'Air Liquide Nominatif Pur' }];
+    seed.holdings = [{ id: 'ai', ticker: 'AI.PA', displayTicker: 'AI.PA', isin: '', name: "L'Air Liquide S.A.", type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: 33, avgCost: 136.36, price: 170, account: 'nom', logo: null, source: 'manual', addedAt: '2026-02-10', dividend: { none: true } }];
+    seed.transactions = [{ id: 't1', holdingId: 'ai', date: '2026-02-10', type: 'buy', qty: 30, price: 150, fees: 0, currency: 'EUR', amountAcct: 4500, acctCur: 'EUR', source: 'manual' }, { id: 'g1', holdingId: 'ai', date: '2026-06-10', type: 'buy', corp: true, freeShares: true, qty: 3, price: null, fees: 0, currency: 'EUR', amountAcct: 0, acctCur: 'EUR', source: 'manual' }];
+    const p = await device({ guest: true, seed, viewport: { width: 1200, height: 1500 } }); p.setDefaultTimeout(25000); await p.open();
+    await p.evaluate(() => openBuysModal('ai')); await p.waitForSelector('#atRompu'); await p.click('#atRompu'); await p.waitForSelector('#rpAmt');
+    ok(/Air Liquide/.test(await p.locator('#rpH option:checked').innerText()), 'position de la fiche présélectionnée'); await p.fill('#rpYear', '2026'); await p.fill('#rpAmt', '99,37'); await p.click('#rpSave'); await p.waitForTimeout(500);
+    let st = await storeOf(p); eq([st.payments.length, st.payments[0].kind, st.payments[0].gross, st.holdings[0].quantity, st.holdings[0].avgCost, st.transactions.length], [1, 'rompu', 99.37, 33, 136.36, 2], 'montant seul enregistré ; quantité, PRU et opérations inchangés');
+    // formulaire « Actions gratuites reçues » : nombre d'actions vide + indemnité = indemnité seule
+    await p.evaluate(() => openBuysModal('ai')); await p.waitForSelector('#fsRompu'); await p.evaluate(() => { document.querySelector('#fsBox').open = true; }); await p.fill('#fsDate', '2026-06-19'); await p.fill('#fsRompu', '5,5'); await p.click('#fsAdd'); await p.waitForTimeout(500);
+    st = await storeOf(p); eq([st.payments.length, st.payments.map((x) => x.gross).sort((a, b) => a - b), st.holdings[0].quantity, st.transactions.length], [2, [5.5, 99.37], 33, 2], 'indemnité seule depuis le formulaire : aucune action gratuite ajoutée'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };

@@ -205,7 +205,7 @@ function openBuysModal(id, startMode) {
     '<div class="hint" style="margin:4px 0 8px">Une attribution d\'actions gratuites s\'ajoute à votre quantité <b>sans coût</b> : le prix de revient baisse, la somme investie ne change pas.' + (isAirLiquide ? ' Chez Air Liquide, l\'attribution (1 pour 10) est la même <b>au porteur</b> (compte-titres, PEA) <b>et au nominatif</b> ; seule la <b>prime de fidélité</b> (+ 10 % d\'actions gratuites) est réservée aux actions au nominatif détenues depuis plus de 2 années civiles pleines. Elle se calcule compte par compte : les rompus sont versés en espèces.' : '') + '</div>' +
     (isAirLiquide ? '<div class="btn-row" style="margin-bottom:6px"><button type="button" class="btn sm" id="fsAL">Remplir : attribution Air Liquide du 10 juin 2026 (1 pour 10)</button></div>' : '') +
     '<div class="row2">' + fld('Date d\'attribution', '<input type="date" id="fsDate" max="' + todayISO() + '">', '', 'fsDate') + fld('1 gratuite pour … détenues', '<input type="text" inputmode="decimal" id="fsN" placeholder="ex : 10" autocomplete="off">', 'pour calculer le nombre reçu', 'fsN') + '</div>' +
-    '<div class="row2">' + fld('dont éligibles à la prime de fidélité', '<input type="text" inputmode="decimal" id="fsElig" placeholder="0 (nominatif depuis plus de 2 ans)" autocomplete="off">', 'facultatif : titres au nominatif', 'fsElig') + fld('Actions gratuites reçues', '<input type="text" inputmode="decimal" id="fsQty" placeholder="nombre reçu" autocomplete="off">', 'saisissez le nombre exact de votre relevé, ou laissez le calcul', 'fsQty') + '</div>' +
+    '<div class="row2">' + fld('dont éligibles à la prime de fidélité', '<input type="text" inputmode="decimal" id="fsElig" placeholder="0 (nominatif depuis plus de 2 ans)" autocomplete="off">', 'facultatif : titres au nominatif', 'fsElig') + fld('Actions gratuites reçues', '<input type="text" inputmode="decimal" id="fsQty" placeholder="nombre reçu" autocomplete="off">', 'à laisser VIDE si l\'attribution est déjà comptée : seule l\'indemnité est alors enregistrée', 'fsQty') + '</div>' +
     '<div class="row2">' + fld('Indemnité de rompus reçue (' + esc(costCur) + ', facultatif)', '<input type="text" inputmode="decimal" id="fsRompu" placeholder="si connue" autocomplete="off">', 'versée en espèces pour la fraction de titre : enregistrée comme revenu, sous le libellé « Indemnité de rompus »', 'fsRompu') + '<div></div></div>' +
     '<div id="fsPrev" class="dg-summary" style="margin-top:6px"></div><div id="fsErr" class="notice err hide"></div>' +
     '<div class="btn-row" style="margin-top:6px"><button class="btn" type="button" id="fsAdd">' + icon('plus') + 'Ajouter les actions gratuites</button></div></details><div class="modal-actions"><span></span><div class="btn-row"><button class="btn" type="button" id="byAdd">' + icon('plus') + 'Ajouter cet achat</button><button class="btn primary" type="button" data-close>Terminé</button></div></div>', { wide: true, onClose: () => renderPageSoft() });
@@ -263,6 +263,11 @@ function openBuysModal(id, startMode) {
   if ($('#fsAL', m)) $('#fsAL', m).onclick = () => { $('#fsDate', m).value = '2026-06-10'; $('#fsN', m).value = '10'; delete $('#fsQty', m).dataset.touched; fsCalc(); };
   $('#fsAdd', m).onclick = () => {
     const btn = $('#fsAdd', m); if (btn.disabled) return; btn.disabled = true;
+    if (!(val('fsQty') > 0) && val('fsRompu') > 0) {          // attribution déjà comptée : on n'enregistre QUE l'indemnité de rompus (catégorie séparée), sans toucher à la quantité ni au PRU
+      const d = $('#fsDate', m).value, r0 = Dividends.addRompu(state, { holdingId: id, date: d || null, year: d ? d.slice(0, 4) : String(new Date().getFullYear()), amount: val('fsRompu') }, { uid, today: todayISO() });
+      if (!r0.ok) { btn.disabled = false; const e = $('#fsErr', m); e.textContent = r0.error; e.classList.remove('hide'); return; }
+      saveState(); renderPage(); openBuysModal(id); toast('Indemnisation de rompus enregistrée (revenu, hors dividendes). Quantité et prix de revient inchangés.', { ms: 6000 }); return;
+    }
     const prevUndo = state.undo; snapshotForUndo('actions gratuites de ' + (h.name || h.ticker));
     const r = Ledger.recordFreeShares(state, id, { date: $('#fsDate', m).value, qty: val('fsQty') }, { uid, today: todayISO() });
     if (r.ok && val('fsRompu') > 0) Attrib.setRompuOnTx(state, r.id, val('fsRompu'), { uid, today: todayISO() });
@@ -466,10 +471,10 @@ function openPaymentModal(id, preset) {
    INDEMNISATION DES ROMPUS (catégorie propre) : virement reçu pour la vente des fractions d'actions non attribuées lors d'une attribution d'actions gratuites.
    Revenu lié à une opération sur titres : ni dividende, ni action gratuite ; ne modifie ni la quantité ni le PRU. Date exacte facultative (l'année suffit).
    --------------------------------------------------------------- */
-function openRompuModal(id) {
+function openRompuModal(id, holdingId) {
   const ex = id ? state.payments.find((p) => p.id === id && p.kind === 'rompu') : null;
   const all = state.holdings.concat((state.archive || []).filter((a) => !a.statementOnly)), nm = (h) => (h.name || h.ticker || '');
-  const pref = ex ? ex.holdingId : ((state.holdings.filter((h) => Attrib.matches(h) && (view.account === 'all' || h.account === view.account)).sort((a, b) => (/nominatif/i.test(accountName(b.account)) ? 1 : 0) - (/nominatif/i.test(accountName(a.account)) ? 1 : 0))[0] || {}).id || (all[0] || {}).id);
+  const pref = ex ? ex.holdingId : (holdingId || (state.holdings.filter((h) => Attrib.matches(h) && (view.account === 'all' || h.account === view.account)).sort((a, b) => (/nominatif/i.test(accountName(b.account)) ? 1 : 0) - (/nominatif/i.test(accountName(a.account)) ? 1 : 0))[0] || {}).id || (all[0] || {}).id);
   if (!all.length) { toast('Ajoutez d\'abord un actif.', { error: true }); return; }
   const yr = ex ? (ex.year || (ex.payDate || '').slice(0, 4)) : String(new Date().getFullYear()), known = ex ? ex.dateKnown !== false : false;
   const opts = all.slice().sort((a, b) => nm(a).localeCompare(nm(b))).map((h) => '<option value="' + esc(h.id) + '"' + (h.id === pref ? ' selected' : '') + '>' + esc(nm(h)) + ' — ' + esc(accountName(h.account)) + (state.holdings.includes(h) ? '' : ' (clôturée)') + '</option>').join('');
@@ -1184,12 +1189,13 @@ function attribSectionHtml(h) {
     (none ? '<div class="muted" style="margin:4px 0">Aucune opération d\'attribution en attente pour cette position.</div>' : '') +
     '<div class="hint" style="margin:6px 0">Attribution compte par compte : le porteur et le nominatif sont calculés séparément, les rompus aussi (valeur versée en espèces, à saisir quand vous la connaissez : elle n\'est jamais comptée comme dividende). Le prix de revient baisse, la somme investie ne change pas.</div>' +
     '<label class="chk" style="margin:4px 0"><input type="checkbox" id="atAuto"' + (state.settings.attribAuto ? ' checked' : '') + '><span>Appliquer automatiquement les attributions entièrement vérifiées (sinon : proposition à valider). Un cas incertain n\'est jamais appliqué sans validation.</span></label>' +
-    '<div class="btn-row" style="margin-bottom:6px"><button class="btn sm" type="button" id="atCons">Vue consolidée Air Liquide (tous comptes)</button></div>';
+    '<div class="btn-row" style="margin-bottom:6px"><button class="btn sm primary" type="button" id="atRompu" title="Pour une attribution déjà comptée : seul le montant reçu est enregistré (quantité et PRU inchangés)">Ajouter une indemnisation de rompus (montant seulement)</button><button class="btn sm" type="button" id="atCons">Vue consolidée Air Liquide (tous comptes)</button></div>';
 }
 function wireAttrib(m, h, id) {
   const reopen = () => { saveState(); renderPage(); openBuysModal(id); };
   if ($('#atMode', m)) $('#atMode', m).onchange = () => { const v = $('#atMode', m).value; if (v) h.holdMode = v; else delete h.holdMode; reopen(); };
   if ($('#atCons', m)) $('#atCons', m).onclick = () => openAttribConsolidated();
+  if ($('#atRompu', m)) $('#atRompu', m).onclick = () => { closeModal(); openRompuModal(null, h.id); };
   if ($('#atAuto', m)) $('#atAuto', m).onchange = () => { if ($('#atAuto', m).checked) state.settings.attribAuto = true; else delete state.settings.attribAuto; saveState(); };
   $$('[data-atap]', m).forEach((b) => b.onclick = async () => {
     const opId = b.dataset.atap, p = Attrib.proposals(state, todayISO()).find((x) => x.h.id === h.id && x.op.id === opId); if (!p || p.status === 'applied') return;
