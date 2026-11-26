@@ -187,7 +187,7 @@ function saveHoldingForm(m, ex) {
    --------------------------------------------------------------- */
 function openBuysModal(id, startMode) {
   const h = holdingById(id); if (!h) return;
-  const isAirLiquide = Ledger.holdingIsin(h) === 'FR0000120073';
+  const isAirLiquide = Attrib.issuerOf(h) === 'FR0000120073';
   const cur = h.currency || 'EUR', costCur = h.costCurrency || cur, sm = Ledger.purchaseSummary(state, h), lbl = { buy: 'Achat', sell: 'Vente', grant: 'Livraison gratuite', retire: 'Retrait' };
   const rows = sm.rows.map((r) => '<tr><td>' + esc(fmtDate(r.date)) + '</td><td>' + (r.opening ? '<span class="badge info" title="Quantité détenue au prix de revient saisi">Ouverture</span>' : esc(lbl[r.type] || r.type)) + '</td><td class="r">' + fmtNum(r.qty) + '</td><td class="r">' + (r.price == null ? '<span class="muted" title="Prix non saisi">—</span>' : fmtMoney(r.price, r.cur || cur, { d: 4 })) + '</td><td class="muted">' + esc({ degiro: 'DEGIRO', csv: 'Import CSV', manual: 'Saisie' }[r.source] || r.source) + '</td><td class="r">' + (r.manual && (r.type === 'buy') ? '<button class="btn sm ghost" type="button" data-rm="' + esc(r.id) + '" aria-label="Supprimer cet achat">' + icon('trash') + '</button>' : '') + '</td></tr>').join('');
   const status = sm.negative ? '<div class="notice warn"><span>Les ventes dépassent les achats connus : historique incomplet.</span></div>'
@@ -196,9 +196,9 @@ function openBuysModal(id, startMode) {
       (sm.diff < 0 ? '<div class="btn-row" style="margin-top:8px"><button class="btn sm primary" type="button" id="byAlign">Mettre la position à jour d\'après ces achats (' + fmtNum(sm.ledgerQty) + ' titres)</button></div>' : '') + '</div>';
   const m = openModal('<h2>Achats de ' + esc(h.name || h.displayTicker || h.ticker) + '</h2><div class="sub">Quantité détenue : <b>' + fmtNum(h.quantity) + '</b>' + (Number(h.avgCost) > 0 ? ' · prix de revient <b>' + fmtMoney(h.avgCost, costCur) + '</b>' : '') + '. Chaque achat (date + nombre d\'actions) alimente les <b>dividendes réellement éligibles</b> à chaque détachement et la <b>performance</b>.</div>' + status +
     (rows ? '<div class="tbl-wrap" style="max-height:220px;margin-top:8px"><table class="tbl"><thead><tr><th>Date</th><th>Opération</th><th class="r">Quantité</th><th class="r">Prix</th><th>Source</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted" style="margin:8px 0">Aucun achat enregistré pour cette position.</div>') +
-    (Attrib.isEligibleIsin(Ledger.holdingIsin(h)) ? attribSectionHtml(h) : '') + '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
+    (Attrib.matches(h) ? attribSectionHtml(h) : '') + '<div class="sec">Ajouter un achat</div><div class="row2">' + fld('Date d\'achat', '<input type="date" id="byDate" max="' + todayISO() + '">', '', 'byDate') + fld('Nombre d\'actions', '<input type="text" inputmode="decimal" id="byQty" placeholder="ex : 5" autocomplete="off">', sm.diff > 1e-6 && !sm.negative ? 'manquants dans l\'historique : ' + fmtNum(sm.diff) : '', 'byQty') + '</div>' +
     '<div class="row2">' + fld('Prix par action (' + cur + ', facultatif)', '<input type="text" inputmode="decimal" id="byPrice" placeholder="si connu" autocomplete="off">', 'sans prix, le titre reste valorisé sans coût inventé', 'byPrice') + fld('Frais (facultatif)', '<input type="text" inputmode="decimal" id="byFees" placeholder="0">', '', 'byFees') + '</div>' +
-    (h.holdMode === 'registered' ? fld('Date d\'inscription au nominatif (si différente, ex. titres transférés d\'un compte-titres)', '<input type="date" id="byNom" max="' + todayISO() + '">', 'départ de l\'ancienneté pour la prime de fidélité ; vide = date d\'achat', 'byNom') : '') +
+    (Attrib.modeOf(state, h).mode === 'registered' ? fld('Date d\'inscription au nominatif (si différente, ex. titres transférés d\'un compte-titres)', '<input type="date" id="byNom" max="' + todayISO() + '">', 'départ de l\'ancienneté pour la prime de fidélité ; vide = date d\'achat', 'byNom') : '') +
     (costCur !== cur ? '<div id="byCostRow">' + fld('Montant total payé en ' + costCur + ' (frais compris)', '<input type="text" inputmode="decimal" id="byCost" placeholder="montant débité" autocomplete="off">', 'le prix de revient est en ' + costCur + ' et le cours en ' + cur + ' : pas de taux de change inventé', 'byCost') + '</div>' : '') +
     '<div id="byPrev" class="dg-summary" style="margin-top:6px"></div><div class="hint" id="byModeNote" style="margin:6px 0 0"></div><div id="byErr" class="notice err hide"></div>' +
     '<details class="hero-more" id="fsBox"' + (isAirLiquide ? ' open' : '') + '><summary>Actions gratuites reçues (attribution)</summary>' +
@@ -245,7 +245,7 @@ function openBuysModal(id, startMode) {
   };
   m.addEventListener('input', refresh);
   refresh();
-  if (Attrib.isEligibleIsin(Ledger.holdingIsin(h))) wireAttrib(m, h, id);
+  if (Attrib.matches(h)) wireAttrib(m, h, id);
   /* Actions gratuites : calcul facultatif (1 pour N détenues, prime de fidélité) puis enregistrement (quantité + PRU mis à jour) */
   const fsCalc = () => {
     const d = $('#fsDate', m).value, N = val('fsN'), E = val('fsElig') || 0, box = $('#fsPrev', m), qIn = $('#fsQty', m);
@@ -1120,15 +1120,15 @@ function positionNotices() {
    sauf si l'utilisateur active l'application automatique ET que l'opération est entièrement vérifiée (aucune réserve).
    =============================================================== */
 const ATT_MODE = { bearer: 'Au porteur (compte-titres, PEA)', registered: 'Au nominatif (pur chez Air Liquide / Uptevia, ou administré)' };
-function attribHoldingsAI() { return (state.holdings || []).filter((h) => Attrib.isEligibleIsin(Ledger.holdingIsin(h))); }
+function attribHoldingsAI() { return (state.holdings || []).filter((h) => Attrib.matches(h)); }
 function attribBadge(st, reasons) {
   return st === 'applied' ? '<span class="badge received">Déjà appliquée</span>' : st === 'proposed' ? '<span class="badge info">Vérifiée — à appliquer</span>' : '<span class="badge warn" title="' + esc((reasons || []).join(' ; ')) + '">En attente de vérification</span>';
 }
 function attribSectionHtml(h) {
   const today = todayISO(), cur = h.costCurrency || h.currency || 'EUR', props = Attrib.proposals(state, today).filter((p) => p.h.id === h.id);
   const opsDone = state.attribApplied.filter((a) => a.holdingId === h.id);
-  const mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : '';
-  const modeSel = '<div class="row2">' + fld('Mode de détention de cette position', '<select id="atMode"><option value=""' + (mode ? '' : ' selected') + '>À indiquer…</option><option value="bearer"' + (mode === 'bearer' ? ' selected' : '') + '>' + esc(ATT_MODE.bearer) + '</option><option value="registered"' + (mode === 'registered' ? ' selected' : '') + '>' + esc(ATT_MODE.registered) + '</option></select>', 'sans cette information, aucune prime de fidélité n\'est supposée', 'atMode') + '</div>';
+  const mi = Attrib.modeOf(state, h), mode = mi.mode, explicit = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : '', accName = accountName(h.account);
+  const modeSel = '<div class="row2">' + fld('Mode de détention de cette position', '<select id="atMode"><option value=""' + (explicit ? '' : ' selected') + '>' + (mi.inferred ? 'Automatique : ' + esc(ATT_MODE[mi.mode].split(' (')[0]) + ' (d\'après le nom du portefeuille « ' + esc(accName) + ' »)' : 'À indiquer…') + '</option><option value="bearer"' + (explicit === 'bearer' ? ' selected' : '') + '>' + esc(ATT_MODE.bearer) + '</option><option value="registered"' + (explicit === 'registered' ? ' selected' : '') + '>' + esc(ATT_MODE.registered) + '</option></select>', 'déduit du nom du portefeuille « ' + esc(accName) + ' » ; sans nom reconnu et sans choix, aucune prime de fidélité n\'est supposée', 'atMode') + '</div>';
   const lastOp = Attrib.operations(state).filter((o) => (o.creditDate || o.exDate) <= today).pop();
   let elig = '';
   if (mode === 'registered' && lastOp) {
@@ -1191,7 +1191,7 @@ function openAttribConsolidated() {
   const hs = attribHoldingsAI(), today = todayISO(), lastOp = Attrib.operations(state).filter((o) => (o.creditDate || o.exDate) <= today).pop();
   if (!hs.length) { toast('Aucune position Air Liquide.'); return; }
   const cols = hs.map((h) => {
-    const mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : null, c = lastOp ? Attrib.compute(state, h, lastOp) : null, rec = lastOp ? state.attribApplied.find((a) => a.opId === lastOp.id && a.holdingId === h.id) : null;
+    const mode = Attrib.modeOf(state, h).mode, c = lastOp ? Attrib.compute(state, h, lastOp) : null, rec = lastOp ? state.attribApplied.find((a) => a.opId === lastOp.id && a.holdingId === h.id) : null;
     const cashRows = state.attribApplied.filter((a) => a.holdingId === h.id && a.rompuCash != null).map((a) => a.rompuCash).concat(state.transactions.filter((t) => t.holdingId === h.id && t.corp && t.rompuCash != null && !state.attribApplied.some((a) => a.txId === t.id)).map((t) => t.rompuCash)), rompuCash = cashRows.reduce((s, v) => s + v, 0), hasCash = cashRows.length > 0;
     return { h, mode, qty: Number(h.quantity) || 0, eligible: mode === 'registered' && c ? c.eligible : (mode === 'bearer' ? 0 : null), bonus: rec ? rec.bonus : (c && mode ? c.bonus : null), free: rec ? rec.free : (c && mode ? c.free : null), rompu: rec ? rec.rompuQty : (c ? c.rompuQty : null), cash: hasCash ? rompuCash : null, applied: !!rec };
   });

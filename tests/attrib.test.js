@@ -68,4 +68,19 @@ t('détection d\'après les données de marché : un fractionnement 1,1 inconnu 
   assert.strictEqual(A.detectFromMarket(mk('bearer', 16, [], { splits: [{ date: '2026-06-08', ratio: 1.1 }] }), '2026-11-25').length, 0, 'opération du catalogue (2026-06-08)');
 });
 
+t('position SANS ISIN (nominatif pur saisi à la main) reconnue par son nom ; mode de détention déduit du NOM DU PORTEFEUILLE (nominatif / DEGIRO, CTO, PEA) ; choix explicite prioritaire', () => {
+  const st = { accounts: [{ id: 'dg', name: 'DEGIRO' }, { id: 'nom', name: 'Air Liquide Nominatif Pur' }, { id: 'x', name: 'Mon portefeuille' }],
+    holdings: [{ id: 'a', ticker: 'AI.PA', isin: ISIN, name: 'AIR LIQUIDE', currency: 'EUR', costCurrency: 'EUR', account: 'dg', quantity: 16, avgCost: 150, addedAt: '2019-01-01' },
+      { id: 'b', ticker: 'AI.PA', isin: '', name: "L'Air Liquide S.A.", currency: 'EUR', costCurrency: 'EUR', account: 'nom', quantity: 100, avgCost: 120, addedAt: '2019-01-01' },
+      { id: 'c', ticker: 'AI.PA', isin: ISIN, name: 'Air Liquide', currency: 'EUR', costCurrency: 'EUR', account: 'x', quantity: 10, avgCost: 120, addedAt: '2019-01-01' },
+      { id: 'd', ticker: 'AAA', isin: '', name: 'Autre société', currency: 'EUR', account: 'nom', quantity: 5, avgCost: 10 }], archive: [], corp: [], attributions: [OP24],
+    transactions: [buy('ta', 'a', '2019-05-01', 16, 150), buy('tb', 'b', '2020-03-01', 100, 120), buy('tc', 'c', '2020-03-01', 10, 120)] };
+  assert.strictEqual(A.issuerOf(st.holdings[1]), ISIN, 'sans ISIN : reconnue par son nom'); assert.strictEqual(A.issuerOf(st.holdings[3]), null, 'autre société : ignorée');
+  assert.deepStrictEqual([A.modeOf(st, st.holdings[0]).mode, A.modeOf(st, st.holdings[1]).mode, A.modeOf(st, st.holdings[2]).mode], ['bearer', 'registered', null], 'DEGIRO : porteur ; « Nominatif Pur » : nominatif ; nom inconnu : à indiquer');
+  assert.strictEqual(A.modeOf(st, st.holdings[1]).inferred, true); st.holdings[2].holdMode = 'registered'; assert.deepStrictEqual([A.modeOf(st, st.holdings[2]).mode, A.modeOf(st, st.holdings[2]).inferred], ['registered', false], 'choix explicite');
+  const by = {}; A.proposals(st, '2026-11-25').filter((p) => p.op.id === 'T-2024').forEach((p) => { by[p.h.id] = p.calc; });
+  assert.deepStrictEqual([by.a.free, by.a.bonus, by.b.free, by.b.bonus, by.b.mode], [1, 0, 11, 1, 'registered'], 'DEGIRO : 1 gratuite, pas de prime ; nominatif pur : 11 dont 1 de prime'); assert.ok(!by.b.reasons.some((r) => /mode de détention/.test(r)), 'mode connu par le nom du portefeuille');
+  assert.strictEqual(by.d, undefined, 'les autres positions ne sont pas concernées');
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

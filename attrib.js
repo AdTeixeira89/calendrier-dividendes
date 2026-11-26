@@ -28,6 +28,24 @@
   ];
   const ISINS = Array.from(new Set(CATALOGUE.map((o) => o.isin)));
   const isEligibleIsin = (isin) => ISINS.indexOf(String(isin || '').toUpperCase()) >= 0;
+  /* Émetteur d'une position : par ISIN, ou — quand la position n'a pas d'ISIN (ex. nominatif pur saisi à la main) — par son nom ou son symbole. */
+  const ISSUER_NAMES = { 'FR0000120073': { name: /air\s*liquide/i, tickers: ['AI.PA', 'AI'] } };
+  function issuerOf(h) {
+    const isin = String((Ledger && Ledger.holdingIsin ? Ledger.holdingIsin(h) : h.isin) || '').toUpperCase();
+    if (isin) return isEligibleIsin(isin) ? isin : null;
+    const nm = String(h.name || ''), tk = String(h.ticker || h.displayTicker || '').toUpperCase();
+    for (const k of Object.keys(ISSUER_NAMES)) if (ISSUER_NAMES[k].name.test(nm) || ISSUER_NAMES[k].tickers.indexOf(tk) >= 0) return k;
+    return null;
+  }
+  const matches = (h) => issuerOf(h) !== null;
+  /* Mode de détention : choix explicite de l'utilisateur, sinon DÉDUIT DU NOM DU PORTEFEUILLE (« nominatif », « Uptevia » → nominatif ; DEGIRO, CTO, PEA, compte-titres, courtier → porteur). */
+  function modeOf(state, h) {
+    if (h.holdMode === 'registered' || h.holdMode === 'bearer') return { mode: h.holdMode, inferred: false };
+    const acc = ((state.accounts || []).find((a) => a.id === h.account) || {}).name || '';
+    if (/nominatif|uptevia|registered/i.test(acc)) return { mode: 'registered', inferred: true, from: acc };
+    if (/degiro|cto|pea|compte[-\s]*titres|trade\s*republic|boursorama|saxo|interactive|bourse|courtier|broker/i.test(acc)) return { mode: 'bearer', inferred: true, from: acc };
+    return { mode: null, inferred: false };
+  }
 
   const holdingIsin = (h) => (Ledger && Ledger.holdingIsin ? Ledger.holdingIsin(h) : String(h.isin || '').toUpperCase());
   /* Opérations connues : catalogue + opérations ajoutées (détection de marché, saisie) ; une opération d'état de même identifiant remplace celle du catalogue. */
@@ -61,7 +79,7 @@
   /* Calcul des droits d'UNE position pour UNE opération. mode : 'bearer' | 'registered' | undefined. */
   function compute(state, h, op, opt) {
     opt = opt || {};
-    const ref = addDays(op.exDate || op.creditDate, -1), refYear = Number(ref.slice(0, 4)), mode = h.holdMode === 'registered' || h.holdMode === 'bearer' ? h.holdMode : null;
+    const ref = addDays(op.exDate || op.creditDate, -1), refYear = Number(ref.slice(0, 4)), mode = modeOf(state, h).mode;
     const lots = lotsAt(state, h, ref), held = r6(lots.lots.reduce((s, l) => s + l.qty, 0)), reasons = [];
     let eligible = 0;
     if (mode === 'registered') {
@@ -93,10 +111,10 @@
 
   /* Statut et proposition de chaque (opération × position) : 'applied' | 'proposed' (données fiables, à valider) | 'review' (à vérifier) | 'none' (non concernée). */
   function proposals(state, todayISO) {
-    const out = [], held = (state.holdings || []).filter((h) => isEligibleIsin(holdingIsin(h)));
+    const out = [], held = (state.holdings || []).filter(matches);
     allOps(state, todayISO).forEach((op) => {
       const date = op.creditDate || op.exDate; if (!date || date > todayISO) { return; }
-      held.filter((h) => holdingIsin(h) === op.isin.toUpperCase()).forEach((h) => {
+      held.filter((h) => issuerOf(h) === op.isin.toUpperCase()).forEach((h) => {
         const ap = appliedOf(state, h, op);
         if (ap) { out.push({ status: 'applied', op, h, applied: ap }); return; }
         if (h.addedAt && String(h.addedAt).slice(0, 10) > date && !(state.transactions || []).some((t) => t.holdingId === h.id && t.date && t.date <= date)) { return; }     // position entrée après l'opération
@@ -111,12 +129,12 @@
   /* Candidat d'après les données de marché : un fractionnement ≈ 1 + 1/N (ex. 1,1) détecté sur la position signale une attribution, sans source officielle → « à vérifier ». */
   function detectFromMarket(state, todayISO) {
     const found = [], known = operations(state);
-    (state.holdings || []).filter((h) => isEligibleIsin(holdingIsin(h))).forEach((h) => {
+    (state.holdings || []).filter(matches).forEach((h) => {
       (h.splits || []).forEach((s) => {
         if (!s || !s.date || !(num(s.ratio) > 1.05 && num(s.ratio) < 1.25) || s.date > todayISO) return;
         if (known.some((o) => Math.abs(dayNum(o.exDate || o.creditDate) - dayNum(s.date)) <= 12)) return;
         const N = Math.round(1 / (num(s.ratio) - 1)); if (!(N >= 2 && N <= 100)) return;
-        const id = 'AI-mkt-' + s.date; if (!found.some((f) => f.id === id)) found.push({ id, isin: holdingIsin(h), name: h.name || 'Air Liquide', N, bonusPct: 10, exDate: s.date, creditDate: addDays(s.date, 2), exConfirmed: false, creditConfirmed: false, origin: 'market',
+        const id = 'AI-mkt-' + s.date; if (!found.some((f) => f.id === id)) found.push({ id, isin: issuerOf(h), name: h.name || 'Air Liquide', N, bonusPct: 10, exDate: s.date, creditDate: addDays(s.date, 2), exConfirmed: false, creditConfirmed: false, origin: 'market',
           source: 'Données de marché : fractionnement ' + s.ratio + ' détecté au ' + s.date + ' (aucun avis officiel trouvé) ; date d\'attribution estimée' });
       });
     });
@@ -153,7 +171,7 @@
     state.attribApplied.splice(i, 1); return { ok: true };
   }
 
-  const api = { allOps, CATALOGUE, isEligibleIsin, operations, effYear, lotsAt, compute, appliedOf, proposals, detectFromMarket, apply, setRompuCash, revert };
+  const api = { allOps, CATALOGUE, isEligibleIsin, issuerOf, matches, modeOf, operations, effYear, lotsAt, compute, appliedOf, proposals, detectFromMarket, apply, setRompuCash, revert };
   root.Attrib = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof self !== 'undefined' ? self : this);

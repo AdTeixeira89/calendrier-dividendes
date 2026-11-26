@@ -1414,6 +1414,19 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     await p.click('#atCons'); await p.waitForSelector('text=vue consolidée'); ok(/1,25/.test(await p.locator('.modal').last().innerText()), 'reprise dans la vue consolidée'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('Air Liquide nominatif pur SANS ISIN : rubrique « Opérations sur titres » présente, mode déduit du nom du portefeuille, attribution appliquée à cette position seulement, indemnité de rompus saisissable', async () => {
+    RELAY.old = false;
+    const mk = (id, acc, qty, isin, nm) => ({ id, ticker: 'AI.PA', displayTicker: 'AI.PA', isin, name: nm, type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', costCurrency: 'EUR', quantity: qty, avgCost: 150, price: 170, account: acc, logo: null, source: 'manual', addedAt: '2024-01-01', dividend: { none: true } });
+    const seed = SEED(0); seed.accounts = [{ id: 'dg', name: 'DEGIRO' }, { id: 'nom', name: 'Air Liquide Nominatif Pur' }]; seed.holdings = [mk('aidg', 'dg', 16, 'FR0000120073', 'AIR LIQUIDE'), mk('ainom', 'nom', 30, '', "L'Air Liquide S.A.")];
+    const tx = (id, h, d, q) => ({ id, holdingId: h, date: d, type: 'buy', qty: q, price: 150, fees: 0, currency: 'EUR', amountAcct: q * 150, acctCur: 'EUR', source: 'manual' }); seed.transactions = [tx('t1', 'aidg', '2023-05-02', 16), tx('t2', 'ainom', '2026-02-10', 30)];
+    const p = await device({ guest: true, seed, viewport: { width: 1200, height: 1400 } }); p.setDefaultTimeout(25000); await p.open();
+    await p.evaluate(() => openBuysModal('ainom')); await p.waitForSelector('#atMode'); ok(/Automatique : Au nominatif/.test(await p.locator('#atMode option').first().innerText()) && /Air Liquide Nominatif Pur/.test(await p.locator('#atMode option').first().innerText()), 'mode « nominatif » déduit du nom du portefeuille');
+    ok(await p.locator('[data-atap]').count() === 1, 'attribution proposée pour le nominatif'); await p.click('[data-atap]'); await p.waitForSelector('#cdYes'); await p.click('#cdYes'); await p.waitForTimeout(600);
+    let st = await storeOf(p); eq([st.holdings.find((x) => x.id === 'ainom').quantity, st.holdings.find((x) => x.id === 'aidg').quantity], [33, 16], 'seul le nominatif pur est modifié (30 + 3), DEGIRO inchangé');
+    await p.waitForSelector('.at-rc'); await p.fill('.at-rc', '2,10'); await p.locator('.at-rc').press('Tab'); await p.waitForTimeout(300); st = await storeOf(p); eq([st.attribApplied[0].holdingId, st.attribApplied[0].rompuCash, (st.payments || []).length], ['ainom', 2.1, 0], 'indemnité de rompus rattachée au portefeuille nominatif pur, hors dividendes');
+    await p.evaluate(() => openBuysModal('aidg')); await p.waitForSelector('#atMode'); ok(/Automatique : Au porteur/.test(await p.locator('#atMode option').first().innerText()), 'DEGIRO : porteur, déduit du nom'); eq(p.errors, [], 'aucune erreur JS');
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };
