@@ -60,6 +60,7 @@ function wireDo(host) {
     else if (a === 'refresh') refreshMarket(visibleHoldings());
     else if (a === 'daily-detail') openDailyDetail();
     else if (a === 'add-payment') openPaymentModal(null);
+    else if (a === 'add-rompu') openRompuModal(null);
     else if (a === 'settings') go('settings');
     else if (a === 'div-history') runDividendHistory();
     else if (a === 'div-analyze') runDividendAnalysis({ ids: visibleIds() });
@@ -148,6 +149,7 @@ function dividendKpisHtml() {
     kpi('Dividendes bruts perçus', sm.count ? money(sm.gross) : '—', 'Avant retenues, depuis le 1er janvier', sm.count ? 'income' : ''),
     kpi('Retenues fiscales', sm.count ? money(sm.tax) : '—', sm.count ? 'Retenues connues depuis le 1er janvier' + (sm.taxUnknown ? ' (' + sm.taxUnknown + ' sans retenue connue)' : '') : 'Aucune donnée'),
     kpi('Total net perçu depuis le début', all.count ? money(all.net) : '—', all.count ? 'Brut ' + money(all.gross) + ' · retenues ' + money(all.tax) + '<br>' + all.count + ' versement(s)' + (firstPay ? ' depuis le ' + esc(fmtDate(firstPay, { day: 'numeric', month: 'short', year: 'numeric' })) : '') + partial(all) : 'Aucun versement réel enregistré', all.count ? 'income' : ''),
+    (all.rompu && all.rompu.count ? kpi('Indemnisation des rompus', '+' + money(all.rompu.gross), 'Revenu lié aux opérations sur titres, <b>hors dividendes</b> et hors actions gratuites · ' + all.rompu.count + ' versement(s) depuis le début') : '') +
     kpi('Prévision pour ' + MOIS[today.getMonth()].toLowerCase(), money(mSum.total), mEvs.length ? mReceived + ' reçu(s) sur ' + mEvs.length + ' versement(s)' : 'Aucun versement attendu ce mois-ci', 'income'),
     kpi('Prochain dividende', first ? (convert(fa.v, first.currency) === null ? fmtMoney(fa.v, first.currency) : money(convert(fa.v, first.currency))) : '—', first ? esc(first.name || first.ticker) + ' · ' + esc(fmtDate(first.date, { day: 'numeric', month: 'short' })) + '<br>' + esc(kindLabel(first.dateKind, first.status, first)) : 'Aucun dans les 4 mois', first ? 'income' : ''),
     kpi('Rendement sur coût', yoc.rate === null ? '—' : fmtPct(yoc.rate, 2), yoc.rate === null ? 'Renseignez le prix de revient de vos actifs' : 'Calculé sur ' + yoc.withCost + ' / ' + yoc.payers + ' actif(s) avec prix de revient'),
@@ -238,7 +240,7 @@ function cashBarHtml(titres, cash, slim) {
 function portfolioSummaryHtml(perf) {
   const ids = visibleIds(), pv = Engine.portfolioValue(state, convert, ids), inv = Engine.investedTotal(state, convert, ids);
   const rec = Engine.receivedBetween(state, '2000-01-01', todayISO(), 'gross', convert, ids), div = rec.verified.total;
-  const tr = perf.count && perf.cost > 0 ? (perf.gain + div) / perf.cost : null, cashK = Engine.cashTotals(state, view.account);
+  const tr = perf.count && perf.cost > 0 ? (perf.gain + div) / perf.cost : null, cashK = Engine.cashTotals(state, view.account), rompuK = Dividends.summary(state, { to: todayISO(), ids, convert }).rompu;
   const cls = (v) => (v >= 0 ? 'pos' : 'neg');
   const mask = !!state.settings.hideNumbers;
   return '<div class="grid kpis sum-strip' + (mask ? ' hide-nums' : '') + '" style="margin-bottom:12px">' +
@@ -246,6 +248,7 @@ function portfolioSummaryHtml(perf) {
     kpiCard('Investi (PRU)', inv.count ? money(inv.cost, 0) : '—', inv.count + ' actif(s) avec PRU') +
     kpiCard('Plus / moins-value', perf.count ? (perf.gain >= 0 ? '+' : '') + money(perf.gain, 0) : '—', perf.count ? fmtPct(perf.pct, 1, true) + ' sur ' + perf.count + ' actif(s) (PRU + cours)' : 'Nécessite le PRU et le cours', perf.count ? cls(perf.gain) === 'pos' ? 'income' : 'neg' : '') +
     (cashK.amount > 0 ? kpiCard('Liquidités', money(cashK.amount, 0), cashScopeLabel(cashK) + ' · ' + cashCountedLabel(cashK)) : '') +
+    (rompuK.count ? kpiCard('Indemnisation des rompus', '+' + money(rompuK.gross, 2), 'Revenu sur opérations sur titres · catégorie séparée des dividendes') : '') +
     kpiCard('Rendement total', tr === null ? '—' : fmtPct(tr, 1, true), tr === null ? 'Plus-value + dividendes perçus' : 'Plus-value + ' + money(div, 0) + ' de dividendes perçus (vérifiés)', tr !== null ? (tr >= 0 ? 'income' : 'neg') : '') + '</div>';
 }
 
@@ -422,6 +425,7 @@ function renderCalendar(host) {
 function paymentRows() {
   const ids = visibleIds(), h = view.hist;
   return Dividends.realPayments(state).filter((p) => {                    // uniquement les versements réellement perçus
+    if (p.kind === 'rompu') return false;                                  // les indemnisations de rompus ont leur propre section
     if (ids && !ids.has(p.holdingId)) return false;
     const d = p.payDate || p.exDate || '';
     if (h.year !== 'all' && d.slice(0, 4) !== h.year) return false;
@@ -471,6 +475,28 @@ function txColumns() {
   ];
 }
 
+/* Indemnisations de rompus (catégorie séparée des dividendes et des actions gratuites), mêmes filtres que l'historique. */
+function rompuRows() {
+  const ids = visibleIds(), h = view.hist;
+  return Dividends.rompuPayments(state).filter((p) => {
+    if (ids && !ids.has(p.holdingId)) return false;
+    const d = p.payDate || p.exDate || '';
+    if (h.year !== 'all' && d.slice(0, 4) !== h.year) return false;
+    if (h.month !== 'all' && p.dateKnown !== false && d.slice(5, 7) !== h.month) return false;
+    if (h.asset !== 'all' && p.holdingId !== h.asset) return false;
+    return true;
+  }).sort((a, b) => ((b.payDate || '') < (a.payDate || '') ? -1 : 1));
+}
+function rompuSectionHtml() {
+  const rows = rompuRows(); if (!rows.length) return '';
+  const tot = rows.reduce((s, p) => { const v = convert(Number(p.gross) || 0, p.currency || 'EUR'); return v === null ? s : s + v; }, 0);
+  return '<section class="card card-pad" id="rompuCard" style="margin-top:12px"><div class="card-head"><h3>Indemnisation des rompus</h3><span class="muted">revenu lié à une opération sur titres · hors dividendes · hors actions gratuites</span></div>' +
+    '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Libellé</th><th>Type</th><th class="r">Montant encaissé</th><th>Compte</th></tr></thead><tbody>' + rows.map((p) => {
+      const h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId) || {};
+      return '<tr data-open="' + esc(p.id) + '" style="cursor:pointer"><td>' + (p.dateKnown === false ? esc(String(p.year || (p.payDate || '').slice(0, 4))) + ' <span class="muted">(date exacte à compléter)</span>' : esc(fmtDate(p.payDate))) + '</td><td>' + esc(p.label || 'Indemnisation des rompus') + '</td><td>' + esc(p.rompuType || 'Indemnisation de fractions d\'actions') + '</td><td class="r"><b class="pos">+' + esc(fmtMoney(Number(p.gross) || 0, p.currency || 'EUR')) + '</b></td><td>' + esc(accountName(h.account)) + '</td></tr>';
+    }).join('') + '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td class="r"><b>+' + esc(money(tot)) + '</b></td><td></td></tr></tfoot></table></div>' +
+    '<p class="hint" style="margin-top:6px">Fractions d\'actions vendues lors d\'une attribution d\'actions gratuites. Compté dans vos revenus, <b>pas</b> dans les dividendes ni dans leur rendement ; la quantité détenue et le prix de revient ne sont pas modifiés.</p></section>';
+}
 function renderHistory(host) {
   const h = view.hist;
   const years = Array.from(new Set(Dividends.realPayments(state).map((p) => (p.payDate || p.exDate || '').slice(0, 4)).concat(state.transactions.map((t) => (t.date || '').slice(0, 4))).filter(Boolean))).sort().reverse();
@@ -488,15 +514,16 @@ function renderHistory(host) {
   const mig = isPay ? Dividends.planMigration(state) : null;
   Notify.set('divmig', migrationNotices(mig));
   host.innerHTML = pageHead('Historique', 'Dividendes effectivement reçus et opérations associées',
-    '<button class="btn" type="button" data-do="import-tx">' + icon('upload') + 'Importer</button>' + (isPay ? '<button class="btn primary" type="button" data-do="add-payment">' + icon('plus') + 'Ajouter un versement</button>' : '')) +
+    '<button class="btn" type="button" data-do="import-tx">' + icon('upload') + 'Importer</button>' + (isPay ? '<button class="btn" type="button" data-do="add-rompu">' + icon('plus') + 'Indemnisation de rompus</button><button class="btn primary" type="button" data-do="add-payment">' + icon('plus') + 'Ajouter un versement</button>' : '')) +
     '<div class="toolbar"><div class="seg" id="hTab"><button type="button" data-t="payments" class="' + (isPay ? 'on' : '') + '">Dividendes reçus</button><button type="button" data-t="transactions" class="' + (!isPay ? 'on' : '') + '">Opérations</button></div>' +
     '<select id="hYear" aria-label="Année" style="width:auto"><option value="all">Toutes les années</option>' + years.map((y) => '<option value="' + y + '">' + y + '</option>').join('') + '</select>' +
     '<select id="hMonth" aria-label="Mois" style="width:auto"><option value="all">Tous les mois</option>' + MOIS.map((m, i) => '<option value="' + pad2(i + 1) + '">' + m + '</option>').join('') + '</select>' +
     '<select id="hAsset" aria-label="Actif" style="width:auto;max-width:180px"><option value="all">Tous les actifs</option>' + assets.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name || a.displayTicker || a.ticker) + '</option>').join('') + '</select>' +
     '<span class="grow"></span>' + (isPay ? '<button class="btn" type="button" data-do="div-analyze">' + icon('refresh') + 'Analyser mes dividendes</button><button class="btn" type="button" data-do="div-history">' + icon('refresh') + 'Dividendes dus</button>' : '') + Tbl.menuHtml(cfg) + '</div>' +
     '' +
-    '<div id="tblHost"></div>' + (isPay ? '<p class="hint" style="margin-top:8px">Uniquement les versements réellement perçus (relevés, CSV, saisie). Un total marqué * est partiel : certains versements n\'ont ni retenue ni net connus (non estimés, non remplacés par le brut).</p>' : '');
+    '<div id="tblHost"></div>' + (isPay ? rompuSectionHtml() : '') + (isPay ? '<p class="hint" style="margin-top:8px">Uniquement les versements réellement perçus (relevés, CSV, saisie). Un total marqué * est partiel : certains versements n\'ont ni retenue ni net connus (non estimés, non remplacés par le brut).</p>' : '');
   $('#hYear', host).value = h.year; $('#hMonth', host).value = h.month; $('#hAsset', host).value = h.asset;
+  $$('#rompuCard [data-open]', host).forEach((r) => r.onclick = () => openRompuModal(r.dataset.open));
   ['hYear:year', 'hMonth:month', 'hAsset:asset'].forEach((x) => { const [id, k] = x.split(':'); const el = $('#' + id, host); if (el) el.onchange = (e) => { h[k] = e.target.value; renderHistory(host); }; });
   $$('#hTab [data-t]', host).forEach((b) => b.onclick = () => { h.tab = b.dataset.t; renderHistory(host); });
   Tbl.render($('#tblHost'), cfg); wireDo(host);

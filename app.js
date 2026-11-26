@@ -709,7 +709,7 @@ function csvPositions() {
 }
 function csvDividends() {
   const ids = visibleIds();
-  const rows = Dividends.realPayments(state).filter((p) => !ids || ids.has(p.holdingId)).slice().sort((x, y) => String(x.payDate || x.exDate).localeCompare(String(y.payDate || y.exDate))).map((p) => {
+  const rows = Dividends.realPayments(state).filter((p) => p.kind !== 'rompu' && (!ids || ids.has(p.holdingId))).slice().sort((x, y) => String(x.payDate || x.exDate).localeCompare(String(y.payDate || y.exDate))).map((p) => {
     const h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId), am = Dividends.amounts(p), o = p.origin || {};
     return [p.payDate || '', p.exDate || '', p.ticker || '', p.name || '', accountName(h && h.account), p.qty, p.perShare, am.gross, am.tax, p.fees, am.net, p.currency || '', p.source || '', o.file || '', o.line || '', p.extId || ''];
   });

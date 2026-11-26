@@ -87,13 +87,30 @@ t('indemnité de rompus : revenu perçu enregistré sous son vrai libellé, ratt
   const D = require('../dividends.js'), E = require('../engine.js');
   const st = mk('registered', 100, [buy('t1', 'h', '2020-03-01', 100, 100)]); st.holdings[0].avgCost = 100; const r = A.apply(st, 'T-2024', 'h', deps); assert.ok(r.ok);
   assert.ok(A.setRompuCash(st, r.rec.id, 3.2, deps).ok); let p = st.payments; assert.strictEqual(p.length, 1); assert.deepStrictEqual([p[0].kind, p[0].holdingId, p[0].gross, p[0].net, p[0].payDate, p[0].rompuKey, p[0].verified], ['rompu', 'h', 3.2, 3.2, '2024-06-05', 'attrib:' + r.rec.id, true]);
-  assert.ok(/rompus/i.test(p[0].label), 'libellé explicite'); assert.ok(D.isReal(p[0]) && !D.isDividend(p[0]), 'revenu perçu, mais pas un dividende');
-  assert.strictEqual(D.summary(st, { from: '2024-01-01', to: '2024-12-31', convert: (v) => v }).gross, 3.2, 'compté dans les revenus perçus');
+  assert.ok(/Régularisation rompus Air Liquide 2024/.test(p[0].label) && p[0].category === 'Indemnisation des rompus' && p[0].rompuType === 'Indemnisation de fractions d\'actions', 'libellé et catégorie explicites'); assert.ok(D.isReal(p[0]) && !D.isDividend(p[0]), 'revenu perçu, mais pas un dividende');
+  const sm0 = D.summary(st, { from: '2024-01-01', to: '2024-12-31', convert: (v) => v }); assert.deepStrictEqual([sm0.gross, sm0.count, sm0.rompu.gross, sm0.rompu.count], [0, 0, 3.2, 1], 'catégorie séparée : hors totaux de dividendes, comptée dans les revenus de rompus');
   A.setRompuCash(st, r.rec.id, 4.5, deps); assert.strictEqual(st.payments.length, 1, 'idempotent : une seule écriture'); assert.strictEqual(st.payments[0].gross, 4.5);
   st.holdings[0].divHist = { at: '2026-11-01', currency: 'EUR', items: [['2024-06-03', 2]] }; const props = E.dividendProposals(st, new Date(2026, 10, 25), () => 'x', {}); assert.ok(props.proposals.some((q) => q.exDate === '2024-06-03') || props.already.length === 0, 'l\'indemnité n\'est pas prise pour le dividende du même mois');
   A.setRompuCash(st, r.rec.id, null, deps); assert.strictEqual(st.payments.length, 0, 'montant vide : écriture supprimée'); A.setRompuCash(st, r.rec.id, 2, deps); assert.ok(A.revert(st, r.rec.id).ok); assert.strictEqual(st.payments.length, 0, 'annulation de l\'opération : l\'indemnité est retirée');
   // attribution déjà enregistrée (livraison gratuite saisie / importée)
   const st2 = mk('bearer', 17, [buy('t1', 'h', '2019-05-01', 16, 100), buy('g1', 'h', '2024-06-05', 1, 0, { corp: true, price: null, amountAcct: 0 })]); assert.ok(A.setRompuOnTx(st2, 'g1', 1.1, deps).ok); assert.deepStrictEqual([st2.payments.length, st2.payments[0].rompuKey, st2.transactions[1].rompuCash], [1, 'tx:g1', 1.1]);
+});
+
+t('indemnisation des rompus saisie à part (virement « ROMPUS AIR LIQUIDE 2026 », année seule) : catégorie indépendante, ni dividende, ni action gratuite, quantité et PRU intacts, rendement des dividendes inchangé', () => {
+  const D = require('../dividends.js'), E = require('../engine.js');
+  const st = { accounts: [{ id: 'nom', name: 'Air Liquide Nominatif Pur' }], holdings: [{ id: 'h', ticker: 'AI.PA', isin: '', name: "L'Air Liquide S.A.", currency: 'EUR', costCurrency: 'EUR', account: 'nom', quantity: 33, avgCost: 136.36, price: 170, addedAt: '2026-02-10', dividend: { lastAmount: 3.7, frequency: 'annual', none: false } }], archive: [], corp: [], payments: [],
+    transactions: [buy('t1', 'h', '2026-02-10', 30, 150), buy('g1', 'h', '2026-06-10', 3, 0, { corp: true, price: null, amountAcct: 0 })] };
+  const before = JSON.stringify([st.holdings[0].quantity, st.holdings[0].avgCost, st.transactions]);
+  const r = D.addRompu(st, { holdingId: 'h', year: '2026', amount: 99.37 }, deps); assert.ok(r.ok, r.error); const p = st.payments[0];
+  assert.deepStrictEqual([p.kind, p.category, p.rompuType, p.label, p.gross, p.net, p.payDate, p.dateKnown, p.year, p.holdingId], ['rompu', 'Indemnisation des rompus', 'Indemnisation de fractions d\'actions', "Régularisation rompus L'Air Liquide S.A. 2026", 99.37, 99.37, '2026-01-01', false, '2026', 'h'], 'année seule : date à compléter, libellé par défaut');
+  assert.strictEqual(JSON.stringify([st.holdings[0].quantity, st.holdings[0].avgCost, st.transactions]), before, 'quantité, PRU et opérations inchangés');
+  const sm = D.summary(st, { convert: (v) => v }); assert.deepStrictEqual([sm.count, sm.gross, sm.rompu.count, sm.rompu.gross], [0, 0, 1, 99.37], 'revenu séparé : aucun dividende compté');
+  assert.strictEqual(E.receivedBetween(st, '2026-01-01', '2026-12-31', 'gross', (v) => v, null).total, 0, 'les dividendes perçus de l\'année restent à 0');
+  const ev = E.buildEvents(st, new Date(2026, 0, 1), new Date(2026, 11, 31), new Date(2026, 10, 25), null).filter((x) => x.status === 'received'); assert.strictEqual(ev.length, 0, 'pas d\'événement « dividende reçu » dans le calendrier');
+  // date exacte + libellé personnalisé + modification (même écriture)
+  assert.ok(D.addRompu(st, { id: p.id, holdingId: 'h', date: '2026-06-19', amount: 99.37, label: 'Régularisation rompus Air Liquide 2026' }, deps).ok); assert.strictEqual(st.payments.length, 1, 'modifiée, sans doublon'); assert.deepStrictEqual([st.payments[0].payDate, st.payments[0].dateKnown], ['2026-06-19', true]);
+  assert.ok(!D.addRompu(st, { holdingId: 'h', year: '2026', amount: 0 }, deps).ok, 'montant obligatoire'); assert.ok(!D.addRompu(st, { holdingId: 'zz', year: '2026', amount: 5 }, deps).ok, 'position inconnue');
+  assert.ok(!D.recordDue(st, [], deps).added);
 });
 
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

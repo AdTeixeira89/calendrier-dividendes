@@ -32,7 +32,7 @@ function cvAtFor(today) { const nowYM = Engine.ymOf(today); return (a_, c_, y_) 
 function perfStripHtml(o) {
   const today = o.today, ids = o.ids, per = o.per, cvAt = cvAtFor(today), perLbl = (HOME_PERIODS.find((q) => q[0] === per) || [0, 'Tout'])[1];
   const reqFrom = per > 0 ? Engine.toISO(new Date(today.getFullYear(), today.getMonth() - per, today.getDate())) : null;
-  const divAll = Dividends.realPayments(state).filter((p_) => (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
+  const divAll = Dividends.realPayments(state).filter((p_) => p_.kind !== 'rompu' && (!ids || ids.has(p_.holdingId)) && (p_.payDate || p_.exDate)).map((p_) => {
     const d_ = p_.payDate || p_.exDate, a_ = Engine.amount({ gross: Number(p_.gross) || 0, net: p_.net == null ? null : Number(p_.net) }, 'net');
     return { date: d_, v: cvAt(a_.v, p_.currency || 'EUR', d_.slice(0, 7)), unverified: false, estimated: false };
   }).filter((d_) => d_.v !== null);

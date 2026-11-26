@@ -31,6 +31,7 @@
   /* Un versement est un DIVIDENDE sauf s'il porte une autre nature (kind) : l'indemnité de rompus d'une attribution d'actions gratuites est un revenu perçu,
      compté dans les totaux et visible dans l'historique sous son vrai libellé, mais exclue des analyses propres aux dividendes (rapprochement, délais, dû, calendrier). */
   const isDividend = (p) => isReal(p) && p.kind !== 'rompu';
+  const ROMPU_CAT = 'Indemnisation des rompus', ROMPU_TYPE = 'Indemnisation de fractions d\'actions';
   const knownIds = (state) => new Set((state.holdings || []).concat(state.archive || []).map((h) => h.id));
   /* Versements perçus rattachés à une position existante (un versement orphelin n'est jamais compté). */
   /* INDEMNITÉ DE ROMPUS : une écriture par clé (opération × position) ; montant nul ou vide = écriture supprimée. Idempotent. */
@@ -40,10 +41,27 @@
     if (amt === null || !(amt > 0)) { if (i >= 0) state.payments.splice(i, 1); return { ok: true, removed: i >= 0 }; }
     const h = (state.holdings || []).concat(state.archive || []).find((x) => x.id === spec.holdingId); if (!h) return { ok: false, error: 'Position introuvable.' };
     const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker || '', name: h.name || '', exDate: null, payDate: spec.date || null, qty: null, perShare: null, gross: r2(amt), tax: null, fees: null, net: r2(amt),
-      currency: h.costCurrency || h.currency || 'EUR', source: 'manual', verified: true, kind: 'rompu', label: 'Indemnité de rompus (attribution d\'actions gratuites)', rompuKey: spec.key };
+      currency: h.costCurrency || h.currency || 'EUR', source: 'manual', verified: true, kind: 'rompu', category: ROMPU_CAT, rompuType: ROMPU_TYPE, dateKnown: !!spec.date,
+      label: spec.label || ('Régularisation rompus ' + (h.name || h.ticker || '') + ' ' + String(spec.date || spec.year || '').slice(0, 4)).trim(), rompuKey: spec.key };
     if (i >= 0) { state.payments[i] = Object.assign({}, state.payments[i], base); return { ok: true, updated: true, id: state.payments[i].id }; }
     const p = Object.assign({ id: deps.uid(), origin: { broker: '', file: 'saisie : indemnité de rompus', at: (deps && deps.today) || '' } }, base); state.payments.push(p); return { ok: true, added: true, id: p.id };
   }
+  /* Saisie d'une indemnisation de rompus INDÉPENDANTE d'une attribution enregistrée (virement reçu : « ROMPUS AIR LIQUIDE 2026 »). Date exacte facultative : sans date, l'année seule est
+     conservée (date de repère au 1er janvier, marquée « à compléter » : dateKnown = false). Catégorie propre : jamais un dividende, jamais une action gratuite ; ne touche ni la quantité ni le PRU. */
+  function addRompu(state, spec, deps) {
+    const h = (state.holdings || []).concat(state.archive || []).find((x) => x.id === spec.holdingId); if (!h) return { ok: false, error: 'Position introuvable.' };
+    const amt = Number(spec.amount); if (!(amt > 0)) return { ok: false, error: 'Indiquez le montant encaissé.' };
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(spec.date || '')) ? spec.date : null, year = String(spec.year || '').match(/^\d{4}$/) ? String(spec.year) : (date ? date.slice(0, 4) : '');
+    if (!date && !year) return { ok: false, error: 'Indiquez une date ou au moins l\'année.' };
+    state.payments = state.payments || [];
+    const key = spec.key || ('manual:' + (spec.id || deps.uid())), ex = state.payments.find((p) => p.kind === 'rompu' && (p.rompuKey === key || (spec.id && p.id === spec.id)));
+    const label = spec.label && String(spec.label).trim() ? String(spec.label).trim() : 'Régularisation rompus ' + (h.name || h.ticker || '') + ' ' + year;
+    const base = { holdingId: h.id, ticker: h.displayTicker || h.ticker || '', name: h.name || '', exDate: null, payDate: date || (year + '-01-01'), qty: null, perShare: null, gross: r2(amt), tax: null, fees: null, net: r2(amt),
+      currency: spec.currency || h.costCurrency || h.currency || 'EUR', source: 'manual', verified: true, kind: 'rompu', category: ROMPU_CAT, rompuType: ROMPU_TYPE, dateKnown: !!date, year, label, rompuKey: key, note: spec.note || undefined };
+    if (ex) { Object.assign(ex, base); return { ok: true, updated: true, id: ex.id }; }
+    const p = Object.assign({ id: deps.uid(), origin: { broker: '', file: 'saisie : indemnisation des rompus', at: (deps && deps.today) || '' } }, base); state.payments.push(p); return { ok: true, added: true, id: p.id };
+  }
+  const rompuPayments = (state) => realPayments(state).filter((p) => p.kind === 'rompu');
   function realPayments(state) { const k = knownIds(state); return (state.payments || []).filter((p) => isReal(p) && k.has(p.holdingId)); }
   /* Anciennes estimations encore présentes dans les versements, ou déjà rangées dans state.estimates. */
   function estimatesOf(state) { return (state.payments || []).filter((p) => !isReal(p)).concat(state.estimates || []); }
@@ -67,13 +85,14 @@
      Retourne les totaux convertis + le détail. Les montants non convertibles (taux absent) sont comptés à part, jamais ignorés en silence. */
   function summary(state, o) {
     o = o || {}; const convert = o.convert || ((v) => v), insts = new Map((state.holdings || []).concat(state.archive || []).map((h) => [h.id, h]));
-    const out = { count: 0, gross: 0, tax: 0, net: 0, taxUnknown: 0, netUnknown: 0, netUnknownGross: 0, unconverted: 0, byBroker: [], byCompany: [], byMonth: [], items: [] };
+    const out = { count: 0, gross: 0, tax: 0, net: 0, taxUnknown: 0, netUnknown: 0, netUnknownGross: 0, unconverted: 0, byBroker: [], byCompany: [], byMonth: [], items: [], rompu: { count: 0, gross: 0, items: [] } };
     const brokers = new Map(), cos = new Map(); if (o.year) for (let m = 0; m < 12; m++) out.byMonth.push({ gross: 0, tax: 0, net: 0, count: 0 });
     const bump = (t, a) => { t.count++; t.gross += a.g; if (a.t !== null) t.tax += a.t; if (a.n !== null) t.net += a.n; };
     realPayments(state).forEach((p) => {
       const d = dateOf(p); if (!d || (o.from && d < o.from) || (o.to && d > o.to)) return;
       const h = insts.get(p.holdingId); if (o.ids && !o.ids.has(p.holdingId)) return; if (o.accounts && !(h && o.accounts.has(h.account))) return;
       const am = amounts(p), cur = p.currency || (h && h.currency) || 'EUR', g = convert(am.gross, cur);
+      if (p.kind === 'rompu') { if (g !== null) { out.rompu.count++; out.rompu.gross += g; out.rompu.items.push({ id: p.id, holdingId: p.holdingId, date: d, gross: g, label: p.label, dateKnown: p.dateKnown !== false }); } return; }       // catégorie séparée : hors dividendes
       if (g === null) { out.unconverted++; return; }
       const t = am.tax === null ? null : convert(am.tax, cur), n = am.net === null ? null : convert(am.net, cur);
       const a = { g, t, n }; out.count++; out.gross += g; if (t === null) out.taxUnknown++; else out.tax += t; if (n === null) { out.netUnknown++; out.netUnknownGross += g; } else out.net += n;
@@ -255,6 +274,6 @@
     out.continuity = continuity(its.map((d) => d.ex), from, to);
     return out;
   }
-  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, recordDue, setRompu, isDividend, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
+  root.Dividends = { analyse, continuity,  isReal, realPayments, estimatesOf, amounts, summary, entitled, stableIds, reconcile, applyReconcile, recordDue, setRompu, addRompu, rompuPayments, isDividend, ROMPU_CAT, ROMPU_TYPE, logImport, learnPayLags, planMigration, applyMigration, undoMigration, dateOf };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.Dividends;
 })(typeof self !== 'undefined' ? self : this);

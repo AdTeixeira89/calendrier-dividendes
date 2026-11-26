@@ -389,7 +389,7 @@ const SOURCE_LABEL = { manual: 'Saisie manuelle', csv: 'Import CSV', degiro: 'Re
 function provenanceHtml(p) {
   const o = p.origin || {}, h = holdingById(p.holdingId) || (state.archive || []).find((x) => x.id === p.holdingId), imp = (state.imports || []).find((x) => x.id === o.importId);
   const rows = [['Courtier / compte', accountName(h && h.account)], ['Source', SOURCE_LABEL[p.source] || p.source || '—'], ['Fichier importé', o.file || (imp && imp.name) || '—'], ['Ligne(s) du fichier', o.line || '—'], ['Importé le', (o.at || (imp && imp.at)) ? fmtDate(String(o.at || imp.at).slice(0, 10)) : '—'], ['Identifiant', p.extId || '—']];
-  if (p.kind === 'rompu') rows.push(['Nature', 'indemnité de rompus : fraction de titre d\'une attribution d\'actions gratuites, versée en espèces (pas un dividende)']);
+  if (p.kind === 'rompu') rows.push(['Catégorie', 'Indemnisation des rompus : fractions d\'actions vendues lors d\'une attribution d\'actions gratuites, versées en espèces (ni dividende, ni action gratuite)']);
   if (p.calculated) rows.push(['Calcul', 'versement calculé : quantité détenue la veille du détachement (' + (p.basis && p.basis.qty != null ? p.basis.qty : '—') + ') × dividende de marché (' + (p.basis && p.basis.perShare != null ? p.basis.perShare : '—') + ' par titre) — pas un relevé du courtier ; un relevé importé le remplacera']);
   if (p.revisions && p.revisions.length) rows.push(['Révisions', p.revisions.map((r) => fmtDate(String(r.at).slice(0, 10)) + ' (brut ' + r.before.gross + ')').join(' ; ')]);
   return '<details class="dg-cols" style="margin:8px 0"><summary>Provenance du versement</summary><div class="tbl-wrap"><table class="tbl"><tbody>' + rows.map((r) => '<tr><td class="muted">' + esc(r[0]) + '</td><td>' + esc(String(r[1])) + '</td></tr>').join('') + '</tbody></table></div></details>';
@@ -409,6 +409,7 @@ function openCompanyDividends(key) {
    =============================================================== */
 function openPaymentModal(id, preset) {
   const ex = id ? state.payments.find((p) => p.id === id) : null;
+  if (ex && ex.kind === 'rompu') { openRompuModal(ex.id); return; }
   const p = ex ? clone(ex) : Object.assign({ id: uid(), holdingId: (view.account !== 'all' ? (visibleHoldings()[0] || {}).id : (state.holdings[0] || {}).id) || '', exDate: '', payDate: todayISO(), qty: null, perShare: null, gross: null, tax: null, fees: null, net: null, currency: 'EUR', source: 'manual', verified: true }, preset || {}, preset || {});
   if (!state.holdings.length && !ex) { toast("Ajoutez d'abord un actif.", { error: true }); return; }
   // positions détenues ET positions clôturées (une position vendue a pu verser des dividendes pendant sa détention) ; les « relevé seul » restent exclues sauf si le versement en dépend
@@ -457,6 +458,33 @@ function openPaymentModal(id, preset) {
     if (i >= 0) state.payments[i] = np; else state.payments.push(np);
     Dividends.learnPayLags(state, Market, todayISO());
     saveState(); closeModal(); toast('Versement enregistré.'); renderPage();
+  };
+}
+
+
+/* ---------------------------------------------------------------
+   INDEMNISATION DES ROMPUS (catégorie propre) : virement reçu pour la vente des fractions d'actions non attribuées lors d'une attribution d'actions gratuites.
+   Revenu lié à une opération sur titres : ni dividende, ni action gratuite ; ne modifie ni la quantité ni le PRU. Date exacte facultative (l'année suffit).
+   --------------------------------------------------------------- */
+function openRompuModal(id) {
+  const ex = id ? state.payments.find((p) => p.id === id && p.kind === 'rompu') : null;
+  const all = state.holdings.concat((state.archive || []).filter((a) => !a.statementOnly)), nm = (h) => (h.name || h.ticker || '');
+  const pref = ex ? ex.holdingId : ((state.holdings.filter((h) => Attrib.matches(h) && (view.account === 'all' || h.account === view.account)).sort((a, b) => (/nominatif/i.test(accountName(b.account)) ? 1 : 0) - (/nominatif/i.test(accountName(a.account)) ? 1 : 0))[0] || {}).id || (all[0] || {}).id);
+  if (!all.length) { toast('Ajoutez d\'abord un actif.', { error: true }); return; }
+  const yr = ex ? (ex.year || (ex.payDate || '').slice(0, 4)) : String(new Date().getFullYear()), known = ex ? ex.dateKnown !== false : false;
+  const opts = all.slice().sort((a, b) => nm(a).localeCompare(nm(b))).map((h) => '<option value="' + esc(h.id) + '"' + (h.id === pref ? ' selected' : '') + '>' + esc(nm(h)) + ' — ' + esc(accountName(h.account)) + (state.holdings.includes(h) ? '' : ' (clôturée)') + '</option>').join('');
+  const m = openModal('<h2>' + (ex ? 'Modifier' : 'Ajouter') + ' une indemnisation de rompus</h2><div class="sub">Virement reçu pour la <b>vente de fractions d\'actions</b> non attribuées en actions entières lors d\'une attribution d\'actions gratuites. Catégorie <b>« Indemnisation des rompus »</b> : comptée dans vos revenus, <b>jamais</b> dans les dividendes, et sans effet sur la quantité ni sur le prix de revient.</div>' +
+    fld('Position et compte', '<select id="rpH">' + opts + '</select>', '', 'rpH') +
+    '<div class="row2">' + fld('Date exacte (si connue)', '<input type="date" id="rpDate" max="' + todayISO() + '" value="' + esc(known && ex ? ex.payDate : '') + '">', 'laissez vide si vous ne connaissez que l\'année', 'rpDate') + fld('Année (si pas de date exacte)', '<input type="text" inputmode="numeric" id="rpYear" maxlength="4" value="' + esc(yr) + '">', '', 'rpYear') + '</div>' +
+    fld('Libellé', '<input type="text" id="rpLabel" value="' + esc(ex ? ex.label : '') + '" placeholder="Régularisation rompus Air Liquide 2026">', 'vide = « Régularisation rompus <actif> <année> »', 'rpLabel') +
+    fld('Montant encaissé', '<input type="text" inputmode="decimal" id="rpAmt" value="' + esc(ex ? ex.gross : '') + '" placeholder="ex : 99,37">', '', 'rpAmt') +
+    '<div class="notice info"><span>Type : <b>Indemnisation de fractions d\'actions</b> · Catégorie : <b>Indemnisation des rompus</b></span></div><div id="rpErr" class="notice err hide"></div>' +
+    '<div class="modal-actions"><div>' + (ex ? '<button class="btn danger" type="button" id="rpDel">' + icon('trash') + 'Supprimer</button>' : '') + '</div><div class="btn-row"><button class="btn" type="button" data-close>Annuler</button><button class="btn primary" type="button" id="rpSave">Enregistrer</button></div></div>');
+  if (ex) $('#rpDel', m).onclick = () => { closeModal(); confirmDeletePayments([ex.id]); };
+  $('#rpSave', m).onclick = () => {
+    const r = Dividends.addRompu(state, { id: ex ? ex.id : undefined, key: ex ? ex.rompuKey : undefined, holdingId: $('#rpH', m).value, date: $('#rpDate', m).value || null, year: $('#rpYear', m).value.trim(), amount: numOrNull($('#rpAmt', m).value), label: $('#rpLabel', m).value }, { uid, today: todayISO() });
+    if (!r.ok) { const e = $('#rpErr', m); e.textContent = r.error; e.classList.remove('hide'); return; }
+    saveState(); closeModal(); renderPage(); toast('Indemnisation de rompus enregistrée (revenu, hors dividendes).', { ms: 5000 });
   };
 }
 
