@@ -1474,6 +1474,22 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     st = await storeOf(p); eq([st.payments.length, st.payments.map((x) => x.gross).sort((a, b) => a - b), st.holdings[0].quantity, st.transactions.length], [2, [5.5, 99.37], 33, 2], 'indemnité seule depuis le formulaire : aucune action gratuite ajoutée'); eq(p.errors, [], 'aucune erreur JS');
   });
 
+  await test('mobile : les tableaux « Perçu par courtier / compte » et « Historique mensuel » (statistiques des dividendes) défilent horizontalement sans déborder de la carte (360 et 390 px)', async () => {
+    RELAY.old = false;
+    const base = { type: 'stock', instrumentType: 'EQUITY', currency: 'EUR', logo: null, source: 'manual', addedAt: '2025-01-01', dividend: { none: true } };
+    const seed = SEED(0); seed.accounts = [{ id: 'dg', name: 'DEGIRO' }, { id: 'pea', name: 'PEA Trade Republic' }, { id: 'nom', name: 'Air Liquide Nominatif Pur' }];
+    seed.holdings = [Object.assign({}, base, { id: 'a', ticker: 'AAA', displayTicker: 'AAA', name: 'Alpha', quantity: 10, avgCost: 50, price: 60, account: 'dg' }), Object.assign({}, base, { id: 'b', ticker: 'BBB', displayTicker: 'BBB', name: 'Beta', quantity: 10, avgCost: 50, price: 60, account: 'pea' }), Object.assign({}, base, { id: 'c', ticker: 'CCC', displayTicker: 'CCC', name: 'Gamma', quantity: 10, avgCost: 50, price: 60, account: 'nom' })];
+    const yr = new Date().getFullYear(); seed.payments = ['a', 'b', 'c'].map((h, i) => ({ id: 'p' + i, holdingId: h, ticker: h, name: h, payDate: yr + '-0' + (i + 2) + '-10', qty: 10, gross: 1234.56 + i, net: 1000.5 + i, tax: 234, currency: 'EUR', source: 'manual', verified: true }));
+    for (const w of [360, 390]) {
+      const p = await device({ guest: true, seed, mobile: true, viewport: { width: w, height: 800 } }); await p.open(); await p.evaluate(() => { view.divTab = 'stats'; go('dividends'); }); await p.waitForTimeout(600);
+      const r = await p.evaluate(() => Array.from(document.querySelectorAll('#page .tbl-wrap')).map((el) => { const b = el.getBoundingClientRect(), c = el.closest('.card'), cb = c ? c.getBoundingClientRect() : null; return { right: Math.round(b.right), cardRight: cb ? Math.round(cb.right) : null, sw: el.scrollWidth, cw: el.clientWidth, inner: innerWidth, th: (el.querySelector('th') || {}).textContent }; }));
+      ok(r.length >= 2, w + ' px : tableaux présents : ' + JSON.stringify(r)); ok(r.every((x) => x.right <= x.inner + 1 && (x.cardRight === null || x.right <= x.cardRight + 1)), w + ' px : chaque tableau reste dans sa carte et dans l\'écran : ' + JSON.stringify(r));
+      ok(r.some((x) => x.sw > x.cw + 1), w + ' px : au moins un tableau est plus large que son cadre, donc défilable : ' + JSON.stringify(r));
+      const sc = await p.evaluate(() => { const el = Array.from(document.querySelectorAll('#page .tbl-wrap')).find((e) => e.scrollWidth > e.clientWidth + 1); if (!el) return null; el.scrollLeft = 80; return el.scrollLeft; }); ok(sc > 0, w + ' px : le défilement horizontal fonctionne (scrollLeft = ' + sc + ')');
+      eq(p.errors, [], 'aucune erreur JS');
+    }
+  });
+
   await test('dividendes dus : positions détenues ET clôturées, achats datés ; un brouillon n\'est pas un versement réel ; rien n\'est enregistré et rien n\'est ajouté au perçu', async () => {
     RELAY.old = false;
     const base = { type: 'stock', instrumentType: 'EQUITY', logo: null, source: 'degiro', derived: true, addedAt: '2026-01-01', account: 'main', dividend: { lastAmount: .26, frequency: 'quarterly', anchorMonth: 2, dateKind: 'ex' } };

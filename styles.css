@@ -94,8 +94,9 @@ a{color:var(--accent)}
 .card h3{font-size:14px;margin-bottom:10px}
 .grid{display:grid;gap:12px}
 .kpis{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
-.two{grid-template-columns:1fr}
-@media (min-width:900px){ .two{grid-template-columns:1.4fr 1fr} .two.even{grid-template-columns:1fr 1fr} }
+.two{grid-template-columns:minmax(0,1fr)}
+.two>*{min-width:0}        /* un tableau large défile dans sa carte au lieu d'élargir la colonne (téléphone) */
+@media (min-width:900px){ .two{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)} .two.even{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} }
 .kpi{padding:14px 16px}
 .kpi .lbl{font-size:12px;color:var(--muted);font-weight:550;display:flex;align-items:center;gap:6px}
 .kpi .val{font-size:22px;font-weight:700;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
