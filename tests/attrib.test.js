@@ -113,4 +113,10 @@ t('indemnisation des rompus saisie à part (virement « ROMPUS AIR LIQUIDE 2026 
   assert.ok(!D.recordDue(st, [], deps).added);
 });
 
+t('moins de 10 titres : aucune action gratuite entière = « rompu seul » (rien à valider ni à appliquer, pas de notification), la fraction reste indemnisée en espèces', () => {
+  const st = mk('bearer', 6, [buy('t1', 'h', '2019-05-01', 6, 100)]); const pr = A.proposals(st, '2026-11-25').filter((p) => p.op.id === 'T-2024');
+  assert.strictEqual(pr.length, 1); assert.strictEqual(pr[0].status, 'rompu_only'); assert.deepStrictEqual([pr[0].calc.free, pr[0].calc.base], [0, 0]); near(pr[0].calc.rompuQty, 0.6, 'fraction 0,6 titre');
+  assert.ok(!A.apply(st, 'T-2024', 'h', deps).ok, 'rien à appliquer'); assert.strictEqual(st.holdings[0].quantity, 6);
+});
+
 console.log('\n' + n + ' tests réussis' + (failed ? ', ' + failed + ' échec(s)' : ''));

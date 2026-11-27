@@ -120,7 +120,7 @@
         if (h.addedAt && String(h.addedAt).slice(0, 10) > date && !(state.transactions || []).some((t) => t.holdingId === h.id && t.date && t.date <= date)) { return; }     // position entrée après l'opération
         const c = compute(state, h, op);
         if (c.held <= EPS) return;
-        out.push({ status: c.reasons.length ? 'review' : 'proposed', op, h, calc: c });
+        out.push({ status: c.free <= 0 ? 'rompu_only' : (c.reasons.length ? 'review' : 'proposed'), op, h, calc: c });       // 'rompu_only' : moins de N titres, aucune action gratuite entière — rien à appliquer ni à valider
       });
     });
     return out;

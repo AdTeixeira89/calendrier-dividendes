@@ -72,7 +72,7 @@ function chartSeries(y, interval) {
 async function mockRelay(route) {
   const u = new URL(route.request().url()), j = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', headers: Object.assign({ 'access-control-allow-origin': '*', 'access-control-expose-headers': 'x-relay-version' }, RELAY.noVersion ? {} : { 'x-relay-version': '3' }), body: JSON.stringify(o) });
   if (u.pathname === '/search') { const q = u.searchParams.get('q'); const s0 = ISIN[q] || (YAHOO[q] ? q : null) || (/apple/i.test(q) ? 'AAPL' : /air liquide/i.test(q) ? 'AI.PA' : null), ss = s0 ? [].concat(s0) : []; return j({ quotes: ss.map((s) => ({ symbol: s, quoteType: YAHOO[s].type, shortname: YAHOO[s].name, exchDisp: 'X', sector: YAHOO[s].sector || null, industry: YAHOO[s].sector ? 'Test industry' : null })) }); }
-  if (u.pathname === '/chart') { RELAY.chartCalls = (RELAY.chartCalls || 0) + 1; const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts('2026-10-12') }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
+  if (u.pathname === '/chart') { RELAY.chartCalls = (RELAY.chartCalls || 0) + 1; const y = YAHOO[u.searchParams.get('symbol')]; if (!y) return j({ chart: { result: null, error: { description: 'No data found' } } }); return j({ chart: { result: [{ meta: { currency: y.cur, longName: y.name, instrumentType: y.type, regularMarketPrice: y.price, regularMarketTime: ts(RECENT_QUOTE) }, ...chartSeries(y, u.searchParams.get('interval')), events: { dividends: Object.fromEntries(y.divs.map((d, i) => [i, { amount: d[1], date: ts(d[0]) }])), splits: Object.fromEntries((y.splits || []).map((d, i) => [i, { date: ts(d[0]), numerator: d[1], denominator: d[2], splitRatio: d[1] + ':' + d[2] }])) } }] } }); }
   if (u.pathname === '/translate' && RELAY.trOld) return route.fulfill({ status: 404 });
   if (u.pathname === '/translate') { RELAY.trCalls = (RELAY.trCalls || []).concat([u.searchParams.getAll('t')]); return j({ translations: u.searchParams.getAll('t').map((t) => (RELAY.trFail ? null : 'FR: ' + t)) }); }
   if (u.pathname === '/news') {
@@ -130,6 +130,7 @@ const eq0 = (n) => n === 0;
 const bellClose = async (p) => { if (!(await p.locator('#bellPanel.hide').count())) await p.keyboard.press('Escape'); await p.waitForTimeout(100); };
 const storeOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('dividendCalendarApp_v1')));
 const cloudState = (uid) => { const m = fsOps.get('suivi_dividendes/' + uid); if (!m.exists) return null; let s = ''; for (let i = 0; i < m.data.chunks; i++) s += fsOps.get('suivi_dividendes/' + uid + '/chunks/' + i).data.data; return JSON.parse(s); };
+const RECENT_QUOTE = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);        // dernière cotation du relais simulé : toujours récente (sinon « cotation arrêtée » au bout de 45 jours)
 const csvFile = (name, text) => ({ name, mimeType: 'text/csv', buffer: Buffer.from(text, 'utf-8') });
 async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(clickSel)]); await fc.setFiles(file); }
 
@@ -580,7 +581,7 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
     const p = await device({ guest: true, seed }); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(200);
     ok(!/1\s?900/.test(await p.locator('tbody').innerText()), 'pas de cours avant actualisation');
     await p.click('[data-rf-btn]'); await p.waitForFunction(() => state.holdings[0].price > 0, null, { timeout: 6000 }); await p.waitForTimeout(500);
-    let s = await storeOf(p); eq([s.holdings[0].price, s.holdings[0].priceAt.slice(0, 10)], [190, '2026-10-12'], 'cours et date enregistrés');
+    let s = await storeOf(p); eq([s.holdings[0].price, s.holdings[0].priceAt.slice(0, 10)], [190, RECENT_QUOTE], 'cours et date enregistrés');
     const g = await p.evaluate(() => [Engine.value(state.holdings[0]), Math.round(Engine.unrealized(state, convert, null).gain * 100) / 100, Math.round(Engine.unrealized(state, convert, null).pct * 1000) / 1000]);
     eq(g, [1900, 583.33, 0.583], 'valeur 1900 $ = 1583,33 €, coût 1000 € → +583,33 € (+58,3 %)');
     await p.evaluate(() => go('home')); await p.waitForTimeout(250); const home = await p.locator('main').innerText();
@@ -1294,7 +1295,8 @@ async function chooseFile(page, clickSel, file) { const [fc] = await Promise.all
       Object.assign({}, base, { id: 'b1', ticker: 'BBB', displayTicker: 'BBB', isin: 'FR0000000002', name: 'Beta', quantity: 5, avgCost: 100, price: 110 })];
     seed.transactions = [{ id: 't1', holdingId: 'a1', date: '2025-01-10', type: 'buy', qty: 10, price: 50, fees: 0, currency: 'EUR', amountAcct: 500, acctCur: 'EUR', source: 'manual' }];
     const p = await device({ guest: true, seed, viewport: { width: 1280, height: 1000 } }); p.setDefaultTimeout(25000); await p.open(); await p.evaluate(() => go('portfolio')); await p.waitForTimeout(300);
-    const add = async (date, qty, price, fees) => { await p.fill('#byDate', date); await p.fill('#byQty', String(qty)); await p.fill('#byPrice', String(price)); await p.fill('#byFees', String(fees)); await p.click('#byAdd'); await p.waitForSelector('#byDate'); await p.waitForTimeout(250); };
+    const fillOk = async (sel, v) => { for (let i = 0; i < 5; i++) { await p.fill(sel, v); await p.waitForTimeout(60); if ((await p.inputValue(sel)) === v) return; } };
+    const add = async (date, qty, price, fees) => { await p.waitForSelector('#byDate'); await p.waitForTimeout(200); await fillOk('#byDate', date); await fillOk('#byQty', String(qty)); await fillOk('#byPrice', String(price)); await fillOk('#byFees', String(fees)); await p.click('#byAdd'); await p.waitForSelector('#byDate'); await p.waitForTimeout(300); };
     await p.evaluate(() => openHoldingModal('a1')); await p.click('#hBuys'); await p.waitForSelector('#byDate');
     await p.fill('#byDate', '2026-02-01'); await p.waitForTimeout(100); ok(/Nouvel achat/.test(await p.locator('#byModeNote').innerText()), 'achat daté après l\'ajout de la position : lu comme un nouvel achat');
     await p.fill('#byQty', '5'); await p.fill('#byPrice', '60'); await p.fill('#byFees', '2'); await p.waitForTimeout(150); const prev = (await p.locator('#byPrev').innerText()).replace(/\s+/g, ' '); ok(/10\s*→\s*15/.test(prev) && /53,47/.test(prev), 'aperçu : quantité 10 → 15, PRU 50 → 53,47 : ' + prev);

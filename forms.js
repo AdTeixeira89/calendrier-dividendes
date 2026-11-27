@@ -1158,7 +1158,7 @@ function positionNotices() {
 const ATT_MODE = { bearer: 'Au porteur (compte-titres, PEA)', registered: 'Au nominatif (pur chez Air Liquide / Uptevia, ou administré)' };
 function attribHoldingsAI() { return (state.holdings || []).filter((h) => Attrib.matches(h)); }
 function attribBadge(st, reasons) {
-  return st === 'applied' ? '<span class="badge received">Déjà appliquée</span>' : st === 'proposed' ? '<span class="badge info">Vérifiée — à appliquer</span>' : '<span class="badge warn" title="' + esc((reasons || []).join(' ; ')) + '">En attente de vérification</span>';
+  return st === 'rompu_only' ? '<span class="badge">Aucune action gratuite entière</span>' : st === 'applied' ? '<span class="badge received">Déjà appliquée</span>' : st === 'proposed' ? '<span class="badge info">Vérifiée — à appliquer</span>' : '<span class="badge warn" title="' + esc((reasons || []).join(' ; ')) + '">En attente de vérification</span>';
 }
 function attribSectionHtml(h) {
   const today = todayISO(), cur = h.costCurrency || h.currency || 'EUR', props = Attrib.proposals(state, today).filter((p) => p.h.id === h.id);
@@ -1180,6 +1180,7 @@ function attribSectionHtml(h) {
       return '<tr><td>' + esc(fmtDate(r.date)) + '</td><td class="r">' + fmtNum(r.before) + '</td><td class="r">' + fmtNum(r.base) + '</td><td class="r">' + (r.mode === 'registered' ? fmtNum(r.bonus) : '—') + '</td><td class="r">' + fmtNum(r.rompuQty, 3) + ' titre' + '<div><input type="text" inputmode="decimal" class="at-rc" data-rc="' + esc(r.id) + '" placeholder="indemnité (' + esc(cur) + ')" value="' + (r.rompuCash == null ? '' : r.rompuCash) + '" style="width:110px"></div></td><td class="r"><b>' + fmtNum(r.after) + '</b></td><td>' + attribBadge('applied') + '<div><button type="button" class="link-btn" data-atrv="' + esc(r.id) + '">Annuler cette opération</button></div></td></tr>';
     }
     const c = p.calc;
+    if (p.status === 'rompu_only') return '<tr><td>' + esc(fmtDate(d)) + '<div class="dg-note">1 pour ' + op.N + '</div></td><td class="r">' + fmtNum(c.held) + '</td><td class="r">0</td><td class="r">—</td><td class="r">' + fmtNum(c.rompuQty, 3) + ' titre</td><td class="r"><b>' + fmtNum(c.held) + '</b></td><td>' + attribBadge('rompu_only') + '<div class="dg-note">' + fmtNum(c.held) + ' titre(s) : moins de ' + op.N + ' pour recevoir une action gratuite. La fraction est indemnisée en espèces (à saisir avec « Ajouter une indemnisation de rompus »).</div></td></tr>';
     return '<tr><td>' + esc(fmtDate(d)) + '<div class="dg-note">1 pour ' + op.N + '</div></td><td class="r">' + fmtNum(c.held) + '</td><td class="r">' + fmtNum(c.base) + '</td><td class="r">' + (c.mode === 'registered' ? fmtNum(c.bonus) + '<div class="dg-note">' + fmtNum(c.eligible) + ' éligible(s)</div>' : '—') + '</td><td class="r">' + fmtNum(c.rompuQty, 3) + ' titre</td><td class="r"><b>' + fmtNum(c.after) + '</b></td><td>' + attribBadge(p.status, c.reasons) +
       (c.mode === 'registered' ? '<div><input type="text" inputmode="decimal" class="at-el" data-elig="' + esc(op.id) + '" placeholder="éligibles (si connu)" style="width:130px"></div>' : '') + '<div class="btn-row" style="margin-top:4px"><button type="button" class="btn sm primary" data-atap="' + esc(op.id) + '">' + (p.status === 'proposed' ? 'Appliquer' : 'Vérifier et appliquer') + '</button></div></td></tr>';
   }).join('');
@@ -1243,7 +1244,7 @@ function openAttribConsolidated() {
 /* Cloche : opérations à valider + vérification tous les 6 mois (les attributions Air Liquide ont lieu environ tous les 2 ans ; la vérification est périodique). */
 function attribNotices() {
   const hs = attribHoldingsAI(); if (!hs.length) return [];
-  const pend = Attrib.proposals(state, todayISO()).filter((p) => p.status !== 'applied'); if (!pend.length) return [];
+  const pend = Attrib.proposals(state, todayISO()).filter((p) => p.status === 'proposed' || p.status === 'review'); if (!pend.length) return [];
   return [{ id: 'attrib:' + pend.map((p) => p.op.id + p.h.id).sort().join(','), level: 'info', title: 'Attribution d\'actions gratuites à valider',
     body: pend.slice(0, 3).map((p) => '<b>' + esc(accountName(p.h.account)) + '</b> : ' + p.calc.free + ' gratuite(s) (1 pour ' + p.op.N + ', ' + esc(fmtDate(p.op.creditDate || p.op.exDate)) + ')' + (p.status === 'review' ? ' — à vérifier' : '')).join('<br>') + (pend.length > 3 ? '<br>…' : ''),
     accept: { label: 'Ouvrir la fiche', run: () => { openBuysModal(pend[0].h.id); }, ack: false } }];
@@ -1261,7 +1262,7 @@ function attribAutoRun() {
   if (applied) { saveState(); Notify.push({ level: 'info', title: applied + ' attribution(s) d\'actions gratuites appliquée(s)', body: 'Opérations Air Liquide entièrement vérifiées : quantité et prix de revient mis à jour, trace conservée dans la fiche (Opérations sur titres).', accept: { label: 'Annuler', run: () => undoLastImport(), ack: false } }); }
   if (due) {
     state.settings.attribCheckAt = today; saveState();
-    const pend = Attrib.proposals(state, today).filter((p) => p.status !== 'applied').length;
+    const pend = Attrib.proposals(state, today).filter((p) => p.status === 'proposed' || p.status === 'review').length;
     Notify.push({ level: 'info', title: 'Vérification des opérations Air Liquide', body: pend ? pend + ' attribution(s) à valider dans la fiche Air Liquide (Opérations sur titres).' : 'Aucune attribution d\'actions gratuites en attente. (Air Liquide en distribue environ tous les deux ans, en juin des années paires.)' });
   }
 }
